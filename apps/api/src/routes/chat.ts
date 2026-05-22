@@ -12,23 +12,47 @@ import { toolDefsForAnthropic, runTool } from '../lib/chat-tools.js';
 // composes a final natural-language answer. We cap the loop at 8 turns to
 // prevent runaway agentic behavior.
 
-const ChatRequestSchema = z.object({
+// Two accepted shapes:
+//   { question: "..." }                       — single-turn (back-compat)
+//   { messages: [{role, content}, ...] }      — multi-turn, last entry must be a user msg
+// We cap the history at MAX_HISTORY turns to keep tokens bounded; older
+// messages get dropped silently.
+const SingleTurnSchema = z.object({
   question: z.string().trim().min(1).max(2000),
 });
+const HistoryMessageSchema = z.object({
+  role: z.enum(['user', 'assistant']),
+  content: z.string().min(1).max(8000),
+});
+const MultiTurnSchema = z.object({
+  messages: z.array(HistoryMessageSchema).min(1).max(40),
+});
+const ChatRequestSchema = z.union([SingleTurnSchema, MultiTurnSchema]);
+
+const MAX_HISTORY = 20;
 
 const SYSTEM_PROMPT = `You are Jerad's personal-operations assistant. You answer questions about \
-his work, projects, tasks, notes, quotes, and calendar by querying the database via the tools \
-provided.
+his work, projects, tasks, notes, quotes, annotations, and calendar by querying the database \
+via the tools provided.
 
 Behavior rules:
 1. Use tools to look up real data. Never fabricate dates, projects, hours, or quote text.
 2. When the user asks about a project, use get_project_summary with the closest matching name.
 3. When the user asks "what did I work on", use search_tasks (status=done) and/or get_recent_events.
-4. Be concise. Default to 1-3 sentence answers plus a bulleted list if it improves clarity.
-5. Mountain Time is the user's timezone. Dates from the DB are UTC; format them naturally (e.g. "Tuesday").
-6. If a tool returns 0 results, say so honestly. Don't invent.
-7. Don't return raw JSON. Summarize the data in plain English.
-8. If you can't answer with the available tools, say what's missing.`;
+4. Notes vs annotations vs quotes — pick the right tool:
+   - search_notes: free-floating thoughts (own thought, reading response, meeting note, brainstorm).
+   - search_annotations: dated thoughts the user attached TO a specific quote.
+   - search_quotes: the verbatim text of saved quotes, with annotation counts.
+   When a question is broad ("what have I thought about stewardship"), call multiple tools.
+5. Attribute sources naturally in your answer:
+   - "In a reading response from March 14 you wrote..."
+   - "You annotated a Cal Newport quote in October with..."
+   - "Your quote from Stewardship by Peter Block says..."
+6. Be concise. Default to 1-3 sentence answers plus a bulleted list if it improves clarity.
+7. Mountain Time is the user's timezone. Dates from the DB are UTC; format them naturally (e.g. "Tuesday").
+8. If a tool returns 0 results, say so honestly. Don't invent.
+9. Don't return raw JSON. Summarize the data in plain English.
+10. If you can't answer with the available tools, say what's missing.`;
 
 type ContentBlock = Anthropic.ContentBlock;
 type ToolUseBlock = Anthropic.ToolUseBlock;
@@ -61,9 +85,28 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
     const tools = toolDefsForAnthropic();
     const trace: ToolTrace[] = [];
 
-    const messages: MessageParam[] = [
-      { role: 'user', content: parsed.data.question },
-    ];
+    // Normalize either shape into the same MessageParam[] starting point.
+    // For multi-turn we trim oldest messages first but always keep the
+    // most recent user message (the one Claude is meant to answer).
+    let messages: MessageParam[];
+    let question: string;
+    if ('question' in parsed.data) {
+      messages = [{ role: 'user', content: parsed.data.question }];
+      question = parsed.data.question;
+    } else {
+      const history = parsed.data.messages;
+      const lastIn = history[history.length - 1];
+      if (!lastIn || lastIn.role !== 'user') {
+        return reply.code(400).send({
+          error: 'invalid_payload',
+          details: { messages: ['last message must be from user'] },
+        });
+      }
+      const trimmed = history.slice(-MAX_HISTORY);
+      messages = trimmed.map((m) => ({ role: m.role, content: m.content }));
+      // Safe: trimmed has at least one entry because history did.
+      question = trimmed[trimmed.length - 1]!.content;
+    }
 
     let turns = 0;
     let finalAnswer = '';
@@ -134,12 +177,18 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
     }
 
     req.log.info(
-      { user_id: req.user!.id, turns, tools_used: trace.length, question_chars: parsed.data.question.length },
+      {
+        user_id: req.user!.id,
+        turns,
+        tools_used: trace.length,
+        question_chars: question.length,
+        history_msgs: messages.length,
+      },
       'chat answered',
     );
 
     return reply.code(200).send({
-      question: parsed.data.question,
+      question,
       answer: finalAnswer,
       tool_trace: trace,
       turns,

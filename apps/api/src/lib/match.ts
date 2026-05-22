@@ -89,6 +89,39 @@ export async function matchContentItem(sb: SupabaseClient, query: string | undef
   return best(query, (data ?? []).map((r) => ({ id: r.id, label: r.title })))?.id ?? null;
 }
 
+/** Fuzzy match against quote text + source_author + source_reference.
+ *  Useful for "the Cal Newport quote about focus" → quote id. */
+export async function matchQuote(sb: SupabaseClient, query: string | undefined): Promise<string | null> {
+  if (!query) return null;
+  const { data } = await sb
+    .from('quotes')
+    .select('id, text, source_author, source_reference, book:books(title, author)')
+    .order('created_at', { ascending: false })
+    .limit(500);
+  type Row = {
+    id: string;
+    text: string;
+    source_author: string | null;
+    source_reference: string | null;
+    book: { title?: string | null; author?: string | null } | { title?: string | null; author?: string | null }[] | null;
+  };
+  const candidates = ((data ?? []) as unknown as Row[]).map((r) => {
+    const book = Array.isArray(r.book) ? r.book[0] : r.book;
+    // Build a search-friendly label that mixes attribution + a slice of the
+    // quote text, so "Cal Newport quote about focus" can match on author +
+    // the word 'focus' from the text body.
+    const parts = [
+      r.source_author,
+      r.source_reference,
+      book?.title,
+      book?.author,
+      r.text.slice(0, 120),
+    ].filter(Boolean) as string[];
+    return { id: r.id, label: parts.join(' · ') };
+  });
+  return best(query, candidates)?.id ?? null;
+}
+
 export async function matchMilestone(
   sb: SupabaseClient,
   projectId: string,

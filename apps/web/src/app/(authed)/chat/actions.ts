@@ -1,16 +1,23 @@
 'use server';
 
-import { chatApi, ApiError, type ChatResponse } from '@/lib/api';
+import { chatApi, ApiError, type ChatResponse, type ChatHistoryMessage } from '@/lib/api';
 import { getAccessToken } from '@/lib/auth';
 
 export type AskResult =
   | { ok: true; response: ChatResponse }
   | { ok: false; error: string };
 
-export async function askAction(question: string): Promise<AskResult> {
-  if (!question.trim()) return { ok: false, error: 'empty question' };
+// Send the whole conversation back each turn so /api/chat has context.
+// History is shaped from the client: prior user questions + assistant
+// answers, with the new question appended last.
+export async function askAction(history: ChatHistoryMessage[]): Promise<AskResult> {
+  const last = history[history.length - 1];
+  if (!last) return { ok: false, error: 'empty history' };
+  if (last.role !== 'user' || !last.content.trim()) {
+    return { ok: false, error: 'last message must be a user question' };
+  }
   try {
-    const response = await chatApi.ask(question);
+    const response = await chatApi.ask(history);
     return { ok: true, response };
   } catch (err) {
     if (err instanceof ApiError) {

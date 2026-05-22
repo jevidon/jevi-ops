@@ -77,16 +77,70 @@ Action types you may produce (use the exact "action" string for each):
 - update_milestone: { action, project_match, milestone_match, progress_pct?, status? }
 - create_calendar_event: { action, title, start, end, location?, attendees? }
   start/end are ISO 8601 with timezone offset
-- create_note: { action, body, tags?, project_match?, person_match? }
-- create_quote: { action, text, book_match?, page_number?, tags? }
+- create_note: { action, body, source_type?, source_reference?, tags?, project_match?, person_match?, quote_match?, needs_review? }
+  source_type ∈ "own_thought" | "reading_response" | "meeting_note" | "brainstorm" | "observation" | "other"
+- create_quote: { action, text, book_match?, page_number?, chapter?, source_type?, source_reference?, source_author?, tags?, annotation_body? }
+  source_type ∈ "book" | "article" | "podcast" | "conversation" | "sermon" | "other"
+  annotation_body is OPTIONAL — only set when the user bundles a thought with the quote in the same utterance
+- create_quote_annotation: { action, quote_match, body, context?, tags? }
+  context ∈ "on_capture" | "on_revisit" | "on_surface" | "unspecified"
 - create_journal_entry: { action, text, date? }
 - create_person_fact: { action, person_match, fact_type, fact_value, date_relevant?, recurring? }
   fact_type ∈ "anniversary" | "birthday" | "kid_name" | "shared" | "follow_up" | "other"
 - update_content_item: { action, item_match, status?, video_url?, outline_md? }
 - add_inventory_item: { action, category, brand?, model?, serial?, purchase_date?, purchase_price? }
 
-The *_match fields are short fuzzy phrases (e.g. "the Reviews plugin", "Randy", "Mere Christianity"). \
-The backend will resolve them to IDs against the context provided below.
+The *_match fields are short fuzzy phrases (e.g. "the Reviews plugin", "Randy", "Mere Christianity", \
+"that Cal Newport quote about focus"). The backend resolves them to IDs against the context below.
+
+# Notes & Quotes routing (Addendum 02 §4)
+
+The user thinks in different shapes — quotes, thoughts about quotes, free thoughts, reading responses, \
+meeting notes, journal entries. Route precisely:
+
+1. **Quote (with optional bundled thought)** — explicit quote framing + attribution.
+   Signals: "save a quote", "quote from <book/author>", attribution present, possessive of others' words.
+   If a thought is bundled ("My thought on this: ..."): emit create_quote with annotation_body set.
+   Examples:
+   - "Save this quote from Deep Work by Cal Newport, page 47: ..." → create_quote
+   - "Quote from Stewardship by Peter Block: ... My thought: ..." → create_quote with annotation_body
+
+2. **Annotation on an existing quote** — reference to a saved quote + annotation framing.
+   Signals: "the Cal Newport quote", "that quote about ...", "add a thought to", "annotate", "another thought on".
+   Examples:
+   - "Add a thought to that Cal Newport quote about being immersed: ..." → create_quote_annotation
+   - "On the Stewardship book quote about ownership: ..." → create_quote_annotation
+
+3. **Reading response** — reading context, no verbatim attribution.
+   Signals: "I was reading", "while reading", "an article on Substack", thoughts sparked by reading.
+   → create_note with source_type='reading_response', source_reference set to whatever was named.
+
+4. **Meeting note** — person name + conversation framing.
+   Signals: "after my call with...", "from my meeting with...", "<Person> mentioned...".
+   → create_note with source_type='meeting_note', person_match set.
+
+5. **Brainstorm** — multiple loose ideas, explicit framing.
+   Signals: "brainstorming", "loose ideas", "thinking out loud about ...".
+   → create_note with source_type='brainstorm'.
+
+6. **Own thought** — generic capture, no external source.
+   Signals: "thought to capture", "random idea", "note to self", or NO framing at all.
+   → create_note with source_type='own_thought'. THIS IS THE SAFE DEFAULT.
+
+7. **Journal entry** — explicit journal framing.
+   Signals: "journal entry", "log for today", "today I ...".
+   → create_journal_entry.
+
+8. **Activity log** — project name + work activity + (often) time.
+   Signals: "logged time on", "worked on", "made progress on", "logged X minutes/hours on <project>".
+   → log_activity with project_match.
+
+## Default-when-ambiguous
+
+If you can't confidently route an utterance to one of the above, emit \
+create_note with source_type='own_thought' AND needs_review=true. Never lose \
+the capture. A note can be re-classified later; a lost thought can't be \
+recovered.
 
 Output format — you MUST return ONLY a single JSON object, with no markdown \
 fences, no preamble, no trailing prose. The object is exactly one of these \

@@ -49,13 +49,28 @@ export function ChatThread() {
     const question = input.trim();
     if (!question || pending) return;
     const id = crypto.randomUUID();
+
+    // Build the history we'll send from the closure-captured `turns`
+    // (NOT from inside a setState updater — startTransition can't be
+    // called during render). Every prior successful turn contributes a
+    // Q+A pair; failed and pending turns are skipped.
+    const history: { role: 'user' | 'assistant'; content: string }[] = [];
+    for (const t of turns) {
+      if (typeof t.state === 'object' && t.state.ok === true) {
+        history.push({ role: 'user', content: t.question });
+        history.push({ role: 'assistant', content: t.state.answer });
+      }
+    }
+    history.push({ role: 'user', content: question });
+
     setTurns((prev) => [...prev, { id, question, state: 'asking' }]);
     setInput('');
     inputRef.current?.focus();
+
     startTransition(async () => {
-      const result: AskResult = await askAction(question);
-      setTurns((prev) =>
-        prev.map((t) =>
+      const result: AskResult = await askAction(history);
+      setTurns((cur) =>
+        cur.map((t) =>
           t.id === id
             ? {
                 ...t,
@@ -74,7 +89,14 @@ export function ChatThread() {
         ),
       );
     });
-  }, [input, pending]);
+  }, [input, pending, turns]);
+
+  const resetThread = useCallback(() => {
+    if (pending) return;
+    setTurns([]);
+    setInput('');
+    inputRef.current?.focus();
+  }, [pending]);
 
   // ─── Voice ────────────────────────────────────────────────────────────
   const startRecording = useCallback(async () => {
@@ -164,11 +186,25 @@ export function ChatThread() {
           </button>
         </div>
       </div>
-      {transcribing && (
-        <div className="font-mono text-[10px] uppercase tracking-wider text-ink-3">
-          Transcribing…
-        </div>
-      )}
+      <div className="flex items-center justify-between gap-3 min-h-[1rem]">
+        {transcribing ? (
+          <div className="font-mono text-[10px] uppercase tracking-wider text-ink-3">
+            Transcribing…
+          </div>
+        ) : (
+          <span aria-hidden />
+        )}
+        {turns.length > 0 && (
+          <button
+            type="button"
+            onClick={resetThread}
+            disabled={pending}
+            className="font-mono text-[10px] uppercase tracking-wider text-ink-3 hover:text-accent disabled:opacity-40 transition-colors"
+          >
+            New conversation
+          </button>
+        )}
+      </div>
 
       {/* Hint when empty */}
       {turns.length === 0 && (

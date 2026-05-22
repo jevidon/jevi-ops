@@ -59,23 +59,70 @@ const searchTasks: ChatTool = {
 
 const searchNotes: ChatTool = {
   name: 'search_notes',
-  description: 'Search notes by tag (exact) or body substring. Returns up to 30 matches.',
+  description: 'Search notes by tag, body substring, or source_type. Notes are free-floating thoughts — distinct from quote_annotations (which are thoughts attached to a captured quote). Use search_annotations for those. Returns up to 30 matches.',
   input_schema: {
     type: 'object',
     properties: {
       tag: { type: 'string', description: 'Match any note that has this tag' },
       body_contains: { type: 'string', description: 'Substring to match in the note body' },
-      type: { type: 'string', enum: ['note', 'quote', 'idea', 'personal_log'] },
+      source_type: {
+        type: 'string',
+        enum: ['own_thought', 'reading_response', 'meeting_note', 'brainstorm', 'observation', 'other'],
+        description: 'Filter by source_type (Addendum 02 §3)',
+      },
+      needs_review: { type: 'boolean', description: 'Only return notes flagged for re-classification' },
     },
   },
   handler: async (input, sb) => {
-    let q = sb.from('notes').select('id, type, body, tags, created_at').order('created_at', { ascending: false }).limit(30);
+    let q = sb
+      .from('notes')
+      .select('id, body, source_type, source_reference, tags, related_quote_id, related_project_id, related_person_id, needs_review, created_at')
+      .order('created_at', { ascending: false })
+      .limit(30);
     if (typeof input.tag === 'string') q = q.contains('tags', [input.tag]);
     if (typeof input.body_contains === 'string') q = q.ilike('body', `%${input.body_contains}%`);
-    if (input.type) q = q.eq('type', input.type);
+    if (typeof input.source_type === 'string') q = q.eq('source_type', input.source_type);
+    if (input.needs_review === true) q = q.eq('needs_review', true);
     const { data, error } = await q;
     if (error) return { error: error.message };
     return { matches: data?.length ?? 0, results: data ?? [] };
+  },
+};
+
+// ─── search_annotations ──────────────────────────────────────────────────
+
+const searchAnnotations: ChatTool = {
+  name: 'search_annotations',
+  description: "Search quote_annotations — thoughts the user attached to specific quotes over time. Use this when the question is about what they've thought or written about quotes (rather than the quotes themselves). Returns up to 30 matches each with the parent quote text for context.",
+  input_schema: {
+    type: 'object',
+    properties: {
+      body_contains: { type: 'string', description: 'Substring to match in the annotation body' },
+      tag: { type: 'string', description: 'Tag on the annotation itself' },
+      quote_text_contains: { type: 'string', description: 'Substring to match in the parent quote text' },
+    },
+  },
+  handler: async (input, sb) => {
+    let q = sb
+      .from('quote_annotations')
+      .select('id, body, context, tags, annotated_at, quote:quotes(id, text, source_author, source_reference)')
+      .order('annotated_at', { ascending: false })
+      .limit(30);
+    if (typeof input.body_contains === 'string') q = q.ilike('body', `%${input.body_contains}%`);
+    if (typeof input.tag === 'string') q = q.contains('tags', [input.tag]);
+    const { data, error } = await q;
+    if (error) return { error: error.message };
+    let results = data ?? [];
+    if (typeof input.quote_text_contains === 'string') {
+      const needle = input.quote_text_contains.toLowerCase();
+      type QuoteRel = { text?: string | null };
+      results = results.filter((r) => {
+        const quote = (r as { quote?: QuoteRel | QuoteRel[] | null }).quote;
+        const qarr = Array.isArray(quote) ? quote : quote ? [quote] : [];
+        return (qarr[0]?.text ?? '').toLowerCase().includes(needle);
+      });
+    }
+    return { matches: results.length, results };
   },
 };
 
@@ -95,7 +142,7 @@ const searchQuotes: ChatTool = {
   handler: async (input, sb) => {
     let q = sb
       .from('quotes')
-      .select('id, text, page_number, chapter, source_author, tags, my_notes, book:books(title, author)')
+      .select('id, text, page_number, chapter, source_author, source_reference, tags, book:books(title, author), annotations:quote_annotations(id, body, annotated_at, context)')
       .order('created_at', { ascending: false })
       .limit(30);
     if (typeof input.tag === 'string') q = q.contains('tags', [input.tag]);
@@ -226,6 +273,7 @@ export const CHAT_TOOLS: ChatTool[] = [
   searchTasks,
   searchNotes,
   searchQuotes,
+  searchAnnotations,
   getProjectSummary,
   getRecentEvents,
 ];

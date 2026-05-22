@@ -56,15 +56,39 @@ export const VoiceActionSchema = z.discriminatedUnion('action', [
   z.object({
     action: z.literal('create_note'),
     body: z.string().min(1),
+    // Addendum 02 — finer-grained source_type replaces the old `type` enum.
+    source_type: z.enum([
+      'own_thought', 'reading_response', 'meeting_note',
+      'brainstorm', 'observation', 'other',
+    ]).optional(),
+    source_reference: z.string().optional(),
     tags: z.array(z.string()).optional(),
     project_match: FuzzyMatchSchema.optional(),
     person_match: FuzzyMatchSchema.optional(),
+    quote_match: FuzzyMatchSchema.optional(),  // when the note is about a quote but isn't itself an annotation
+    needs_review: z.boolean().optional(),
   }),
   z.object({
     action: z.literal('create_quote'),
     text: z.string().min(1),
     book_match: FuzzyMatchSchema.optional(),
     page_number: z.number().int().positive().optional(),
+    chapter: z.string().optional(),
+    source_type: z.enum(['book', 'article', 'podcast', 'conversation', 'sermon', 'other']).optional(),
+    source_reference: z.string().optional(),
+    source_author: z.string().optional(),
+    tags: z.array(z.string()).optional(),
+    // Addendum 02 §4 — if the user bundles a thought with the quote in the
+    // same utterance, the parser includes annotation_body here and the
+    // executor creates both the quote AND an annotation with context='on_capture'.
+    annotation_body: z.string().optional(),
+  }),
+  z.object({
+    // Addendum 02 §4 — adding a thought to an existing quote.
+    action: z.literal('create_quote_annotation'),
+    quote_match: FuzzyMatchSchema,
+    body: z.string().min(1),
+    context: z.enum(['on_capture', 'on_revisit', 'on_surface', 'unspecified']).optional(),
     tags: z.array(z.string()).optional(),
   }),
   z.object({

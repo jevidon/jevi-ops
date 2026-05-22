@@ -159,8 +159,19 @@ export interface ChatResponse {
   turns: number;
 }
 
+export interface ChatHistoryMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
 export const chatApi = {
-  ask: (question: string) => api.post<ChatResponse>('/api/chat', { question }),
+  // Two shapes:
+  //   ask("What's on my calendar?")                       — single-turn
+  //   ask([{role:'user', content:'Q1'}, {role:'assistant', content:'A1'}, {role:'user', content:'Q2'}])
+  ask: (input: string | ChatHistoryMessage[]) => {
+    const body = typeof input === 'string' ? { question: input } : { messages: input };
+    return api.post<ChatResponse>('/api/chat', body);
+  },
 };
 
 // ─── Google Calendar ─────────────────────────────────────────────────────
@@ -210,6 +221,104 @@ export const calendarApi = {
 export const googleApi = {
   status: () => api.get<GoogleStatus>('/api/auth/google/status'),
   disconnect: () => api.post<{ status: string }>('/api/auth/google/disconnect'),
+};
+
+// ─── Library: notes, quotes, annotations, journal, feed ────────────────
+
+export type NoteSourceType =
+  | 'own_thought' | 'reading_response' | 'meeting_note'
+  | 'brainstorm' | 'observation' | 'other';
+
+export interface Note {
+  id: string;
+  body: string;
+  source_type: NoteSourceType;
+  source_reference: string | null;
+  tags: string[];
+  related_project_id: string | null;
+  related_person_id: string | null;
+  related_quote_id: string | null;
+  needs_review: boolean;
+  created_at: string;
+  project?: { id: string; name: string; color: string | null } | null;
+  person?: { id: string; name: string } | null;
+  quote?: { id: string; text: string; source_author?: string | null } | null;
+}
+
+export interface Quote {
+  id: string;
+  text: string;
+  page_number: string | number | null;
+  chapter: string | null;
+  source_type: string | null;
+  source_reference: string | null;
+  source_author: string | null;
+  tags: string[];
+  added_via: string;
+  created_at: string;
+  book?: { id: string; title: string; author: string | null } | null;
+  annotation_count?: number;
+}
+
+export type AnnotationContext = 'on_capture' | 'on_revisit' | 'on_surface' | 'unspecified';
+
+export interface QuoteAnnotation {
+  id: string;
+  quote_id: string;
+  body: string;
+  annotated_at: string;
+  context: AnnotationContext;
+  tags: string[];
+  created_at: string;
+}
+
+export interface JournalEntry {
+  id: string;
+  entry_date: string;
+  transcription_text: string | null;
+  source: string;
+  created_at: string;
+}
+
+export type FeedItemKind = 'note' | 'quote' | 'annotation' | 'journal';
+export interface FeedItem {
+  kind: FeedItemKind;
+  id: string;
+  at: string;
+  payload: Record<string, unknown>;
+}
+
+export const libraryApi = {
+  feed: (limit = 60) =>
+    api.get<{ items: FeedItem[] }>(`/api/library/feed?limit=${limit}`),
+  notes: {
+    list: (opts?: { source_type?: string; needs_review?: boolean }) => {
+      const qs = new URLSearchParams();
+      if (opts?.source_type) qs.set('source_type', opts.source_type);
+      if (opts?.needs_review) qs.set('needs_review', 'true');
+      const q = qs.toString();
+      return api.get<{ notes: Note[] }>(`/api/notes${q ? `?${q}` : ''}`);
+    },
+    get: (id: string) => api.get<Note>(`/api/notes/${id}`),
+    update: (id: string, body: Partial<Note>) => api.patch<Note>(`/api/notes/${id}`, body),
+    remove: (id: string) => api.delete(`/api/notes/${id}`),
+  },
+  quotes: {
+    list: () => api.get<{ quotes: Quote[] }>('/api/quotes'),
+    get: (id: string) =>
+      api.get<{ quote: Quote; annotations: QuoteAnnotation[] }>(`/api/quotes/${id}`),
+    remove: (id: string) => api.delete(`/api/quotes/${id}`),
+  },
+  annotations: {
+    create: (quote_id: string, body: string) =>
+      api.post<QuoteAnnotation>('/api/quote-annotations', { quote_id, body, context: 'on_revisit' }),
+    update: (id: string, body: string) =>
+      api.patch<QuoteAnnotation>(`/api/quote-annotations/${id}`, { body }),
+    remove: (id: string) => api.delete(`/api/quote-annotations/${id}`),
+  },
+  journal: {
+    list: () => api.get<{ entries: JournalEntry[] }>('/api/journal-entries'),
+  },
 };
 
 // ─── Observations ────────────────────────────────────────────────────────

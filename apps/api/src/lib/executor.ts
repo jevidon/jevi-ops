@@ -2,7 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { ParsedAction } from './parser.js';
 import {
   matchProject, matchDomain, matchPerson, matchTask,
-  matchBook, matchContentItem, matchMilestone,
+  matchBook, matchContentItem, matchMilestone, matchQuote,
 } from './match.js';
 import { insertEvent as insertGoogleEvent, loadTokens as loadGoogleTokens } from './google.js';
 
@@ -216,28 +216,117 @@ async function createCalendarEvent(sb: SupabaseClient, a: ParsedAction): Promise
 async function createNote(sb: SupabaseClient, a: ParsedAction): Promise<ActionResult> {
   const body = str(a, 'body');
   if (!body) return { action: a.action, status: 'failed', message: 'missing_body' };
-  const project_id = await matchProject(sb, str(a, 'project_match'));
-  const person_id = await matchPerson(sb, str(a, 'person_match'));
-  const insert: Record<string, unknown> = { body, type: 'note' };
+
+  // Resolve fuzzy references in parallel.
+  const [project_id, person_id, quote_id] = await Promise.all([
+    matchProject(sb, str(a, 'project_match')),
+    matchPerson(sb, str(a, 'person_match')),
+    matchQuote(sb, str(a, 'quote_match')),
+  ]);
+
+  const insert: Record<string, unknown> = {
+    body,
+    source_type: str(a, 'source_type') ?? 'own_thought',
+    needs_review: a.needs_review === true,
+  };
+  if (str(a, 'source_reference')) insert.source_reference = str(a, 'source_reference');
   if (Array.isArray(a.tags)) insert.tags = a.tags;
   if (project_id) insert.related_project_id = project_id;
   if (person_id) insert.related_person_id = person_id;
+  if (quote_id) insert.related_quote_id = quote_id;
+
   const { data, error } = await sb.from('notes').insert(insert).select('id').single();
   if (error) return { action: a.action, status: 'failed', message: error.message };
-  return { action: a.action, status: 'success', message: 'Note saved', entity_id: data.id, entity_kind: 'notes' };
+
+  // Short success message — reflects the resolved source_type so the
+  // notification feed is informative ("Reading response saved" vs just
+  // "Note saved").
+  const labels: Record<string, string> = {
+    own_thought: 'Note saved',
+    reading_response: 'Reading response saved',
+    meeting_note: 'Meeting note saved',
+    brainstorm: 'Brainstorm saved',
+    observation: 'Observation note saved',
+    other: 'Note saved',
+  };
+  const label = labels[insert.source_type as string] ?? 'Note saved';
+  const reviewSuffix = insert.needs_review ? ' (needs review)' : '';
+
+  return {
+    action: a.action,
+    status: 'success',
+    message: `${label}${reviewSuffix}`,
+    entity_id: data.id,
+    entity_kind: 'notes',
+  };
 }
 
 async function createQuote(sb: SupabaseClient, a: ParsedAction): Promise<ActionResult> {
   const text = str(a, 'text');
   if (!text) return { action: a.action, status: 'failed', message: 'missing_text' };
+
   const book_id = await matchBook(sb, str(a, 'book_match'));
   const insert: Record<string, unknown> = { text, added_via: 'voice' };
   if (book_id) insert.book_id = book_id;
   if (num(a, 'page_number')) insert.page_number = num(a, 'page_number');
+  if (str(a, 'chapter')) insert.chapter = str(a, 'chapter');
+  if (str(a, 'source_type')) insert.source_type = str(a, 'source_type');
+  if (str(a, 'source_reference')) insert.source_reference = str(a, 'source_reference');
+  if (str(a, 'source_author')) insert.source_author = str(a, 'source_author');
   if (Array.isArray(a.tags)) insert.tags = a.tags;
+
   const { data, error } = await sb.from('quotes').insert(insert).select('id').single();
   if (error) return { action: a.action, status: 'failed', message: error.message };
-  return { action: a.action, status: 'success', message: 'Quote saved', entity_id: data.id, entity_kind: 'quotes' };
+
+  // Addendum 02 §4 — if the user bundled a thought with the quote in the
+  // same utterance, the parser includes `annotation_body`. Write the
+  // annotation alongside the quote with context='on_capture'.
+  const annotationBody = str(a, 'annotation_body');
+  let annotationNote = '';
+  if (annotationBody) {
+    const { error: annoErr } = await sb.from('quote_annotations').insert({
+      quote_id: data.id,
+      body: annotationBody,
+      context: 'on_capture',
+    });
+    if (annoErr) {
+      annotationNote = ` (annotation failed: ${annoErr.message})`;
+    } else {
+      annotationNote = ' with your thought';
+    }
+  }
+
+  return {
+    action: a.action,
+    status: 'success',
+    message: `Quote saved${annotationNote}`,
+    entity_id: data.id,
+    entity_kind: 'quotes',
+  };
+}
+
+async function createQuoteAnnotation(sb: SupabaseClient, a: ParsedAction): Promise<ActionResult> {
+  const body = str(a, 'body');
+  if (!body) return { action: a.action, status: 'failed', message: 'missing_body' };
+  const quote_id = await matchQuote(sb, str(a, 'quote_match'));
+  if (!quote_id) return { action: a.action, status: 'skipped', message: 'quote_not_found' };
+
+  const insert: Record<string, unknown> = {
+    quote_id,
+    body,
+    context: str(a, 'context') ?? 'on_revisit',
+  };
+  if (Array.isArray(a.tags)) insert.tags = a.tags;
+
+  const { data, error } = await sb.from('quote_annotations').insert(insert).select('id').single();
+  if (error) return { action: a.action, status: 'failed', message: error.message };
+  return {
+    action: a.action,
+    status: 'success',
+    message: 'Annotation added to quote',
+    entity_id: data.id,
+    entity_kind: 'quote_annotations',
+  };
 }
 
 async function createJournalEntry(sb: SupabaseClient, a: ParsedAction): Promise<ActionResult> {
@@ -314,6 +403,7 @@ const handlers: HandlerMap = {
   create_calendar_event: createCalendarEvent,
   create_note: createNote,
   create_quote: createQuote,
+  create_quote_annotation: createQuoteAnnotation,
   create_journal_entry: createJournalEntry,
   create_person_fact: createPersonFact,
   update_content_item: updateContentItem,
@@ -330,12 +420,13 @@ const DRILL_URL: Record<string, string> = {
   milestones: '/projects', // no detail page yet — go to parent project
   activity_log: '/projects',
   calendar_events: '/calendar',
-  notes: '/library', // future home; for now, just the section
-  quotes: '/library',
-  journal_entries: '/library',
+  notes: '/library/notes',
+  quotes: '/library/quotes',
+  quote_annotations: '/library/quotes', // parent quote
+  journal_entries: '/library/journal',
   person_facts: '/people',
   content_items: '/content',
-  inventory_items: '/library',
+  inventory_items: '/library/inventory',
 };
 
 const ACTION_TITLE: Record<string, string> = {
@@ -348,6 +439,7 @@ const ACTION_TITLE: Record<string, string> = {
   create_calendar_event: 'Event scheduled',
   create_note: 'Note saved',
   create_quote: 'Quote saved',
+  create_quote_annotation: 'Annotation added',
   create_journal_entry: 'Journal entry saved',
   create_person_fact: 'Person fact saved',
   update_content_item: 'Content item updated',
