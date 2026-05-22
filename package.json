@@ -1,0 +1,24 @@
+{
+  "name": "jerad-ops",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Jerad's Personal Operations Dashboard — voice-first capture, one pane of glass over work, content, relationships, and personal stewardship",
+  "engines": {
+    "node": ">=20.10.0",
+    "pnpm": ">=9"
+  },
+  "packageManager": "pnpm@11.2.2",
+  "scripts": {
+    "dev:api": "pnpm --filter @jerad-ops/api dev",
+    "dev:web": "pnpm --filter @jerad-ops/web dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "pnpm -r lint",
+    "db:generate": "pnpm --filter @jerad-ops/api drizzle:generate",
+    "db:push": "pnpm --filter @jerad-ops/api drizzle:push",
+    "db:studio": "pnpm --filter @jerad-ops/api drizzle:studio"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2"
+  }
+}

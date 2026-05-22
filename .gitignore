@@ -1,0 +1,38 @@
+# deps
+node_modules/
+.pnpm-store/
+
+# build artifacts
+dist/
+build/
+.next/
+out/
+*.tsbuildinfo
+
+# env files (never commit)
+.env
+.env.*
+.env.local
+!.env.example
+
+# logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# editor
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
+
+# supabase local
+supabase/.temp/
+
+# tests/coverage
+coverage/
+.nyc_output/

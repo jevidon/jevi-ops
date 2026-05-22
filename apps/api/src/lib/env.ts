@@ -1,0 +1,60 @@
+import { config as loadDotenv } from 'dotenv';
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
+import { z } from 'zod';
+
+// In the monorepo, .env lives at the repo root (one folder up from apps/api).
+// Load that first, then fall back to a local .env so apps/api/.env still works
+// if someone wants per-app overrides.
+const here = dirname(fileURLToPath(import.meta.url));
+loadDotenv({ path: resolve(here, '../../../../.env') });
+loadDotenv({ path: resolve(here, '../../.env'), override: false });
+
+// Strict env validation. Anything required at boot lives here.
+// Phase-2-only vars (Gmail OAuth, etc.) are optional for now.
+
+const EnvSchema = z.object({
+  NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
+  LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
+
+  API_HOST: z.string().default('127.0.0.1'),
+  API_PORT: z.coerce.number().int().positive().default(3001),
+
+  CORS_ORIGINS: z.string().default('http://localhost:3000'),
+
+  // Supabase — required as soon as we have a project.
+  // Kept optional at boot so `pnpm dev` works before a project exists.
+  SUPABASE_URL: z.string().url().optional(),
+  SUPABASE_ANON_KEY: z.string().optional(),
+  SUPABASE_SERVICE_ROLE_KEY: z.string().optional(),
+  DATABASE_URL: z.string().optional(),
+
+  // Webhook secret for /api/ingest. External systems (Zapier, n8n, smart
+  // glasses, Cowork workflows) post here and pass the same value in the
+  // X-Ingest-Secret header.
+  INGEST_WEBHOOK_SECRET: z.string().min(20).optional(),
+
+  // Anthropic — required once voice capture is wired.
+  ANTHROPIC_API_KEY: z.string().optional(),
+
+  // Google OAuth — Phase 1 (Calendar) + Phase 2 (Gmail, Drive).
+  GOOGLE_OAUTH_CLIENT_ID: z.string().optional(),
+  GOOGLE_OAUTH_CLIENT_SECRET: z.string().optional(),
+  GOOGLE_OAUTH_REDIRECT_URI: z.string().url().optional(),
+});
+
+const parsed = EnvSchema.safeParse(process.env);
+
+if (!parsed.success) {
+  // eslint-disable-next-line no-console
+  console.error('❌ Invalid environment variables:');
+  // eslint-disable-next-line no-console
+  console.error(parsed.error.flatten().fieldErrors);
+  process.exit(1);
+}
+
+export const env = parsed.data;
+
+export const corsOrigins = env.CORS_ORIGINS.split(',').map((s) => s.trim()).filter(Boolean);
+
+export const isDev = env.NODE_ENV === 'development';

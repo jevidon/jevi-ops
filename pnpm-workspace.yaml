@@ -1,0 +1,9 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+
+# pnpm 11+ build-script approval. esbuild backs tsx-watch and Next.js dev;
+# sharp is Next.js's image optimizer. Both required for dev/build to work.
+allowBuilds:
+  esbuild: true
+  sharp: true

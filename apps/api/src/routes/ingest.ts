@@ -1,0 +1,72 @@
+import type { FastifyPluginAsync } from 'fastify';
+import { timingSafeEqual } from 'node:crypto';
+import { IngestRequestSchema } from '@jerad-ops/shared/schemas';
+import { env } from '../lib/env.js';
+import { supabaseAdmin, isSupabaseConfigured } from '../lib/supabase.js';
+
+// POST /api/ingest — generic capture endpoint (spec §3, §7).
+//
+// Called by external systems (Zapier, n8n, Cowork workflows, future
+// smart-glasses webhooks). Auth: shared secret in X-Ingest-Secret header,
+// compared with timingSafeEqual. If INGEST_WEBHOOK_SECRET is unset the
+// endpoint refuses all requests rather than silently accepting them.
+
+function checkSecret(provided: string | undefined): boolean {
+  const expected = env.INGEST_WEBHOOK_SECRET;
+  if (!expected || !provided) return false;
+  const a = Buffer.from(expected);
+  const b = Buffer.from(provided);
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
+
+export const ingestRoutes: FastifyPluginAsync = async (app) => {
+  app.post('/api/ingest', async (req, reply) => {
+    if (!env.INGEST_WEBHOOK_SECRET) {
+      return reply.code(503).send({
+        error: 'ingest_disabled',
+        reason: 'INGEST_WEBHOOK_SECRET not set',
+      });
+    }
+    const provided = req.headers['x-ingest-secret'];
+    const single = Array.isArray(provided) ? provided[0] : provided;
+    if (!checkSecret(single)) {
+      return reply.code(401).send({ error: 'unauthorized' });
+    }
+
+    const parsed = IngestRequestSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: 'invalid_payload',
+        details: parsed.error.flatten().fieldErrors,
+      });
+    }
+
+    if (!isSupabaseConfigured()) {
+      req.log.info({ event: 'ingest_stub', body: parsed.data }, 'captured (no db)');
+      return reply.code(202).send({ status: 'accepted_no_db', stub: true });
+    }
+
+    // Service-role client — webhook is not a user-authenticated context;
+    // RLS would block this insert. The secret check above is the auth.
+    const { data, error } = await supabaseAdmin()
+      .from('captured_data')
+      .insert({
+        source: parsed.data.source,
+        type: parsed.data.type,
+        payload: parsed.data.payload,
+        tags: parsed.data.tags ?? [],
+        display_hint: parsed.data.display_hint ?? 'log',
+        source_ref: parsed.data.source_ref ?? null,
+      })
+      .select('id, created_at')
+      .single();
+
+    if (error) {
+      req.log.error({ error }, 'ingest insert failed');
+      return reply.code(500).send({ error: 'insert_failed' });
+    }
+
+    return reply.code(201).send(data);
+  });
+};

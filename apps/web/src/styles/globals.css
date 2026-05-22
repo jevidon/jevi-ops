@@ -1,0 +1,36 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body {
+  background: #f6f2ea;
+  color: #1a1612;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+::selection {
+  background: rgba(184, 68, 43, 0.22);
+}
+
+/* Hairline rule used throughout — matches `Rule` in the mockup canvas. */
+.hairline {
+  height: 1px;
+  width: 100%;
+  background: rgba(26, 22, 18, 0.08);
+}
+
+/* Editorial eyebrow label. */
+.eyebrow {
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #8b7f73;
+}
