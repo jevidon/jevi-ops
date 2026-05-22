@@ -144,6 +144,25 @@ export const captureApi = {
     }),
 };
 
+// ─── Chat ────────────────────────────────────────────────────────────────
+
+export interface ChatToolTrace {
+  name: string;
+  input: Record<string, unknown>;
+  result_summary: string;
+}
+
+export interface ChatResponse {
+  question: string;
+  answer: string;
+  tool_trace: ChatToolTrace[];
+  turns: number;
+}
+
+export const chatApi = {
+  ask: (question: string) => api.post<ChatResponse>('/api/chat', { question }),
+};
+
 // ─── Google Calendar ─────────────────────────────────────────────────────
 
 export interface CalendarEvent {

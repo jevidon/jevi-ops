@@ -14,6 +14,7 @@ import { domainRoutes } from './routes/domains.js';
 import { captureRoutes } from './routes/capture.js';
 import { googleAuthRoutes } from './routes/google-auth.js';
 import { calendarRoutes } from './routes/calendar.js';
+import { chatRoutes } from './routes/chat.js';
 
 export async function buildServer() {
   const app = Fastify({
@@ -48,6 +49,7 @@ export async function buildServer() {
   await app.register(captureRoutes);
   await app.register(googleAuthRoutes);
   await app.register(calendarRoutes);
+  await app.register(chatRoutes);
 
   app.get('/', async () => ({
     name: 'jerad-ops/api',

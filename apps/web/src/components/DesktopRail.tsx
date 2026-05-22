@@ -60,11 +60,19 @@ export function DesktopRail({ email }: { email?: string }) {
         </ul>
       </nav>
 
-      {/* Settings link */}
+      {/* Utility links — Ask (chat) + Settings */}
       <div className="border-t border-line">
         <Link
-          href="/settings"
+          href="/chat"
           className={`block px-6 py-3 font-mono text-[10px] uppercase tracking-wider transition-colors ${
+            pathname === '/chat' ? 'text-ink' : 'text-ink-3 hover:text-ink-2'
+          }`}
+        >
+          Ask
+        </Link>
+        <Link
+          href="/settings"
+          className={`block px-6 py-3 font-mono text-[10px] uppercase tracking-wider border-t border-line transition-colors ${
             pathname === '/settings' ? 'text-ink' : 'text-ink-3 hover:text-ink-2'
           }`}
         >

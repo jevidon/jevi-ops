@@ -146,4 +146,38 @@ export const captureRoutes: FastifyPluginAsync = async (app) => {
     );
     return runPipeline(req, reply, transcript);
   });
+
+  // Transcribe-only: same Whisper path, no parser or executor. Used by the
+  // chat page so voice input fills the question field for the user to
+  // review before sending.
+  app.post('/api/capture/transcribe', async (req, reply) => {
+    if (!isWhisperConfigured()) {
+      return reply.code(503).send({ error: 'whisper_not_configured' });
+    }
+    if (!req.isMultipart()) {
+      return reply.code(400).send({ error: 'expected_multipart' });
+    }
+    const fileData = await req.file();
+    if (!fileData) return reply.code(400).send({ error: 'no_file_uploaded' });
+    if (fileData.fieldname !== 'audio') {
+      return reply.code(400).send({ error: 'expected_field_name_audio' });
+    }
+    const buffer = await fileData.toBuffer();
+    if (buffer.length === 0) return reply.code(400).send({ error: 'empty_audio' });
+
+    try {
+      const transcript = await transcribeAudio(
+        buffer,
+        fileData.filename || 'audio.webm',
+        fileData.mimetype || 'audio/webm',
+      );
+      return reply.code(200).send({ transcript });
+    } catch (err) {
+      req.log.error({ err }, 'whisper transcription failed');
+      return reply.code(502).send({
+        error: 'whisper_failed',
+        message: err instanceof Error ? err.message : 'unknown_whisper_error',
+      });
+    }
+  });
 };

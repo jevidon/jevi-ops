@@ -15,6 +15,12 @@ export async function AccountChip() {
         {user.email}
       </div>
       <Link
+        href="/chat"
+        className="font-mono text-[11px] uppercase tracking-wider text-ink-3 hover:text-ink-2 transition-colors"
+      >
+        Ask
+      </Link>
+      <Link
         href="/settings"
         className="font-mono text-[11px] uppercase tracking-wider text-ink-3 hover:text-ink-2 transition-colors"
       >
