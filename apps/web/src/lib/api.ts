@@ -212,6 +212,35 @@ export const googleApi = {
   disconnect: () => api.post<{ status: string }>('/api/auth/google/disconnect'),
 };
 
+// ─── Observations ────────────────────────────────────────────────────────
+
+export interface Observation {
+  id: string;
+  type: string;
+  severity: 'info' | 'notable' | 'concerning';
+  title: string;
+  body: string | null;
+  supporting_data: Record<string, unknown> | null;
+  domain_id: string | null;
+  project_id: string | null;
+  surfaced_at: string;
+  dismissed_at: string | null;
+  acted_on: boolean;
+  domain?: { id: string; name: string } | null;
+  project?: { id: string; name: string; color: string | null } | null;
+}
+
+export const observationsApi = {
+  list: (active = true, limit = 50) =>
+    api.get<{ observations: Observation[] }>(
+      `/api/observations?active=${active}&limit=${limit}`,
+    ),
+  dismiss: (id: string) =>
+    api.post<Observation>(`/api/observations/${id}/dismiss`),
+  acted: (id: string) =>
+    api.post<Observation>(`/api/observations/${id}/acted`),
+};
+
 // ─── Notifications ───────────────────────────────────────────────────────
 
 export interface Notification {

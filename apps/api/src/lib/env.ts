@@ -39,6 +39,10 @@ const EnvSchema = z.object({
   // X-Ingest-Secret header.
   INGEST_WEBHOOK_SECRET: z.string().min(20).optional(),
 
+  // Cron secret for /api/cron/* endpoints. External cron service (Supabase
+  // pg_cron, system cron, etc.) passes this in the X-Cron-Secret header.
+  CRON_SECRET: z.string().min(20).optional(),
+
   // Anthropic — required once voice capture is wired.
   ANTHROPIC_API_KEY: z.string().optional(),
   // Override the parser model. Default is the current best for structured

@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
-import { tasksApi, ApiError } from '@/lib/api';
+import { tasksApi, observationsApi, ApiError } from '@/lib/api';
 import { todayIsoDate } from '@/lib/today';
 
 const CreateTaskFormSchema = z.object({
@@ -54,4 +54,16 @@ export async function toggleTop3Action(formData: FormData) {
     // ignore — revalidate will resync
   }
   revalidatePath('/today');
+}
+
+export async function dismissObservationAction(formData: FormData) {
+  const id = String(formData.get('id') ?? '');
+  if (!id) return;
+  try {
+    await observationsApi.dismiss(id);
+  } catch {
+    /* best-effort */
+  }
+  revalidatePath('/today');
+  revalidatePath('/observations');
 }

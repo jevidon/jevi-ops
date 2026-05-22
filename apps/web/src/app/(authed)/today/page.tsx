@@ -3,7 +3,8 @@ import { AccountChip } from '@/components/AccountChip';
 import { TaskItem } from '@/components/TaskItem';
 import { AddTaskForm } from './add-task-form';
 import Link from 'next/link';
-import { tasksApi, calendarApi, notificationsApi, ApiError, type CalendarEvent, type Notification } from '@/lib/api';
+import { tasksApi, calendarApi, notificationsApi, observationsApi, ApiError, type CalendarEvent, type Notification, type Observation } from '@/lib/api';
+import { dismissObservationAction } from './actions';
 import { todayIsoDate, isToday } from '@/lib/today';
 import type { Task } from '@jerad-ops/shared';
 
@@ -78,17 +79,19 @@ export default async function TodayPage() {
   let tasks: Task[] = [];
   let events: CalendarEvent[] = [];
   let notifications: Notification[] = [];
+  let observations: Observation[] = [];
   let unreadCount = 0;
   let errorMessage: string | null = null;
 
-  // Fetch tasks + upcoming events + recent notifications in parallel.
-  // Calendar may fail (Google not connected yet); notifications is also
-  // non-fatal. Task list is the priority.
-  const [taskRes, eventRes, notifRes, countRes] = await Promise.allSettled([
+  // Fetch in parallel — task list is the priority, everything else is
+  // non-fatal (Google might not be connected, observations cron might not
+  // have run, etc.).
+  const [taskRes, eventRes, notifRes, countRes, obsRes] = await Promise.allSettled([
     tasksApi.list(),
     calendarApi.upcoming(4),
     notificationsApi.list('unread', 3),
     notificationsApi.count(),
+    observationsApi.list(true, 5),
   ]);
   if (taskRes.status === 'fulfilled') {
     tasks = taskRes.value.tasks;
@@ -99,6 +102,7 @@ export default async function TodayPage() {
   if (eventRes.status === 'fulfilled') events = eventRes.value.events;
   if (notifRes.status === 'fulfilled') notifications = notifRes.value.notifications;
   if (countRes.status === 'fulfilled') unreadCount = countRes.value.unread;
+  if (obsRes.status === 'fulfilled') observations = obsRes.value.observations;
 
   const { top3, inbox, doneToday } = splitTasks(tasks);
   const emptySlots = Math.max(0, 3 - top3.length);
@@ -171,12 +175,19 @@ export default async function TodayPage() {
 
         {/* ─── Right column — ambient ──────────────────────────────────── */}
         <div>
-          <Section label="Slipping">
-            <Hint>Nothing flagged. Domain failure patterns evaluate nightly once data flows.</Hint>
-          </Section>
-
-          <Section label="Observation">
-            <Hint>No observations yet. Engine runs after Phase 1 cron lands.</Hint>
+          <Section label={`Slipping${observations.length > 0 ? ` · ${observations.length}` : ''}`}>
+            {observations.length === 0 ? (
+              <Hint>
+                Nothing flagged. Domain failure patterns evaluate when the observations cron
+                runs (POST /api/cron/observations with X-Cron-Secret).
+              </Hint>
+            ) : (
+              <ul className="flex flex-col gap-3">
+                {observations.map((o) => (
+                  <ObservationCard key={o.id} observation={o} />
+                ))}
+              </ul>
+            )}
           </Section>
 
           <Section label="Resurfacing">
@@ -344,6 +355,56 @@ function formatEventTime(e: CalendarEvent): string {
 
 function Hint({ children }: { children: React.ReactNode }) {
   return <p className="font-sans text-[12px] text-ink-3 leading-relaxed mt-1">{children}</p>;
+}
+
+function ObservationCard({ observation }: { observation: Observation }) {
+  const concerning = observation.severity === 'concerning';
+  const link = observation.project ? `/projects/${observation.project.id}` : null;
+
+  return (
+    <li className="border border-line p-3 bg-surface">
+      <div className="flex items-start gap-3">
+        <span
+          className={`mt-1.5 h-1.5 w-1.5 rounded-full shrink-0 ${
+            concerning ? 'bg-accent' : 'bg-ink-2'
+          }`}
+          aria-hidden
+        />
+        <div className="flex-1 min-w-0">
+          <div className="font-serif text-[15px] text-ink leading-snug">
+            {link ? (
+              <Link href={link} className="hover:text-accent transition-colors">
+                {observation.title}
+              </Link>
+            ) : (
+              observation.title
+            )}
+          </div>
+          {observation.body && (
+            <div className="mt-1 font-sans text-[12px] text-ink-2 leading-snug">
+              {observation.body}
+            </div>
+          )}
+          <div className="mt-2 flex items-center gap-3">
+            {observation.domain?.name && (
+              <span className="font-mono text-[10px] uppercase tracking-wider text-ink-3">
+                {observation.domain.name}
+              </span>
+            )}
+            <form action={dismissObservationAction}>
+              <input type="hidden" name="id" value={observation.id} />
+              <button
+                type="submit"
+                className="font-mono text-[10px] uppercase tracking-wider text-ink-3 hover:text-accent transition-colors"
+              >
+                Dismiss
+              </button>
+            </form>
+          </div>
+        </div>
+      </div>
+    </li>
+  );
 }
 
 // Compact "5m ago" / "2h ago" / "3d ago" for the Today notifications strip.
