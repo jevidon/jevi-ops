@@ -62,6 +62,9 @@ importers:
       postgres:
         specifier: ^3.4.5
         version: 3.4.9
+      tsx:
+        specifier: ^4.19.2
+        version: 4.22.3
       zod:
         specifier: ^3.23.8
         version: 3.25.76
@@ -75,9 +78,6 @@ importers:
       pino-pretty:
         specifier: ^11.3.0
         version: 11.3.0
-      tsx:
-        specifier: ^4.19.2
-        version: 4.22.3
       typescript:
         specifier: ^5.7.2
         version: 5.9.3
