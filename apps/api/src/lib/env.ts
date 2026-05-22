@@ -63,6 +63,12 @@ const EnvSchema = z.object({
   // Where to send the user after a successful OAuth callback. Defaults to
   // the web app's settings page.
   WEB_APP_URL: z.string().url().default('http://localhost:3000'),
+
+  // Shared HMAC secret used by the web app to sign short-lived tokens for
+  // /api/auth/google?t=<token>. Required in production — the begin endpoint
+  // rejects requests without a valid token. See apps/api/src/lib/oauth-bridge.ts.
+  // Generate with: openssl rand -hex 32
+  OAUTH_BRIDGE_SECRET: z.string().min(32).optional(),
 });
 
 const parsed = EnvSchema.safeParse(process.env);

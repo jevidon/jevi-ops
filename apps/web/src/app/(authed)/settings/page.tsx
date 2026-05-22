@@ -1,8 +1,7 @@
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { googleApi, ApiError, type GoogleStatus } from '@/lib/api';
 import { SettingsSection } from './settings-section';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
+import { beginGoogleOAuthAction } from './actions';
 
 // /settings — integrations and account controls. Lives outside the six-tab
 // nav (it's reachable from the rail's email footer or by direct URL).
@@ -79,13 +78,17 @@ function DisconnectedView() {
         Calendly bookings will appear here too because Calendly writes them to your
         Google Calendar.
       </p>
-      {/* a <a> not a <Link>: this is a cross-origin redirect to the API */}
-      <a
-        href={`${API_URL}/api/auth/google`}
-        className="self-start bg-ink hover:bg-ink-2 text-bg font-sans font-semibold text-[13px] uppercase tracking-wider px-4 py-2.5 transition-colors"
-      >
-        Connect Google Calendar
-      </a>
+      {/* Server-action form (not a plain <a>): the action mints a signed
+          bridge token tying the current Supabase user to the OAuth redirect,
+          so the API can verify intent. <a href> can't carry a session header. */}
+      <form action={beginGoogleOAuthAction}>
+        <button
+          type="submit"
+          className="self-start bg-ink hover:bg-ink-2 text-bg font-sans font-semibold text-[13px] uppercase tracking-wider px-4 py-2.5 transition-colors"
+        >
+          Connect Google Calendar
+        </button>
+      </form>
     </div>
   );
 }

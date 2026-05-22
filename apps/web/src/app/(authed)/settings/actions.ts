@@ -1,7 +1,10 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { redirect } from 'next/navigation';
 import { calendarApi, googleApi, ApiError } from '@/lib/api';
+import { requireUser } from '@/lib/auth';
+import { signOAuthBridgeToken } from '@/lib/oauth-bridge';
 
 export interface SyncResult {
   ok: boolean;
@@ -34,6 +37,30 @@ export async function syncCalendarAction(): Promise<SyncResult> {
     }
     return { ok: false, message: (err as Error).message };
   }
+}
+
+// Mints a short-lived HMAC-signed bridge token tying the current Supabase
+// user to the OAuth begin redirect, then sends the browser to the API.
+//
+// Why a server action and not an <a href>: anchors send no Authorization
+// header on cross-origin navigations, so the API has no way to know who
+// initiated the flow. The bridge token solves that without exposing the
+// Supabase access token in a URL.
+export async function beginGoogleOAuthAction(): Promise<void> {
+  const user = await requireUser();
+  const secret = process.env.OAUTH_BRIDGE_SECRET;
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
+
+  // Dev fallback — if no secret is configured, send the user straight to
+  // the begin endpoint without a token. The API mirrors this fallback in
+  // dev mode (see apps/api/src/routes/google-auth.ts).
+  if (!secret) {
+    redirect(`${apiUrl}/api/auth/google`);
+  }
+
+  const expSec = Math.floor(Date.now() / 1000) + 60; // 60 second window
+  const token = signOAuthBridgeToken({ user_id: user.id, exp: expSec }, secret);
+  redirect(`${apiUrl}/api/auth/google?t=${encodeURIComponent(token)}`);
 }
 
 export async function disconnectGoogleAction(): Promise<SyncResult> {
