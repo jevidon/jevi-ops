@@ -2,6 +2,7 @@ import { BottomTabBar } from '@/components/BottomTabBar';
 import { DesktopRail } from '@/components/DesktopRail';
 import { MicFAB } from '@/components/MicFAB';
 import { requireUser } from '@/lib/auth';
+import { notificationsApi, ApiError } from '@/lib/api';
 
 // Every page inside the (authed) group requires a signed-in user — checked
 // in middleware AND here as defense-in-depth.
@@ -17,9 +18,21 @@ import { requireUser } from '@/lib/auth';
 export default async function AuthedLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser();
 
+  // Fetch unread notification count so the rail badge stays in sync across
+  // navigation. Best-effort — a failure here just hides the badge.
+  let unreadNotifications = 0;
+  try {
+    const res = await notificationsApi.count();
+    unreadNotifications = res.unread;
+  } catch (err) {
+    if (!(err instanceof ApiError)) {
+      // swallow; the layout shouldn't block on observability
+    }
+  }
+
   return (
     <div className="flex-1 flex">
-      <DesktopRail email={user.email ?? undefined} />
+      <DesktopRail email={user.email ?? undefined} unreadNotifications={unreadNotifications} />
 
       <div className="flex-1 flex flex-col min-w-0">
         {/* Inner wrapper: clamp width on mobile so the layout matches what

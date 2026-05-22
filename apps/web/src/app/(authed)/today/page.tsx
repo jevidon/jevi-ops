@@ -2,7 +2,8 @@ import { ScreenHeader } from '@/components/ScreenHeader';
 import { AccountChip } from '@/components/AccountChip';
 import { TaskItem } from '@/components/TaskItem';
 import { AddTaskForm } from './add-task-form';
-import { tasksApi, calendarApi, ApiError, type CalendarEvent } from '@/lib/api';
+import Link from 'next/link';
+import { tasksApi, calendarApi, notificationsApi, ApiError, type CalendarEvent, type Notification } from '@/lib/api';
 import { todayIsoDate, isToday } from '@/lib/today';
 import type { Task } from '@jerad-ops/shared';
 
@@ -76,13 +77,18 @@ function splitTasks(tasks: Task[]) {
 export default async function TodayPage() {
   let tasks: Task[] = [];
   let events: CalendarEvent[] = [];
+  let notifications: Notification[] = [];
+  let unreadCount = 0;
   let errorMessage: string | null = null;
 
-  // Fetch tasks + upcoming events in parallel. Calendar may fail (Google not
-  // connected yet), which is non-fatal — task list is the priority.
-  const [taskRes, eventRes] = await Promise.allSettled([
+  // Fetch tasks + upcoming events + recent notifications in parallel.
+  // Calendar may fail (Google not connected yet); notifications is also
+  // non-fatal. Task list is the priority.
+  const [taskRes, eventRes, notifRes, countRes] = await Promise.allSettled([
     tasksApi.list(),
     calendarApi.upcoming(4),
+    notificationsApi.list('unread', 3),
+    notificationsApi.count(),
   ]);
   if (taskRes.status === 'fulfilled') {
     tasks = taskRes.value.tasks;
@@ -90,9 +96,9 @@ export default async function TodayPage() {
     const err = taskRes.reason;
     errorMessage = err instanceof ApiError ? `API ${err.status}` : (err as Error).message;
   }
-  if (eventRes.status === 'fulfilled') {
-    events = eventRes.value.events;
-  }
+  if (eventRes.status === 'fulfilled') events = eventRes.value.events;
+  if (notifRes.status === 'fulfilled') notifications = notifRes.value.notifications;
+  if (countRes.status === 'fulfilled') unreadCount = countRes.value.unread;
 
   const { top3, inbox, doneToday } = splitTasks(tasks);
   const emptySlots = Math.max(0, 3 - top3.length);
@@ -177,8 +183,44 @@ export default async function TodayPage() {
             <Hint>One journal entry, quote, or saved verse rotates here daily.</Hint>
           </Section>
 
-          <Section label="Notifications">
-            <Hint>Audit log of autonomous actions appears here.</Hint>
+          <Section
+            label={`Notifications${unreadCount > 0 ? ` · ${unreadCount} unread` : ''}`}
+            actionHref="/notifications"
+            actionLabel="View all"
+          >
+            {notifications.length === 0 ? (
+              <Hint>
+                {unreadCount === 0
+                  ? 'All caught up.'
+                  : 'Recent activity will show up here.'}
+              </Hint>
+            ) : (
+              <ul>
+                {notifications.map((n) => (
+                  <li key={n.id} className="py-1.5">
+                    <div className="flex items-baseline justify-between gap-3">
+                      <div className="font-sans text-[13px] text-ink leading-snug min-w-0">
+                        {n.source_url ? (
+                          <Link href={n.source_url} className="hover:text-accent transition-colors">
+                            {n.title}
+                          </Link>
+                        ) : (
+                          n.title
+                        )}
+                      </div>
+                      <div className="font-mono text-[10px] uppercase tracking-wider text-ink-3 shrink-0">
+                        {relativeAgo(n.created_at)}
+                      </div>
+                    </div>
+                    {n.body && (
+                      <div className="font-sans text-[11px] text-ink-3 leading-snug truncate">
+                        {n.body}
+                      </div>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
           </Section>
 
           {doneToday.length > 0 && (
@@ -302,4 +344,19 @@ function formatEventTime(e: CalendarEvent): string {
 
 function Hint({ children }: { children: React.ReactNode }) {
   return <p className="font-sans text-[12px] text-ink-3 leading-relaxed mt-1">{children}</p>;
+}
+
+// Compact "5m ago" / "2h ago" / "3d ago" for the Today notifications strip.
+function relativeAgo(iso: string): string {
+  const then = new Date(iso).getTime();
+  const now = Date.now();
+  const secs = Math.max(0, Math.floor((now - then) / 1000));
+  if (secs < 60) return `${secs}s ago`;
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }

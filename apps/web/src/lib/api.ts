@@ -211,3 +211,30 @@ export const googleApi = {
   status: () => api.get<GoogleStatus>('/api/auth/google/status'),
   disconnect: () => api.post<{ status: string }>('/api/auth/google/disconnect'),
 };
+
+// ─── Notifications ───────────────────────────────────────────────────────
+
+export interface Notification {
+  id: string;
+  type: string;
+  title: string;
+  body: string | null;
+  source_ref: string | null;
+  source_url: string | null;
+  status: 'unread' | 'read' | 'dismissed';
+  created_at: string;
+}
+
+export type NotificationStatus = 'unread' | 'read' | 'dismissed' | 'all';
+
+export const notificationsApi = {
+  list: (status: NotificationStatus = 'all', limit = 50) =>
+    api.get<{ notifications: Notification[] }>(
+      `/api/notifications?status=${status}&limit=${limit}`,
+    ),
+  count: () => api.get<{ unread: number }>('/api/notifications/count'),
+  patch: (id: string, status: 'unread' | 'read' | 'dismissed') =>
+    api.patch<Notification>(`/api/notifications/${id}`, { status }),
+  markAllRead: () =>
+    api.post<{ marked_read: number }>('/api/notifications/mark-all-read'),
+};

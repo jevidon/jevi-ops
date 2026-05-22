@@ -320,6 +320,78 @@ const handlers: HandlerMap = {
   add_inventory_item: addInventoryItem,
 };
 
+// ─── Notification writers ───────────────────────────────────────────────
+
+// Map entity_kind → URL path for click-through. Add to this as new
+// entity types ship.
+const DRILL_URL: Record<string, string> = {
+  tasks: '/tasks',
+  projects: '/projects',
+  milestones: '/projects', // no detail page yet — go to parent project
+  activity_log: '/projects',
+  calendar_events: '/calendar',
+  notes: '/library', // future home; for now, just the section
+  quotes: '/library',
+  journal_entries: '/library',
+  person_facts: '/people',
+  content_items: '/content',
+  inventory_items: '/library',
+};
+
+const ACTION_TITLE: Record<string, string> = {
+  create_task: 'Task created',
+  complete_task: 'Task completed',
+  create_project: 'Project created',
+  update_project_status: 'Project status changed',
+  log_activity: 'Activity logged',
+  update_milestone: 'Milestone updated',
+  create_calendar_event: 'Event scheduled',
+  create_note: 'Note saved',
+  create_quote: 'Quote saved',
+  create_journal_entry: 'Journal entry saved',
+  create_person_fact: 'Person fact saved',
+  update_content_item: 'Content item updated',
+  add_inventory_item: 'Inventory item added',
+};
+
+async function recordNotification(
+  sb: SupabaseClient,
+  action: ParsedAction,
+  result: ActionResult,
+): Promise<void> {
+  // We log every action — success and failure. Failures get a 'concerning'
+  // tone the UI can highlight. Skipped (e.g. fuzzy match miss) also lands
+  // here so the user knows why something didn't happen.
+  const title = ACTION_TITLE[action.action] ?? action.action;
+  const type =
+    result.status === 'success' ? 'voice_action'
+    : result.status === 'skipped' ? 'voice_action_skipped'
+    : 'voice_action_failed';
+
+  let source_url: string | null = null;
+  if (result.entity_id && result.entity_kind && DRILL_URL[result.entity_kind]) {
+    source_url = `${DRILL_URL[result.entity_kind]}/${result.entity_id}`;
+    // Some entity kinds don't have a /:id page yet. For those, drop to the
+    // parent path. (DRILL_URL[milestones] = '/projects' which lands on the
+    // list — better than a broken link.)
+    if (['milestones', 'activity_log', 'notes', 'quotes', 'journal_entries',
+         'person_facts', 'content_items', 'inventory_items', 'calendar_events'].includes(result.entity_kind)) {
+      source_url = DRILL_URL[result.entity_kind]!;
+    }
+  }
+
+  await sb.from('notifications').insert({
+    type,
+    title,
+    body: result.message,
+    source_ref: result.entity_id ?? null,
+    source_url,
+    status: 'unread',
+  });
+}
+
+// ─── Executor ───────────────────────────────────────────────────────────
+
 export async function executeActions(
   sb: SupabaseClient,
   actions: ParsedAction[],
@@ -327,18 +399,27 @@ export async function executeActions(
   const results: ActionResult[] = [];
   for (const a of actions) {
     const handler = handlers[a.action];
+    let result: ActionResult;
     if (!handler) {
-      results.push({ action: a.action, status: 'failed', message: 'unknown_action_type' });
-      continue;
+      result = { action: a.action, status: 'failed', message: 'unknown_action_type' };
+    } else {
+      try {
+        result = await handler(sb, a);
+      } catch (err) {
+        result = {
+          action: a.action,
+          status: 'failed',
+          message: err instanceof Error ? err.message : 'unknown_error',
+        };
+      }
     }
+    results.push(result);
+
+    // Notification write is best-effort — never block the action result.
     try {
-      results.push(await handler(sb, a));
-    } catch (err) {
-      results.push({
-        action: a.action,
-        status: 'failed',
-        message: err instanceof Error ? err.message : 'unknown_error',
-      });
+      await recordNotification(sb, a, result);
+    } catch {
+      /* swallow — observability matters less than the action itself */
     }
   }
   return results;

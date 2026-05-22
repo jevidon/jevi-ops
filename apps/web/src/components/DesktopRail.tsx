@@ -18,8 +18,15 @@ const TABS = [
   { href: '/library', label: 'Library' },
 ] as const;
 
-export function DesktopRail({ email }: { email?: string }) {
+export function DesktopRail({
+  email,
+  unreadNotifications = 0,
+}: {
+  email?: string;
+  unreadNotifications?: number;
+}) {
   const pathname = usePathname();
+  const notifActive = pathname === '/notifications' || pathname.startsWith('/notifications/');
   return (
     <aside
       aria-label="Primary"
@@ -60,7 +67,7 @@ export function DesktopRail({ email }: { email?: string }) {
         </ul>
       </nav>
 
-      {/* Utility links — Ask (chat) + Settings */}
+      {/* Utility links — Ask + Notifications + Settings */}
       <div className="border-t border-line">
         <Link
           href="/chat"
@@ -69,6 +76,19 @@ export function DesktopRail({ email }: { email?: string }) {
           }`}
         >
           Ask
+        </Link>
+        <Link
+          href="/notifications"
+          className={`flex items-center justify-between px-6 py-3 font-mono text-[10px] uppercase tracking-wider border-t border-line transition-colors ${
+            notifActive ? 'text-ink' : 'text-ink-3 hover:text-ink-2'
+          }`}
+        >
+          <span>Notifications</span>
+          {unreadNotifications > 0 && (
+            <span className="bg-accent text-bg font-mono text-[10px] leading-none px-1.5 py-0.5 min-w-[1.25rem] text-center">
+              {unreadNotifications > 99 ? '99+' : unreadNotifications}
+            </span>
+          )}
         </Link>
         <Link
           href="/settings"
