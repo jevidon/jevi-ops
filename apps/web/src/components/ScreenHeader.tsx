@@ -1,5 +1,6 @@
 // Reused across all six tabs. Eyebrow + display-serif title + optional meta.
 // Mirrors the mockup's editorial pattern: small mono eyebrow over Newsreader.
+// On desktop the title scales up and the meta sits inline to the right.
 
 export function ScreenHeader({
   eyebrow,
@@ -11,12 +12,20 @@ export function ScreenHeader({
   meta?: string;
 }) {
   return (
-    <header className="px-5 pt-8 pb-5">
-      <div className="eyebrow mb-2">{eyebrow}</div>
-      <h1 className="font-serif text-[28px] leading-[1.08] font-medium tracking-[-0.01em] text-ink">
-        {title}
-      </h1>
-      {meta && <div className="mt-2 font-mono text-meta text-ink-3">{meta}</div>}
+    <header className="px-5 pt-8 pb-5 lg:px-0 lg:pt-10 lg:pb-6">
+      <div className="lg:flex lg:items-end lg:justify-between lg:gap-6">
+        <div>
+          <div className="eyebrow mb-2">{eyebrow}</div>
+          <h1 className="font-serif text-[28px] lg:text-[40px] leading-[1.05] font-medium tracking-[-0.015em] text-ink">
+            {title}
+          </h1>
+        </div>
+        {meta && (
+          <div className="mt-2 lg:mt-0 font-mono text-meta text-ink-3 lg:pb-1">
+            {meta}
+          </div>
+        )}
+      </div>
     </header>
   );
 }

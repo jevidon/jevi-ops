@@ -6,14 +6,13 @@ import { tasksApi, ApiError } from '@/lib/api';
 import { todayIsoDate, isToday } from '@/lib/today';
 import type { Task } from '@jerad-ops/shared';
 
-// Today screen — most important UI per spec §4. Max 7 elements:
-//   1. Calendar slice (next 3-4 events)            ← stub until calendar lands
-//   2. Top 3 tasks for today                       ← real
-//   3. Domain status (anything slipping)           ← stub until observations cron
-//   4. One observation card                        ← stub
-//   5. One resurfacing card                        ← stub
-//   6. Notification feed entry point               ← stub
-//   7. Mic FAB (rendered globally in layout)
+// Today screen — most important UI per spec §4.
+//
+// Mobile: single column, everything stacks top-to-bottom.
+// Desktop (lg+): two-column grid (1.6fr 1fr). Left = focus (Top 3, calendar,
+//   all open tasks). Right = ambient (slipping, observation, resurfacing,
+//   notifications, completed-today). Section order is the same source-of-
+//   truth in both viewports — just rearranged by CSS grid.
 
 function todayLabel() {
   const d = new Date();
@@ -37,11 +36,15 @@ function splitTasks(tasks: Task[]) {
 
   const inbox = open
     .filter((t) => !top3Ids.has(t.id))
-    .filter((t) => !t.due_date || t.due_date === today)
-    .sort((a, b) => b.created_at.localeCompare(a.created_at));
+    .sort((a, b) => {
+      const aDue = a.due_date ?? null;
+      const bDue = b.due_date ?? null;
+      if (aDue && bDue) return aDue.localeCompare(bDue);
+      if (aDue) return -1;
+      if (bDue) return 1;
+      return b.created_at.localeCompare(a.created_at);
+    });
 
-  // Tasks finished today — most-recently-completed first, so the latest win
-  // is on top when you expand the section.
   const doneToday = tasks
     .filter((t) => t.status === 'done' && isToday(t.completed_at ?? null))
     .sort((a, b) => (b.completed_at ?? '').localeCompare(a.completed_at ?? ''));
@@ -66,93 +69,104 @@ export default async function TodayPage() {
   return (
     <div>
       <ScreenHeader eyebrow="Today" title={todayLabel()} meta="Mountain Time" />
-      <div className="hairline" />
+      <div className="hairline lg:mb-2" />
 
-      <Section label="Up next">
-        <EventRow time="—:—" title="No events synced" subtle />
-        <Hint>Connect Google Calendar to populate events.</Hint>
-      </Section>
-
-      <Section label="Top 3 for today">
-        {errorMessage ? (
-          <Hint>Couldn't load tasks: {errorMessage}</Hint>
-        ) : (
-          <>
-            {top3.map((t) => (
-              <TaskItem key={t.id} task={t} />
-            ))}
-            {Array.from({ length: emptySlots }).map((_, i) => (
-              <div key={`slot-${i}`} className="flex items-center gap-3 py-2">
-                <span className="h-5 w-5 border border-line" aria-hidden />
-                <span className="font-sans text-[14px] text-ink-3 italic">(open spot)</span>
-              </div>
-            ))}
-            <Hint>Star a task below to set it as today's top 3.</Hint>
-          </>
-        )}
-      </Section>
-
-      <Section label="Inbox">
-        {errorMessage ? (
-          <Hint>Couldn't load tasks.</Hint>
-        ) : (
-          <>
-            {inbox.length === 0 ? (
-              <p className="font-sans text-[13px] text-ink-3 italic py-1">No open tasks.</p>
+      <div className="lg:grid lg:grid-cols-[1.6fr_1fr] lg:gap-x-14">
+        {/* ─── Left column — focus ─────────────────────────────────────── */}
+        <div>
+          <Section label="Top 3 for today">
+            {errorMessage ? (
+              <Hint>Couldn't load tasks: {errorMessage}</Hint>
             ) : (
-              inbox.map((t) => <TaskItem key={t.id} task={t} />)
+              <>
+                {top3.map((t) => (
+                  <TaskItem key={t.id} task={t} />
+                ))}
+                {Array.from({ length: emptySlots }).map((_, i) => (
+                  <div key={`slot-${i}`} className="flex items-center gap-3 py-2">
+                    <span className="h-5 w-5 border border-line" aria-hidden />
+                    <span className="font-sans text-[14px] text-ink-3 italic">(open spot)</span>
+                  </div>
+                ))}
+                <Hint>Star a task below to set it as today's top 3.</Hint>
+              </>
             )}
-            <AddTaskForm />
-          </>
-        )}
-      </Section>
+          </Section>
 
-      <Section label="Slipping">
-        <Hint>Nothing flagged. Domain failure patterns evaluate nightly once data flows.</Hint>
-      </Section>
+          <Section label="Up next">
+            <EventRow time="—:—" title="No events synced" subtle />
+            <Hint>Connect Google Calendar to populate events.</Hint>
+          </Section>
 
-      <Section label="Observation">
-        <Hint>No observations yet. Engine runs after Phase 1 cron lands.</Hint>
-      </Section>
+          <Section label={`All open${inbox.length > 0 ? ` · ${inbox.length}` : ''}`}>
+            {errorMessage ? (
+              <Hint>Couldn't load tasks.</Hint>
+            ) : (
+              <>
+                {inbox.length === 0 ? (
+                  <p className="font-sans text-[13px] text-ink-3 italic py-1">No open tasks.</p>
+                ) : (
+                  inbox.map((t) => <TaskItem key={t.id} task={t} />)
+                )}
+                <AddTaskForm />
+              </>
+            )}
+          </Section>
+        </div>
 
-      <Section label="Resurfacing">
-        <Hint>One journal entry, quote, or saved verse rotates here daily.</Hint>
-      </Section>
+        {/* ─── Right column — ambient ──────────────────────────────────── */}
+        <div>
+          <Section label="Slipping">
+            <Hint>Nothing flagged. Domain failure patterns evaluate nightly once data flows.</Hint>
+          </Section>
 
-      <Section label="Notifications">
-        <Hint>Audit log of autonomous actions appears here.</Hint>
-      </Section>
+          <Section label="Observation">
+            <Hint>No observations yet. Engine runs after Phase 1 cron lands.</Hint>
+          </Section>
 
-      {doneToday.length > 0 && (
-        <section className="px-5 pt-6">
-          <details className="group">
-            <summary className="eyebrow pb-2 border-b border-line cursor-pointer list-none flex items-center justify-between hover:text-ink-2 transition-colors">
-              <span>✓ {doneToday.length} done today</span>
-              <span
-                className="font-mono text-[10px] text-ink-3 transition-transform group-open:rotate-90"
-                aria-hidden
-              >
-                ▶
-              </span>
-            </summary>
-            <div className="mt-3">
-              {doneToday.map((t) => (
-                <TaskItem key={t.id} task={t} showStar={false} />
-              ))}
-              <Hint>Click the checkbox to undo.</Hint>
-            </div>
-          </details>
-        </section>
-      )}
+          <Section label="Resurfacing">
+            <Hint>One journal entry, quote, or saved verse rotates here daily.</Hint>
+          </Section>
 
-      <AccountChip />
+          <Section label="Notifications">
+            <Hint>Audit log of autonomous actions appears here.</Hint>
+          </Section>
+
+          {doneToday.length > 0 && (
+            <section className="px-5 lg:px-0 pt-6">
+              <details className="group">
+                <summary className="eyebrow pb-2 border-b border-line cursor-pointer list-none flex items-center justify-between hover:text-ink-2 transition-colors">
+                  <span>✓ {doneToday.length} done today</span>
+                  <span
+                    className="font-mono text-[10px] text-ink-3 transition-transform group-open:rotate-90"
+                    aria-hidden
+                  >
+                    ▶
+                  </span>
+                </summary>
+                <div className="mt-3">
+                  {doneToday.map((t) => (
+                    <TaskItem key={t.id} task={t} showStar={false} />
+                  ))}
+                  <Hint>Click the checkbox to undo.</Hint>
+                </div>
+              </details>
+            </section>
+          )}
+        </div>
+      </div>
+
+      {/* Mobile-only account footer (desktop puts it in the rail) */}
+      <div className="lg:hidden">
+        <AccountChip />
+      </div>
     </div>
   );
 }
 
 function Section({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <section className="px-5 pt-6">
+    <section className="px-5 lg:px-0 pt-6">
       <div className="eyebrow pb-2 border-b border-line mb-3">{label}</div>
       {children}
     </section>

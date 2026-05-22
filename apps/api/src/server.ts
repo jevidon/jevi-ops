@@ -1,6 +1,7 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
+import multipart from '@fastify/multipart';
 import sensible from '@fastify/sensible';
 import { env, corsOrigins, isDev } from './lib/env.js';
 import authPlugin from './plugins/auth.js';
@@ -29,6 +30,10 @@ export async function buildServer() {
     credentials: true,
   });
   await app.register(sensible);
+  await app.register(multipart, {
+    // Whisper's max upload is 25 MB. Cap matches.
+    limits: { fileSize: 25 * 1024 * 1024 },
+  });
   await app.register(authPlugin);
 
   await app.register(healthRoutes);

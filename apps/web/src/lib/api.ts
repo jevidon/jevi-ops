@@ -17,7 +17,7 @@ class ApiError extends Error {
   }
 }
 
-async function call<T>(path: string, init?: RequestInit & { auth?: boolean }): Promise<T> {
+async function call<T>(path: string, init?: RequestInit & { auth?: boolean; json?: boolean }): Promise<T> {
   const headers = new Headers(init?.headers);
   if (init?.auth !== false) {
     const token = await getAccessToken();
@@ -26,7 +26,9 @@ async function call<T>(path: string, init?: RequestInit & { auth?: boolean }): P
     }
     headers.set('Authorization', `Bearer ${token}`);
   }
-  if (init?.body && !headers.has('Content-Type')) {
+  // Only set JSON content-type for JSON bodies. FormData / multipart sets its
+  // own content-type with the boundary, and a manual override breaks parsing.
+  if (init?.body && init.json !== false && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
   }
 
@@ -75,4 +77,33 @@ export const projectsApi = {
 
 export const domainsApi = {
   list: () => api.get<{ domains: Domain[] }>('/api/domains'),
+};
+
+export interface VoiceCaptureResponse {
+  status: 'executed' | 'needs_disambiguation' | 'parse_error';
+  transcript: string;
+  actions?: Array<{
+    action: string;
+    status: 'success' | 'skipped' | 'failed';
+    message: string;
+    entity_id?: string;
+    entity_kind?: string;
+  }>;
+  field?: string;
+  candidates?: Array<{ id: string; label: string }>;
+  error?: string;
+}
+
+export const captureApi = {
+  voice: (transcript: string) =>
+    api.post<VoiceCaptureResponse>('/api/capture/voice', { transcript }),
+
+  // Audio path — accepts FormData with field "audio". Don't set
+  // Content-Type; fetch picks the right multipart boundary automatically.
+  voiceAudio: (formData: FormData) =>
+    call<VoiceCaptureResponse>('/api/capture/voice-audio', {
+      method: 'POST',
+      body: formData,
+      json: false,
+    }),
 };

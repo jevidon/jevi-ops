@@ -19,7 +19,7 @@ export function BottomTabBar() {
   return (
     <nav
       aria-label="Primary"
-      className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[480px] bg-bg/95 backdrop-blur-md border-t border-line"
+      className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[480px] bg-bg/95 backdrop-blur-md border-t border-line lg:hidden"
       style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
     >
       <ul className="flex justify-around items-stretch h-14">

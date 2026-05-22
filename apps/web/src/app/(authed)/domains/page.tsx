@@ -57,7 +57,7 @@ function DomainRow({ domain }: { domain: Domain }) {
     : 0;
 
   return (
-    <li className="px-5 py-5 border-b border-line">
+    <li className="px-5 lg:px-0 py-5 border-b border-line">
       <div className="font-serif text-[20px] text-ink leading-tight">{domain.name}</div>
 
       {domain.fruit_definition && (

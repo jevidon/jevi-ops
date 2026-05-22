@@ -39,7 +39,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         />
       </head>
       <body className="font-sans bg-bg text-ink">
-        <div className="mx-auto min-h-screen max-w-[480px] flex flex-col">{children}</div>
+        {/* No width constraint here — each page/layout handles its own.
+            Mobile (authed) pages clamp to 480px; desktop fills the viewport
+            with a left rail. Sign-in centers its form. */}
+        <div className="min-h-screen flex flex-col">{children}</div>
       </body>
     </html>
   );

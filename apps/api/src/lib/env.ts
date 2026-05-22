@@ -6,8 +6,13 @@ import { z } from 'zod';
 // In the monorepo, .env lives at the repo root (one folder up from apps/api).
 // Load that first, then fall back to a local .env so apps/api/.env still works
 // if someone wants per-app overrides.
+//
+// `override: true` on the root .env so that the file is authoritative —
+// otherwise a stale value already set in the shell environment (`unset` not
+// run since exporting it, etc.) silently wins and you get cryptic "X not
+// configured" errors despite the .env having the value.
 const here = dirname(fileURLToPath(import.meta.url));
-loadDotenv({ path: resolve(here, '../../../../.env') });
+loadDotenv({ path: resolve(here, '../../../../.env'), override: true });
 loadDotenv({ path: resolve(here, '../../.env'), override: false });
 
 // Strict env validation. Anything required at boot lives here.
@@ -36,6 +41,15 @@ const EnvSchema = z.object({
 
   // Anthropic — required once voice capture is wired.
   ANTHROPIC_API_KEY: z.string().optional(),
+  // Override the parser model. Default is the current best for structured
+  // parsing accuracy (claude-opus-4-7). Swap to a smaller model for cost.
+  ANTHROPIC_MODEL: z.string().default('claude-opus-4-7'),
+
+  // OpenAI Whisper for audio transcription (browser MediaRecorder → server).
+  // Web Speech API is blocked on some networks; Whisper bypasses Google entirely.
+  OPENAI_API_KEY: z.string().optional(),
+  // Default Whisper model. whisper-1 is fine; reserved for future override.
+  OPENAI_WHISPER_MODEL: z.string().default('whisper-1'),
 
   // Google OAuth — Phase 1 (Calendar) + Phase 2 (Gmail, Drive).
   GOOGLE_OAUTH_CLIENT_ID: z.string().optional(),
@@ -58,3 +72,6 @@ export const env = parsed.data;
 export const corsOrigins = env.CORS_ORIGINS.split(',').map((s) => s.trim()).filter(Boolean);
 
 export const isDev = env.NODE_ENV === 'development';
+
+// Status flags re-exported for the /healthz route, which surfaces them so
+// you can sanity-check what loaded without re-deriving Boolean checks here.

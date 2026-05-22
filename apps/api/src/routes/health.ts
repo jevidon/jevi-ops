@@ -1,5 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { isSupabaseConfigured } from '../lib/supabase.js';
+import { isAnthropicConfigured } from '../lib/anthropic.js';
+import { isWhisperConfigured } from '../lib/whisper.js';
 
 export const healthRoutes: FastifyPluginAsync = async (app) => {
   app.get('/healthz', async () => {
@@ -7,6 +9,8 @@ export const healthRoutes: FastifyPluginAsync = async (app) => {
       status: 'ok',
       time: new Date().toISOString(),
       supabase_configured: isSupabaseConfigured(),
+      anthropic_configured: isAnthropicConfigured(),
+      whisper_configured: isWhisperConfigured(),
     };
   });
 
