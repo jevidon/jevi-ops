@@ -1,0 +1,50 @@
+'use server';
+
+import { revalidatePath } from 'next/cache';
+import { calendarApi, googleApi, ApiError } from '@/lib/api';
+
+export interface SyncResult {
+  ok: boolean;
+  message: string;
+}
+
+export async function syncCalendarAction(): Promise<SyncResult> {
+  try {
+    const res = await calendarApi.pull();
+    revalidatePath('/today');
+    revalidatePath('/calendar');
+    revalidatePath('/settings');
+    const parts = [
+      `Pulled ${res.events_upserted}/${res.events_fetched} from Google`,
+    ];
+    if (res.events_deleted > 0) {
+      parts.push(`removed ${res.events_deleted} deleted`);
+    }
+    if (res.orphans_pushed > 0) {
+      parts.push(`pushed ${res.orphans_pushed} local-only up`);
+    }
+    if (res.orphans_failed > 0) {
+      parts.push(`${res.orphans_failed} push failed`);
+    }
+    return { ok: true, message: parts.join(' · ') + '.' };
+  } catch (err) {
+    if (err instanceof ApiError) {
+      const body = err.body as { error?: string } | null;
+      return { ok: false, message: body?.error ?? `HTTP ${err.status}` };
+    }
+    return { ok: false, message: (err as Error).message };
+  }
+}
+
+export async function disconnectGoogleAction(): Promise<SyncResult> {
+  try {
+    await googleApi.disconnect();
+    revalidatePath('/settings');
+    return { ok: true, message: 'Google Calendar disconnected.' };
+  } catch (err) {
+    if (err instanceof ApiError) {
+      return { ok: false, message: `HTTP ${err.status}` };
+    }
+    return { ok: false, message: (err as Error).message };
+  }
+}

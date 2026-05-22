@@ -4,6 +4,7 @@ import {
   matchProject, matchDomain, matchPerson, matchTask,
   matchBook, matchContentItem, matchMilestone,
 } from './match.js';
+import { insertEvent as insertGoogleEvent, loadTokens as loadGoogleTokens } from './google.js';
 
 // Action executor — dispatch each parsed action to the right table.
 // Returns a per-action result so the client can confirm what happened.
@@ -102,23 +103,43 @@ async function logActivity(sb: SupabaseClient, a: ParsedAction): Promise<ActionR
   const entry = str(a, 'entry');
   if (!entry) return { action: a.action, status: 'failed', message: 'missing_entry' };
   const project_id = await matchProject(sb, str(a, 'project_match'));
+  const hours = num(a, 'hours_logged');
+
   const insert: Record<string, unknown> = { entry, source: 'voice' };
   if (project_id) insert.project_id = project_id;
-  if (num(a, 'hours_logged') !== undefined) insert.hours_logged = num(a, 'hours_logged');
+  if (hours !== undefined) insert.hours_logged = hours;
+
   const { data, error } = await sb.from('activity_log').insert(insert).select('id').single();
   if (error) return { action: a.action, status: 'failed', message: error.message };
 
-  // Also bump hours_logged on the project for the dashboard widget.
-  if (project_id && num(a, 'hours_logged') !== undefined) {
-    await sb.rpc('increment_project_hours', { p_id: project_id, h: num(a, 'hours_logged') }).then(
-      () => null,
-      // Fall back to a manual read+write if the RPC doesn't exist yet.
-      async () => {
-        const { data: row } = await sb.from('projects').select('hours_logged').eq('id', project_id).single();
-        const current = Number(row?.hours_logged ?? 0);
-        await sb.from('projects').update({ hours_logged: current + (num(a, 'hours_logged') ?? 0) }).eq('id', project_id);
-      },
-    );
+  // Bump projects.hours_logged so the list view and project detail header
+  // reflect the new total. Read-then-update — there's no atomic increment
+  // RPC defined yet, and this user is the only writer so the race is
+  // effectively impossible.
+  if (project_id && hours !== undefined && hours > 0) {
+    const { data: row, error: readErr } = await sb
+      .from('projects')
+      .select('hours_logged')
+      .eq('id', project_id)
+      .single();
+    if (!readErr) {
+      const current = Number(row?.hours_logged ?? 0);
+      const { error: updateErr } = await sb
+        .from('projects')
+        .update({ hours_logged: current + hours })
+        .eq('id', project_id);
+      if (updateErr) {
+        // Activity row landed; project total didn't. Surface so the user
+        // knows the project widget will be off until next correction.
+        return {
+          action: a.action,
+          status: 'success',
+          message: `Activity logged (project hours update failed: ${updateErr.message})`,
+          entity_id: data.id,
+          entity_kind: 'activity_log',
+        };
+      }
+    }
   }
 
   return { action: a.action, status: 'success', message: 'Activity logged', entity_id: data.id, entity_kind: 'activity_log' };
@@ -142,16 +163,54 @@ async function createCalendarEvent(sb: SupabaseClient, a: ParsedAction): Promise
   const start = str(a, 'start');
   const end = str(a, 'end');
   if (!title || !start || !end) return { action: a.action, status: 'failed', message: 'missing_required_fields' };
+
   const insert: Record<string, unknown> = {
     title, start_at: start, end_at: end,
     source: 'created_here',
   };
   if (str(a, 'location')) insert.location = str(a, 'location');
   if (Array.isArray(a.attendees)) insert.attendees = a.attendees;
+
+  // Push to Google Calendar first when connected, then mirror locally with
+  // the returned google_event_id so future pulls update (not duplicate) it.
+  // Status is explicit in the message so the user always knows whether the
+  // push happened: "(synced to Google)", "(local only — connect Google in
+  // Settings)", or "(Google push failed: ...)".
+  let pushedNote = '';
+  const googleTokens = await loadGoogleTokens().catch(() => null);
+  if (!googleTokens) {
+    pushedNote = ' (local only — connect Google in Settings)';
+  } else {
+    try {
+      const attendees = Array.isArray(a.attendees)
+        ? (a.attendees as unknown[]).filter((x): x is string => typeof x === 'string')
+        : undefined;
+      const googleEvent = await insertGoogleEvent({
+        summary: title,
+        start, end,
+        location: str(a, 'location'),
+        attendees,
+      });
+      if (googleEvent?.id) {
+        insert.google_event_id = googleEvent.id;
+        pushedNote = ' (synced to Google)';
+      } else {
+        pushedNote = ' (Google push returned no id)';
+      }
+    } catch (err) {
+      pushedNote = ` (Google push failed: ${err instanceof Error ? err.message : 'unknown'})`;
+    }
+  }
+
   const { data, error } = await sb.from('calendar_events').insert(insert).select('id').single();
   if (error) return { action: a.action, status: 'failed', message: error.message };
-  // TODO: push to Google Calendar once OAuth is wired (Phase 1 next step).
-  return { action: a.action, status: 'success', message: `Calendar event created: ${title}`, entity_id: data.id, entity_kind: 'calendar_events' };
+  return {
+    action: a.action,
+    status: 'success',
+    message: `Calendar event created: ${title}${pushedNote}`,
+    entity_id: data.id,
+    entity_kind: 'calendar_events',
+  };
 }
 
 async function createNote(sb: SupabaseClient, a: ParsedAction): Promise<ActionResult> {

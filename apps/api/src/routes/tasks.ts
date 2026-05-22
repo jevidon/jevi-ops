@@ -8,13 +8,26 @@ export const taskRoutes: FastifyPluginAsync = async (app) => {
 
   app.get('/api/tasks', async (req) => {
     const sb = req.supabase!;
+    // Include the linked project's id+name so the Today screen can render
+    // "Reviews v2.4 · 0.5h" next to each task without an N+1 lookup.
     const { data, error } = await sb
       .from('tasks')
-      .select('*')
+      .select('*, project:projects(id, name, color)')
       .order('created_at', { ascending: false })
       .limit(500);
     if (error) throw app.httpErrors.internalServerError(error.message);
     return { tasks: data ?? [] };
+  });
+
+  app.get<{ Params: { id: string } }>('/api/tasks/:id', async (req, reply) => {
+    const { data, error } = await req.supabase!
+      .from('tasks')
+      .select('*, project:projects(id, name, color)')
+      .eq('id', req.params.id)
+      .maybeSingle();
+    if (error) throw app.httpErrors.internalServerError(error.message);
+    if (!data) return reply.code(404).send({ error: 'not_found' });
+    return data;
   });
 
   app.post('/api/tasks', async (req, reply) => {

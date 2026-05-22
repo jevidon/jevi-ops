@@ -51,10 +51,14 @@ const EnvSchema = z.object({
   // Default Whisper model. whisper-1 is fine; reserved for future override.
   OPENAI_WHISPER_MODEL: z.string().default('whisper-1'),
 
-  // Google OAuth — Phase 1 (Calendar) + Phase 2 (Gmail, Drive).
+  // Google OAuth — Phase 1 (Calendar) + Phase 2 (Gmail, Drive). Optional at
+  // boot; runtime checks enforce presence when the user tries to connect.
   GOOGLE_OAUTH_CLIENT_ID: z.string().optional(),
   GOOGLE_OAUTH_CLIENT_SECRET: z.string().optional(),
   GOOGLE_OAUTH_REDIRECT_URI: z.string().url().optional(),
+  // Where to send the user after a successful OAuth callback. Defaults to
+  // the web app's settings page.
+  WEB_APP_URL: z.string().url().default('http://localhost:3000'),
 });
 
 const parsed = EnvSchema.safeParse(process.env);

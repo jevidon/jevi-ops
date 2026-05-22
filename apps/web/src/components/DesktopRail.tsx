@@ -8,11 +8,12 @@ import { signOutAction } from '@/app/sign-in/actions';
 // tabs list but presented vertically with active-tab indication on the left
 // edge. Hidden on mobile (BottomTabBar takes over).
 
+// Tasks replaces Content in the primary nav until Content's pipeline UI lands.
 const TABS = [
   { href: '/today', label: 'Today' },
-  { href: '/domains', label: 'Domains' },
+  { href: '/tasks', label: 'Tasks' },
   { href: '/projects', label: 'Projects' },
-  { href: '/content', label: 'Content' },
+  { href: '/domains', label: 'Domains' },
   { href: '/people', label: 'People' },
   { href: '/library', label: 'Library' },
 ] as const;
@@ -58,6 +59,18 @@ export function DesktopRail({ email }: { email?: string }) {
           })}
         </ul>
       </nav>
+
+      {/* Settings link */}
+      <div className="border-t border-line">
+        <Link
+          href="/settings"
+          className={`block px-6 py-3 font-mono text-[10px] uppercase tracking-wider transition-colors ${
+            pathname === '/settings' ? 'text-ink' : 'text-ink-3 hover:text-ink-2'
+          }`}
+        >
+          Settings
+        </Link>
+      </div>
 
       {/* Account footer */}
       {email && (

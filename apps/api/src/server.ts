@@ -1,4 +1,5 @@
 import Fastify from 'fastify';
+import cookie from '@fastify/cookie';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import multipart from '@fastify/multipart';
@@ -11,6 +12,8 @@ import { taskRoutes } from './routes/tasks.js';
 import { projectRoutes } from './routes/projects.js';
 import { domainRoutes } from './routes/domains.js';
 import { captureRoutes } from './routes/capture.js';
+import { googleAuthRoutes } from './routes/google-auth.js';
+import { calendarRoutes } from './routes/calendar.js';
 
 export async function buildServer() {
   const app = Fastify({
@@ -30,6 +33,7 @@ export async function buildServer() {
     credentials: true,
   });
   await app.register(sensible);
+  await app.register(cookie);
   await app.register(multipart, {
     // Whisper's max upload is 25 MB. Cap matches.
     limits: { fileSize: 25 * 1024 * 1024 },
@@ -42,6 +46,8 @@ export async function buildServer() {
   await app.register(projectRoutes);
   await app.register(domainRoutes);
   await app.register(captureRoutes);
+  await app.register(googleAuthRoutes);
+  await app.register(calendarRoutes);
 
   app.get('/', async () => ({
     name: 'jerad-ops/api',

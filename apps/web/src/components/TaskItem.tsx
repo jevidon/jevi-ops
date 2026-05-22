@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import type { Task } from '@jerad-ops/shared';
 import { toggleTaskDoneAction, toggleTop3Action } from '@/app/(authed)/today/actions';
 import { todayIsoDate } from '@/lib/today';
@@ -5,19 +6,28 @@ import { todayIsoDate } from '@/lib/today';
 // One task row. Two forms (checkbox + star) so each interaction is a single
 // POST. Server actions revalidate /today, so the UI refreshes after every
 // click without client-side state.
+//
+// Props
+//   - showStar:    render the Top 3 star toggle (default true; off in
+//                  "Completed today" and Project detail contexts)
+//   - showProject: render the linked project label (default true; off when
+//                  the row is already on a project's detail page)
 
 export function TaskItem({
   task,
   showStar = true,
+  showProject = true,
 }: {
   task: Task;
   showStar?: boolean;
+  showProject?: boolean;
 }) {
   const isDone = task.status === 'done';
   const isTop3 = Boolean(task.top3_for_date);
   const dueLabel = task.due_date ? formatDueLabel(task.due_date) : null;
   const isOverdue = dueLabel?.kind === 'overdue';
   const isTodayDue = dueLabel?.kind === 'today';
+  const project = showProject ? task.project : null;
 
   return (
     <div className="flex items-start gap-3 py-2 group">
@@ -47,20 +57,40 @@ export function TaskItem({
       </form>
 
       <div className="flex-1 min-w-0">
-        <div
-          className={`font-sans text-[14px] leading-snug ${
+        <Link
+          href={`/tasks/${task.id}`}
+          className={`block font-sans text-[14px] leading-snug hover:text-accent transition-colors ${
             isDone ? 'text-ink-3 line-through decoration-ink-3/60' : 'text-ink'
           }`}
         >
           {task.title}
-        </div>
-        {dueLabel && !isDone && (
-          <div
-            className={`mt-0.5 font-mono text-[10px] uppercase tracking-wider ${
-              isOverdue ? 'text-accent' : isTodayDue ? 'text-ink-2' : 'text-ink-3'
-            }`}
-          >
-            {dueLabel.text}
+        </Link>
+        {(project || (dueLabel && !isDone)) && (
+          <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5">
+            {project && (
+              <Link
+                href={`/projects/${project.id}`}
+                className="inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider text-ink-3 hover:text-ink-2 transition-colors"
+              >
+                {project.color && (
+                  <span
+                    className="h-2 w-2 rounded-full shrink-0"
+                    style={{ backgroundColor: project.color }}
+                    aria-hidden
+                  />
+                )}
+                {project.name}
+              </Link>
+            )}
+            {dueLabel && !isDone && (
+              <span
+                className={`font-mono text-[10px] uppercase tracking-wider ${
+                  isOverdue ? 'text-accent' : isTodayDue ? 'text-ink-2' : 'text-ink-3'
+                }`}
+              >
+                {dueLabel.text}
+              </span>
+            )}
           </div>
         )}
       </div>

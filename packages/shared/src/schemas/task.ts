@@ -26,6 +26,12 @@ export const TaskSchema = z.object({
   created_at: z.string().datetime({ offset: true }),
   completed_at: z.string().datetime({ offset: true }).nullable().optional(),
   updated_at: z.string().datetime({ offset: true }),
+  // Optional join — present when API returns project metadata alongside.
+  project: z.object({
+    id: z.string().uuid(),
+    name: z.string(),
+    color: z.string().nullable().optional(),
+  }).nullable().optional(),
 });
 
 export const CreateTaskSchema = z.object({

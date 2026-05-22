@@ -3,12 +3,15 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
-// Six tabs per spec §4. Order matters — Today is home.
+// Spec §4 prescribed six tabs (Today, Domains, Projects, Content, People,
+// Library). Swapped Content → Tasks because Tasks is core to daily use and
+// Content has no UI yet (Phase 2 feature). Content is still reachable by
+// direct URL until its kanban + derivative spawn UI lands.
 const TABS = [
   { href: '/today', label: 'Today' },
-  { href: '/domains', label: 'Domains' },
+  { href: '/tasks', label: 'Tasks' },
   { href: '/projects', label: 'Projects' },
-  { href: '/content', label: 'Content' },
+  { href: '/domains', label: 'Domains' },
   { href: '/people', label: 'People' },
   { href: '/library', label: 'Library' },
 ] as const;

@@ -62,8 +62,43 @@ export { ApiError };
 // Typed helpers — one per known route. Add as new routes ship.
 import type { Task, Project, Domain } from '@jerad-ops/shared';
 
+// Project list/detail include relations the bare Project type doesn't.
+export interface Milestone {
+  id: string;
+  project_id: string;
+  title: string;
+  status: 'open' | 'done';
+  weight: number;
+  position: number;
+  completed_at: string | null;
+  created_at: string;
+}
+
+export interface ActivityLogEntry {
+  id: string;
+  project_id: string | null;
+  entry: string;
+  hours_logged: number | null;
+  logged_at: string;
+  source: string;
+}
+
+export interface ProjectListItem extends Project {
+  milestones?: Milestone[];
+  domain?: { id: string; name: string } | null;
+  color?: string | null;
+}
+
+export interface ProjectDetail {
+  project: Project & { domain?: { id: string; name: string } | null };
+  milestones: Milestone[];
+  tasks: Task[];
+  activity: ActivityLogEntry[];
+}
+
 export const tasksApi = {
   list: () => api.get<{ tasks: Task[] }>('/api/tasks'),
+  get: (id: string) => api.get<Task>(`/api/tasks/${id}`),
   create: (body: Partial<Task> & { title: string }) =>
     api.post<Task>('/api/tasks', body),
   update: (id: string, body: Partial<Task>) =>
@@ -72,7 +107,8 @@ export const tasksApi = {
 };
 
 export const projectsApi = {
-  list: () => api.get<{ projects: Project[] }>('/api/projects'),
+  list: () => api.get<{ projects: ProjectListItem[] }>('/api/projects'),
+  get: (id: string) => api.get<ProjectDetail>(`/api/projects/${id}`),
 };
 
 export const domainsApi = {
@@ -106,4 +142,53 @@ export const captureApi = {
       body: formData,
       json: false,
     }),
+};
+
+// ─── Google Calendar ─────────────────────────────────────────────────────
+
+export interface CalendarEvent {
+  id: string;
+  google_event_id: string | null;
+  title: string;
+  description: string | null;
+  start_at: string;
+  end_at: string;
+  all_day: boolean;
+  location: string | null;
+  source: 'google' | 'created_here';
+}
+
+export interface GoogleStatus {
+  configured: boolean;
+  connected: boolean;
+  last_synced_at: string | null;
+  scope: string | null;
+}
+
+export const calendarApi = {
+  upcoming: (limit = 4) =>
+    api.get<{ events: CalendarEvent[] }>(`/api/calendar/upcoming?limit=${limit}`),
+  list: (opts?: { from?: string; to?: string }) => {
+    const qs = new URLSearchParams();
+    if (opts?.from) qs.set('from', opts.from);
+    if (opts?.to) qs.set('to', opts.to);
+    const q = qs.toString();
+    return api.get<{ events: CalendarEvent[]; range: { from: string; to: string } }>(
+      `/api/calendar/events${q ? `?${q}` : ''}`,
+    );
+  },
+  pull: () =>
+    api.post<{
+      status: string;
+      events_fetched: number;
+      events_upserted: number;
+      events_deleted: number;
+      orphans_pushed: number;
+      orphans_failed: number;
+    }>('/api/sync/calendar/pull'),
+};
+
+export const googleApi = {
+  status: () => api.get<GoogleStatus>('/api/auth/google/status'),
+  disconnect: () => api.post<{ status: string }>('/api/auth/google/disconnect'),
 };

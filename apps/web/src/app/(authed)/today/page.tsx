@@ -2,7 +2,7 @@ import { ScreenHeader } from '@/components/ScreenHeader';
 import { AccountChip } from '@/components/AccountChip';
 import { TaskItem } from '@/components/TaskItem';
 import { AddTaskForm } from './add-task-form';
-import { tasksApi, ApiError } from '@/lib/api';
+import { tasksApi, calendarApi, ApiError, type CalendarEvent } from '@/lib/api';
 import { todayIsoDate, isToday } from '@/lib/today';
 import type { Task } from '@jerad-ops/shared';
 
@@ -34,15 +34,36 @@ function splitTasks(tasks: Task[]) {
 
   const top3Ids = new Set(top3.map((t) => t.id));
 
+  // Inbox sort tiers (Todoist/Reminders-style):
+  //   1. Overdue (past dates, ascending — oldest first so most-overdue at top)
+  //   2. Due today
+  //   3. No due date (most recently created first)
+  //   4. Future due (ascending — tomorrow first)
+  // The motivation: tomorrow's task shouldn't dominate today's view; it
+  // sits below the "do whenever" pile so you only see it after dealing
+  // with everything immediate.
+  const tier = (t: Task): number => {
+    if (!t.due_date) return 2;
+    if (t.due_date < today) return 0;  // overdue
+    if (t.due_date === today) return 1;  // today
+    return 3;  // future
+  };
   const inbox = open
     .filter((t) => !top3Ids.has(t.id))
     .sort((a, b) => {
-      const aDue = a.due_date ?? null;
-      const bDue = b.due_date ?? null;
-      if (aDue && bDue) return aDue.localeCompare(bDue);
-      if (aDue) return -1;
-      if (bDue) return 1;
-      return b.created_at.localeCompare(a.created_at);
+      const ta = tier(a);
+      const tb = tier(b);
+      if (ta !== tb) return ta - tb;
+
+      switch (ta) {
+        case 0:  // overdue — oldest first
+        case 3:  // future — soonest first
+          return (a.due_date ?? '').localeCompare(b.due_date ?? '');
+        case 1:  // today — most recently created (newest first)
+        case 2:  // undated — most recently created
+          return b.created_at.localeCompare(a.created_at);
+      }
+      return 0;
     });
 
   const doneToday = tasks
@@ -54,13 +75,23 @@ function splitTasks(tasks: Task[]) {
 
 export default async function TodayPage() {
   let tasks: Task[] = [];
+  let events: CalendarEvent[] = [];
   let errorMessage: string | null = null;
 
-  try {
-    const res = await tasksApi.list();
-    tasks = res.tasks;
-  } catch (err) {
+  // Fetch tasks + upcoming events in parallel. Calendar may fail (Google not
+  // connected yet), which is non-fatal — task list is the priority.
+  const [taskRes, eventRes] = await Promise.allSettled([
+    tasksApi.list(),
+    calendarApi.upcoming(4),
+  ]);
+  if (taskRes.status === 'fulfilled') {
+    tasks = taskRes.value.tasks;
+  } else {
+    const err = taskRes.reason;
     errorMessage = err instanceof ApiError ? `API ${err.status}` : (err as Error).message;
+  }
+  if (eventRes.status === 'fulfilled') {
+    events = eventRes.value.events;
   }
 
   const { top3, inbox, doneToday } = splitTasks(tasks);
@@ -93,9 +124,27 @@ export default async function TodayPage() {
             )}
           </Section>
 
-          <Section label="Up next">
-            <EventRow time="—:—" title="No events synced" subtle />
-            <Hint>Connect Google Calendar to populate events.</Hint>
+          <Section
+            label="Up next"
+            actionHref={events.length > 0 ? '/calendar' : undefined}
+            actionLabel="View all"
+          >
+            {events.length === 0 ? (
+              <>
+                <EventRow time="—:—" title="No events" subtle />
+                <Hint>Connect Google Calendar in Settings.</Hint>
+              </>
+            ) : (
+              events.map((e) => (
+                <EventRow
+                  key={e.id}
+                  time={formatEventTime(e)}
+                  title={e.title}
+                  location={e.location}
+                  createdHere={e.source === 'created_here'}
+                />
+              ))
+            )}
           </Section>
 
           <Section label={`All open${inbox.length > 0 ? ` · ${inbox.length}` : ''}`}>
@@ -164,24 +213,91 @@ export default async function TodayPage() {
   );
 }
 
-function Section({ label, children }: { label: string; children: React.ReactNode }) {
+function Section({
+  label,
+  children,
+  actionHref,
+  actionLabel,
+}: {
+  label: string;
+  children: React.ReactNode;
+  actionHref?: string;
+  actionLabel?: string;
+}) {
   return (
     <section className="px-5 lg:px-0 pt-6">
-      <div className="eyebrow pb-2 border-b border-line mb-3">{label}</div>
+      <div className="eyebrow pb-2 border-b border-line mb-3 flex items-center justify-between">
+        <span>{label}</span>
+        {actionHref && actionLabel && (
+          <a
+            href={actionHref}
+            className="text-ink-3 hover:text-ink-2 normal-case tracking-normal transition-colors"
+          >
+            {actionLabel} →
+          </a>
+        )}
+      </div>
       {children}
     </section>
   );
 }
 
-function EventRow({ time, title, subtle }: { time: string; title: string; subtle?: boolean }) {
+function EventRow({
+  time,
+  title,
+  location,
+  subtle,
+  createdHere,
+}: {
+  time: string;
+  title: string;
+  location?: string | null;
+  subtle?: boolean;
+  createdHere?: boolean;
+}) {
   return (
-    <div className="flex items-baseline gap-4 py-2">
-      <span className="font-mono text-[12px] text-ink-3 w-12">{time}</span>
-      <span className={`font-sans text-[14px] ${subtle ? 'text-ink-3 italic' : 'text-ink'}`}>
-        {title}
-      </span>
+    <div className="flex items-start gap-4 py-2">
+      <span className="font-mono text-[12px] text-ink-3 w-14 pt-0.5 tabular-nums">{time}</span>
+      <div className="flex-1 min-w-0">
+        <div className={`font-sans text-[14px] leading-snug ${subtle ? 'text-ink-3 italic' : 'text-ink'}`}>
+          {title}
+        </div>
+        {location && (
+          <div className="font-sans text-[11px] text-ink-3 mt-0.5 truncate">{location}</div>
+        )}
+      </div>
+      {createdHere && (
+        <span
+          className="mt-1.5 h-1.5 w-1.5 rounded-full bg-accent shrink-0"
+          title="Created here"
+          aria-hidden
+        />
+      )}
     </div>
   );
+}
+
+function formatEventTime(e: CalendarEvent): string {
+  if (e.all_day) return 'all day';
+  const today = todayIsoDate();
+  const startDate = new Date(e.start_at);
+  const startDay = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Denver',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(startDate);
+  const time = startDate.toLocaleTimeString('en-US', {
+    timeZone: 'America/Denver',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+  // Show a day prefix for events that aren't today (e.g. "Fri 2:00 PM").
+  if (startDay !== today) {
+    const day = startDate.toLocaleDateString('en-US', { timeZone: 'America/Denver', weekday: 'short' });
+    return `${day} ${time}`;
+  }
+  return time;
 }
 
 function Hint({ children }: { children: React.ReactNode }) {
