@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# XCloud's Start Command runs this. We re-establish PATH because the start
-# process is a fresh shell that doesn't inherit env from the deploy script.
-# Same pattern as scripts/start-web.sh.
+# Start the Fastify API in production. We use tsx (an enhanced Node runtime
+# that handles .ts imports natively) so we can consume @jerad-ops/shared's
+# TypeScript source without a separate compile step. Calls ./node_modules/.bin/tsx
+# directly to avoid depending on pnpm being on PATH at PM2 start time.
 set -e
-export PATH="$HOME/.local/bin:$PATH"
-exec pnpm start:api
+cd "$(dirname "$0")/../apps/api"
+exec ./node_modules/.bin/tsx src/server.ts

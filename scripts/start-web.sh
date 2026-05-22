@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# XCloud's Start Command runs this. We re-establish PATH because the start
-# process is a fresh shell that doesn't inherit env from the deploy script.
-# Same pattern as scripts/start-api.sh.
+# Start the Next.js production server. We call ./node_modules/.bin/next
+# directly (pnpm-installed shim) instead of going through pnpm, because
+# XCloud's PM2 launches this from a fresh shell that doesn't have pnpm on
+# PATH. Calling the binary directly removes that dependency.
 set -e
-export PATH="$HOME/.local/bin:$PATH"
-exec pnpm start:web
+cd "$(dirname "$0")/../apps/web"
+exec ./node_modules/.bin/next start -p 3000
