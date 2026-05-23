@@ -65,6 +65,7 @@ export default async function ProjectDetailPage({
   }
 
   const { project, milestones, tasks, activity, checklist } = detail;
+  const isRetainer = project.engagement_type === 'retainer';
   const openTasks = tasks.filter((t) => t.status === 'open');
   const doneTasks = tasks
     .filter((t) => t.status === 'done')
@@ -73,7 +74,10 @@ export default async function ProjectDetailPage({
 
   const hoursLogged = Number(project.hours_logged ?? 0);
   const quoted = project.quoted_hours != null ? Number(project.quoted_hours) : null;
+  const hoursThisMonth = Number(detail.hours_this_month ?? 0);
+  const hoursLastMonth = Number(detail.hours_last_month ?? 0);
   const meta = [
+    isRetainer ? 'Retainer' : null,
     project.domain?.name,
     project.status !== 'active' ? STATUS_LABELS[project.status] : null,
   ]
@@ -113,27 +117,54 @@ export default async function ProjectDetailPage({
         <ProjectColorPicker projectId={project.id} current={project.color ?? null} />
       </div>
 
-      {/* Hours summary */}
-      <Section label="Hours">
-        <div className="flex items-baseline gap-3">
-          <span className="font-serif text-[28px] text-ink leading-none">
-            {hoursLogged.toFixed(1)}
-          </span>
-          {quoted != null && (
-            <>
-              <span className="font-mono text-[12px] text-ink-3">/</span>
-              <span className="font-serif text-[20px] text-ink-2">{quoted.toFixed(1)}</span>
-              <span className="font-mono text-[10px] uppercase tracking-wider text-ink-3">
-                quoted
-              </span>
-            </>
-          )}
-        </div>
-      </Section>
+      {/* Hours summary. Retainers lead with "this month" (the metric
+          that matters for monthly caps) and show cumulative + last
+          month as secondary context. Project-mode keeps the original
+          cumulative + quoted display. */}
+      {isRetainer ? (
+        <Section label="Hours · this month">
+          <div className="flex items-baseline gap-3 flex-wrap">
+            <span className="font-serif text-[28px] text-ink leading-none">
+              {hoursThisMonth.toFixed(1)}
+            </span>
+            {quoted != null && (
+              <>
+                <span className="font-mono text-[12px] text-ink-3">/</span>
+                <span className="font-serif text-[20px] text-ink-2">{quoted.toFixed(1)}</span>
+                <span className="font-mono text-[10px] uppercase tracking-wider text-ink-3">
+                  monthly cap
+                </span>
+              </>
+            )}
+          </div>
+          <div className="mt-2 font-mono text-[10px] uppercase tracking-wider text-ink-3 flex flex-wrap gap-x-4">
+            <span>Last month · {hoursLastMonth.toFixed(1)}h</span>
+            <span>All time · {hoursLogged.toFixed(1)}h</span>
+          </div>
+        </Section>
+      ) : (
+        <Section label="Hours">
+          <div className="flex items-baseline gap-3">
+            <span className="font-serif text-[28px] text-ink leading-none">
+              {hoursLogged.toFixed(1)}
+            </span>
+            {quoted != null && (
+              <>
+                <span className="font-mono text-[12px] text-ink-3">/</span>
+                <span className="font-serif text-[20px] text-ink-2">{quoted.toFixed(1)}</span>
+                <span className="font-mono text-[10px] uppercase tracking-wider text-ink-3">
+                  quoted
+                </span>
+              </>
+            )}
+          </div>
+        </Section>
+      )}
 
-      {/* Milestones — always visible; the section itself shows an empty
-          state + add form when there are none. */}
-      <MilestonesSection projectId={project.id} milestones={milestones} />
+      {/* Milestones — hidden for retainers (no defined finish line). */}
+      {!isRetainer && (
+        <MilestonesSection projectId={project.id} milestones={milestones} />
+      )}
 
       {/* Open tasks — section header carries the "+ Add task" link so
           you can spin off real, due-dated, reminded tasks from anywhere
@@ -224,6 +255,7 @@ export default async function ProjectDetailPage({
                 domain_id: project.domain_id ?? '',
                 type: (project.type as '' | 'client' | 'internal' | 'content') ?? '',
                 status: project.status as 'active' | 'paused' | 'done' | 'archived',
+                engagement_type: project.engagement_type ?? 'project',
                 quoted_hours: project.quoted_hours != null ? String(project.quoted_hours) : '',
                 start_date: project.start_date ?? '',
                 target_date: project.target_date ?? '',

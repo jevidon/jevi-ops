@@ -41,6 +41,7 @@ export default async function NewProjectPage({
             domain_id: preDomainId ?? '',
             type: '',
             status: 'active',
+            engagement_type: 'project',
             quoted_hours: '',
             start_date: '',
             target_date: '',

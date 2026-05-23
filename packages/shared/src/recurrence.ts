@@ -121,3 +121,73 @@ export function nextDueDate(params: {
   }
   return formatIsoDate(next);
 }
+
+// ─── Period-window helpers for recurring checklist items ──────────────
+//
+// A recurring checklist item is "currently done" if it was marked done
+// within the current period. The period start is rule-dependent:
+//   daily       → today at 00:00
+//   weekdays    → today at 00:00 if today is a weekday; else previous Monday
+//   weekly      → most recent Monday at 00:00
+//   biweekly    → same as weekly but the period is 14 days
+//   monthly     → 1st of this month at 00:00
+//   yearly      → Jan 1 of this year at 00:00
+//
+// "now" is passed in so the caller controls the timezone interpretation;
+// the helpers do plain UTC math on the timestamp the caller gives them.
+
+export function periodStart(
+  rule: RecurrencePattern,
+  nowMs: number,
+): number {
+  const d = new Date(nowMs);
+  const y = d.getUTCFullYear();
+  const m = d.getUTCMonth();
+  const day = d.getUTCDate();
+
+  switch (rule) {
+    case 'daily':
+      return Date.UTC(y, m, day);
+    case 'weekdays': {
+      const dow = d.getUTCDay(); // 0=Sun..6=Sat
+      // Saturday → most recent Friday. Sunday → previous Friday.
+      // Otherwise → today.
+      if (dow === 6) return Date.UTC(y, m, day - 1);
+      if (dow === 0) return Date.UTC(y, m, day - 2);
+      return Date.UTC(y, m, day);
+    }
+    case 'weekly': {
+      // Monday-anchored week.
+      const dow = d.getUTCDay();
+      const daysBack = dow === 0 ? 6 : dow - 1;
+      return Date.UTC(y, m, day - daysBack);
+    }
+    case 'biweekly': {
+      // Same anchor as weekly; the "period" is the latest 14-day window.
+      // We approximate by going back to the most recent Monday and then
+      // back another 7 days only if the most-recent-Monday is < 14 days
+      // ago. Simpler: just use a 14-day rolling window ending at "now".
+      return nowMs - 14 * 86_400_000;
+    }
+    case 'monthly':
+      return Date.UTC(y, m, 1);
+    case 'yearly':
+      return Date.UTC(y, 0, 1);
+  }
+}
+
+// Whether a recurring checklist item should render as "currently done":
+// true if it has a done_at within the current period AND done is true.
+// For non-recurring items the caller can just check `done`; this helper
+// is only meaningful when a recurrence rule is set.
+export function isCurrentlyDoneRecurring(
+  done: boolean,
+  doneAtIso: string | null | undefined,
+  rule: RecurrencePattern,
+  nowMs: number = Date.now(),
+): boolean {
+  if (!done || !doneAtIso) return false;
+  const doneMs = Date.parse(doneAtIso);
+  if (Number.isNaN(doneMs)) return false;
+  return doneMs >= periodStart(rule, nowMs);
+}

@@ -125,8 +125,15 @@ function ReadRow({
     minute: '2-digit',
   });
   const hours = Number(entry.hours_logged ?? 0);
+  const isUpdate = entry.kind === 'update';
   return (
-    <li className="flex items-start gap-4 py-2.5 border-b border-line/40 last:border-b-0 group">
+    <li
+      className={`flex items-start gap-4 py-2.5 border-b border-line/40 last:border-b-0 group ${
+        // Update entries get a rust left border so wins/events stand
+        // out when scanning the timeline.
+        isUpdate ? 'border-l-2 border-l-accent pl-3 -ml-3' : ''
+      }`}
+    >
       {/* The timestamp doubles as the edit affordance — clicking the
           time is the most natural way to ask "let me change when this
           happened." */}
@@ -139,6 +146,11 @@ function ReadRow({
         {when}
       </button>
       <div className="flex-1 min-w-0">
+        {isUpdate && (
+          <div className="font-mono text-[10px] uppercase tracking-wider text-accent mb-0.5">
+            📌 Update
+          </div>
+        )}
         <button
           type="button"
           onClick={onEdit}
@@ -146,7 +158,7 @@ function ReadRow({
         >
           {entry.entry}
         </button>
-        {hours > 0 && (
+        {hours > 0 && !isUpdate && (
           <div className="mt-0.5 font-mono text-[10px] uppercase tracking-wider text-ink-3">
             {hours.toFixed(2)}h
             {entry.source === 'voice' && ' · voice'}

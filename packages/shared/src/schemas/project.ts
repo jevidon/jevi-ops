@@ -2,6 +2,8 @@ import { z } from 'zod';
 
 export const ProjectStatusSchema = z.enum(['active', 'paused', 'done', 'archived']);
 export const ProjectTypeSchema = z.enum(['client', 'internal', 'content']);
+export const EngagementTypeSchema = z.enum(['project', 'retainer']);
+export type EngagementType = z.infer<typeof EngagementTypeSchema>;
 
 // Curated palette. Picked to read well on the warm linen background
 // (#F6F2EA). Keep this list short — paradox of choice — and stable so
@@ -32,6 +34,7 @@ export const ProjectSchema = z.object({
   start_date: z.string().date().nullable().optional(),
   target_date: z.string().date().nullable().optional(),
   color: HexColorSchema.nullable().optional(),
+  engagement_type: EngagementTypeSchema.default('project'),
   completed_at: z.string().datetime({ offset: true }).nullable().optional(),
   created_at: z.string().datetime({ offset: true }),
   updated_at: z.string().datetime({ offset: true }),
@@ -51,6 +54,7 @@ export const CreateProjectSchema = z.object({
   start_date: z.string().date().nullable().optional(),
   target_date: z.string().date().nullable().optional(),
   color: HexColorSchema.nullable().optional(),
+  engagement_type: EngagementTypeSchema.optional(),
 });
 
 export const UpdateProjectSchema = CreateProjectSchema.partial().extend({

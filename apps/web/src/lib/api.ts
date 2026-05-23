@@ -81,6 +81,10 @@ export interface ActivityLogEntry {
   hours_logged: number | null;
   logged_at: string;
   source: string;
+  // 'work' (default — hours-loggable effort) or 'update' (no hours;
+  // wins, status notes, events). Older rows pre-migration 0018 may be
+  // missing this; treat undefined as 'work'.
+  kind?: 'work' | 'update';
 }
 
 export interface ProjectListItem extends Project {
@@ -96,6 +100,7 @@ export interface ProjectChecklistItem {
   title: string;
   done: boolean;
   done_at: string | null;
+  recurrence_rule: 'daily' | 'weekdays' | 'weekly' | 'biweekly' | 'monthly' | 'yearly' | null;
   created_at: string;
   updated_at: string;
 }
@@ -106,6 +111,8 @@ export interface ProjectDetail {
   tasks: Task[];
   activity: ActivityLogEntry[];
   checklist: ProjectChecklistItem[];
+  hours_this_month: number;
+  hours_last_month: number;
 }
 
 export const tasksApi = {
@@ -125,6 +132,8 @@ export const tasksApi = {
   remove: (id: string) => api.delete(`/api/tasks/${id}`),
 };
 
+export type EngagementType = 'project' | 'retainer';
+
 export interface ProjectCreate {
   name: string;
   description?: string | null;
@@ -135,6 +144,7 @@ export interface ProjectCreate {
   start_date?: string | null;
   target_date?: string | null;
   color?: string | null;
+  engagement_type?: EngagementType;
 }
 
 export interface ProjectUpdate extends Partial<ProjectCreate> {
@@ -159,12 +169,23 @@ export const projectsApi = {
       api.delete(`/api/projects/${projectId}/milestones/${milestoneId}`),
   },
   checklist: {
-    add: (projectId: string, body: { title: string; position?: number }) =>
-      api.post<ProjectChecklistItem>(`/api/projects/${projectId}/checklist`, body),
+    add: (
+      projectId: string,
+      body: {
+        title: string;
+        position?: number;
+        recurrence_rule?: 'daily' | 'weekdays' | 'weekly' | 'biweekly' | 'monthly' | 'yearly' | null;
+      },
+    ) => api.post<ProjectChecklistItem>(`/api/projects/${projectId}/checklist`, body),
     update: (
       projectId: string,
       itemId: string,
-      body: { title?: string; done?: boolean; position?: number },
+      body: {
+        title?: string;
+        done?: boolean;
+        position?: number;
+        recurrence_rule?: 'daily' | 'weekdays' | 'weekly' | 'biweekly' | 'monthly' | 'yearly' | null;
+      },
     ) => api.patch<ProjectChecklistItem>(`/api/projects/${projectId}/checklist/${itemId}`, body),
     remove: (projectId: string, itemId: string) =>
       api.delete(`/api/projects/${projectId}/checklist/${itemId}`),
@@ -172,12 +193,12 @@ export const projectsApi = {
   activity: {
     add: (
       projectId: string,
-      body: { entry: string; hours?: number | null; logged_at?: string },
+      body: { entry: string; hours?: number | null; logged_at?: string; kind?: 'work' | 'update' },
     ) => api.post<ActivityLogEntry>(`/api/projects/${projectId}/activity`, body),
     update: (
       projectId: string,
       entryId: string,
-      body: { entry?: string; hours?: number | null; logged_at?: string },
+      body: { entry?: string; hours?: number | null; logged_at?: string; kind?: 'work' | 'update' },
     ) => api.patch<ActivityLogEntry>(`/api/projects/${projectId}/activity/${entryId}`, body),
     remove: (projectId: string, entryId: string) =>
       api.delete(`/api/projects/${projectId}/activity/${entryId}`),

@@ -8,6 +8,7 @@ export type SaveResult = { ok: true } | { ok: false; error: string };
 
 const VALID_TYPES = ['client', 'internal', 'content'] as const;
 const VALID_STATUSES = ['active', 'paused', 'done', 'archived'] as const;
+const VALID_ENGAGEMENTS = ['project', 'retainer'] as const;
 
 function readFields(formData: FormData): {
   name: string;
@@ -15,6 +16,7 @@ function readFields(formData: FormData): {
   domain_id: string | null;
   type: 'client' | 'internal' | 'content' | null;
   status: 'active' | 'paused' | 'done' | 'archived' | null;
+  engagement_type: 'project' | 'retainer';
   quoted_hours: number | null;
   start_date: string | null;
   target_date: string | null;
@@ -31,6 +33,10 @@ function readFields(formData: FormData): {
   const status = (VALID_STATUSES as readonly string[]).includes(rawStatus)
     ? (rawStatus as 'active' | 'paused' | 'done' | 'archived')
     : null;
+  const rawEngagement = String(formData.get('engagement_type') ?? '').trim();
+  const engagement_type = (VALID_ENGAGEMENTS as readonly string[]).includes(rawEngagement)
+    ? (rawEngagement as 'project' | 'retainer')
+    : 'project';
   const quotedRaw = String(formData.get('quoted_hours') ?? '').trim();
   const quoted_hours = quotedRaw && !Number.isNaN(parseFloat(quotedRaw))
     ? parseFloat(quotedRaw)
@@ -39,7 +45,7 @@ function readFields(formData: FormData): {
   const target_date = String(formData.get('target_date') ?? '').trim() || null;
   const color = String(formData.get('color') ?? '').trim() || null;
 
-  return { name, description, domain_id, type, status, quoted_hours, start_date, target_date, color };
+  return { name, description, domain_id, type, status, engagement_type, quoted_hours, start_date, target_date, color };
 }
 
 export async function createProjectAction(
@@ -54,6 +60,7 @@ export async function createProjectAction(
     description: fields.description,
     domain_id: fields.domain_id,
     type: fields.type,
+    engagement_type: fields.engagement_type,
     quoted_hours: fields.quoted_hours,
     start_date: fields.start_date,
     target_date: fields.target_date,
@@ -90,6 +97,7 @@ export async function updateProjectAction(
     description: fields.description,
     domain_id: fields.domain_id,
     type: fields.type,
+    engagement_type: fields.engagement_type,
     quoted_hours: fields.quoted_hours,
     start_date: fields.start_date,
     target_date: fields.target_date,

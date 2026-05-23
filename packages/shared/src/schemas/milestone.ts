@@ -40,6 +40,13 @@ export const UpdateMilestoneSchema = z.object({
 // (which have due dates, reminders, statuses). These are the ad-hoc
 // granular TODOs inside a project — same shape as content_checklist_items.
 
+// Same patterns as recurring tasks. When set, "currently done" is
+// derived from done_at + the period start — the UI shows the item as
+// unchecked once the period rolls over without any cron involvement.
+const ProjectChecklistRecurrenceSchema = z.enum([
+  'daily', 'weekdays', 'weekly', 'biweekly', 'monthly', 'yearly',
+]);
+
 export const ProjectChecklistItemSchema = z.object({
   id: z.string().uuid(),
   project_id: z.string().uuid(),
@@ -47,6 +54,7 @@ export const ProjectChecklistItemSchema = z.object({
   title: z.string().min(1),
   done: z.boolean(),
   done_at: z.string().datetime({ offset: true }).nullable().optional(),
+  recurrence_rule: ProjectChecklistRecurrenceSchema.nullable().optional(),
   created_at: z.string().datetime({ offset: true }),
   updated_at: z.string().datetime({ offset: true }),
 });
@@ -54,10 +62,12 @@ export const ProjectChecklistItemSchema = z.object({
 export const CreateProjectChecklistItemSchema = z.object({
   title: z.string().min(1),
   position: z.number().int().optional(),
+  recurrence_rule: ProjectChecklistRecurrenceSchema.nullable().optional(),
 });
 
 export const UpdateProjectChecklistItemSchema = z.object({
   title: z.string().min(1).optional(),
   done: z.boolean().optional(),
   position: z.number().int().optional(),
+  recurrence_rule: ProjectChecklistRecurrenceSchema.nullable().optional(),
 });

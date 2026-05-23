@@ -46,12 +46,49 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
     if (activityRes.error) throw app.httpErrors.internalServerError(activityRes.error.message);
     if (checklistRes.error) throw app.httpErrors.internalServerError(checklistRes.error.message);
 
+    // Roll up this-month / last-month hours from activity_log. Calendar
+    // months in America/Denver; cheap to compute client-side from the
+    // already-fetched activity rows so we don't issue a second query.
+    type ActivityRow = {
+      hours_logged: number | string | null;
+      logged_at: string;
+      kind?: string | null;
+    };
+    const activity = (activityRes.data ?? []) as ActivityRow[];
+    const denverTodayParts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Denver',
+      year: 'numeric', month: '2-digit', day: '2-digit',
+    }).formatToParts(new Date());
+    const gP = (t: string) => denverTodayParts.find((p) => p.type === t)?.value ?? '';
+    const thisYear = Number(gP('year'));
+    const thisMonth = Number(gP('month'));
+    const thisMonthStart = new Date(Date.UTC(thisYear, thisMonth - 1, 1)).toISOString();
+    const lastMonthStart = new Date(Date.UTC(
+      thisMonth === 1 ? thisYear - 1 : thisYear,
+      thisMonth === 1 ? 11 : thisMonth - 2,
+      1,
+    )).toISOString();
+    const lastMonthEnd = thisMonthStart;
+
+    let hoursThisMonth = 0;
+    let hoursLastMonth = 0;
+    for (const a of activity) {
+      const h = Number(a.hours_logged ?? 0);
+      // 'update' entries don't carry hours; skip even if hours_logged
+      // somehow got populated.
+      if (a.kind === 'update' || h <= 0) continue;
+      if (a.logged_at >= thisMonthStart) hoursThisMonth += h;
+      else if (a.logged_at >= lastMonthStart && a.logged_at < lastMonthEnd) hoursLastMonth += h;
+    }
+
     return {
       project: projectRes.data,
       milestones: milestonesRes.data ?? [],
       tasks: tasksRes.data ?? [],
       activity: activityRes.data ?? [],
       checklist: checklistRes.data ?? [],
+      hours_this_month: Number(hoursThisMonth.toFixed(2)),
+      hours_last_month: Number(hoursLastMonth.toFixed(2)),
     };
   });
 
@@ -210,6 +247,7 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
           project_id: req.params.id,
           title: parsed.data.title,
           position,
+          recurrence_rule: parsed.data.recurrence_rule ?? null,
         })
         .select('*')
         .single();
@@ -264,16 +302,20 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
   // this is a single-user system. If it ever becomes multi-writer, swap
   // for an atomic RPC.
 
-  app.post<{ Params: { id: string }; Body: { entry?: string; hours?: number; logged_at?: string } }>(
+  app.post<{ Params: { id: string }; Body: { entry?: string; hours?: number; logged_at?: string; kind?: string } }>(
     '/api/projects/:id/activity',
     async (req, reply) => {
       const entry = String(req.body?.entry ?? '').trim();
       if (!entry) {
         return reply.code(400).send({ error: 'invalid_payload', details: { entry: ['required'] } });
       }
+      const kind = req.body?.kind === 'update' ? 'update' : 'work';
       const rawHours = req.body?.hours;
+      // Update entries don't carry hours by definition. Silently drop any
+      // hours the client sent rather than 400 — the form might leave the
+      // field populated when toggling kinds.
       const hours =
-        typeof rawHours === 'number' && Number.isFinite(rawHours) && rawHours >= 0
+        kind === 'work' && typeof rawHours === 'number' && Number.isFinite(rawHours) && rawHours >= 0
           ? rawHours
           : null;
 
@@ -281,6 +323,7 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
         project_id: req.params.id,
         entry,
         source: 'manual',
+        kind,
       };
       if (hours !== null) insert.hours_logged = hours;
       if (req.body?.logged_at) insert.logged_at = req.body.logged_at;
@@ -319,7 +362,7 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
 
   app.patch<{
     Params: { id: string; entryId: string };
-    Body: { entry?: string; hours?: number | null; logged_at?: string };
+    Body: { entry?: string; hours?: number | null; logged_at?: string; kind?: string };
   }>(
     '/api/projects/:id/activity/:entryId',
     async (req, reply) => {
@@ -359,6 +402,16 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
       }
       if (req.body?.logged_at) {
         update.logged_at = req.body.logged_at;
+      }
+      if (req.body?.kind === 'work' || req.body?.kind === 'update') {
+        update.kind = req.body.kind;
+        // Switching to update implies clearing hours; mirror the create
+        // path's "hours don't belong on updates" rule. Roll back the
+        // contribution to the project total.
+        if (req.body.kind === 'update' && existing.hours_logged) {
+          newHours = null;
+          update.hours_logged = null;
+        }
       }
       if (Object.keys(update).length === 0) {
         return reply.code(400).send({ error: 'empty_payload' });

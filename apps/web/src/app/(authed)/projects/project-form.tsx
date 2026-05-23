@@ -17,6 +17,7 @@ interface InitialValues {
   domain_id: string;
   type: '' | 'client' | 'internal' | 'content';
   status: 'active' | 'paused' | 'done' | 'archived';
+  engagement_type: 'project' | 'retainer';
   quoted_hours: string;   // input value is always string
   start_date: string;
   target_date: string;
@@ -74,6 +75,40 @@ export function ProjectForm({
             defaultValue={initial.description}
             className="w-full bg-transparent border border-line focus:border-ink-2 focus:outline-none p-2 font-sans text-[14px] text-ink resize-y"
           />
+        </Field>
+
+        {/* Engagement: project (bounded, has milestones) vs retainer
+            (ongoing, no milestones, monthly hours rollup). Drives the
+            project list section + detail page layout. */}
+        <Field label="Engagement">
+          <div className="flex gap-2">
+            <label className="flex-1">
+              <input
+                type="radio"
+                name="engagement_type"
+                value="project"
+                defaultChecked={initial.engagement_type === 'project'}
+                className="peer sr-only"
+              />
+              <div className="px-3 py-2 border border-line peer-checked:border-ink peer-checked:bg-surface-2/50 font-sans text-[13px] text-ink cursor-pointer transition-colors">
+                <div className="font-mono text-[10px] uppercase tracking-wider text-ink-3 mb-0.5">Project</div>
+                Bounded · milestones + target date
+              </div>
+            </label>
+            <label className="flex-1">
+              <input
+                type="radio"
+                name="engagement_type"
+                value="retainer"
+                defaultChecked={initial.engagement_type === 'retainer'}
+                className="peer sr-only"
+              />
+              <div className="px-3 py-2 border border-line peer-checked:border-ink peer-checked:bg-surface-2/50 font-sans text-[13px] text-ink cursor-pointer transition-colors">
+                <div className="font-mono text-[10px] uppercase tracking-wider text-ink-3 mb-0.5">Retainer</div>
+                Ongoing · monthly hours, no milestones
+              </div>
+            </label>
+          </div>
         </Field>
 
         <div className="grid grid-cols-2 gap-4">
@@ -135,14 +170,20 @@ export function ProjectForm({
           </Field>
         </div>
 
-        <Field label="Quoted hours (decimal OK)">
+        <Field
+          label={
+            initial.engagement_type === 'retainer'
+              ? 'Monthly hours cap (decimal OK)'
+              : 'Quoted hours (decimal OK)'
+          }
+        >
           <input
             type="number"
             step="0.25"
             min="0"
             name="quoted_hours"
             defaultValue={initial.quoted_hours}
-            placeholder="optional"
+            placeholder={initial.engagement_type === 'retainer' ? 'e.g. 20' : 'optional'}
             className="w-full bg-transparent border border-line focus:border-ink-2 focus:outline-none p-2 font-sans text-[14px] text-ink"
           />
         </Field>

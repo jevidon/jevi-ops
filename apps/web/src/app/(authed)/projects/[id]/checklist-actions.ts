@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { projectsApi, ApiError } from '@/lib/api';
+import { isRecurrencePattern } from '@jerad-ops/shared';
 
 // Server actions for the per-project ad-hoc checklist. Mirrors the
 // content-checklist actions in shape so the client section can use the
@@ -16,10 +17,12 @@ export async function addChecklistItemAction(
 ): Promise<SaveResult> {
   const projectId = String(formData.get('projectId') ?? '');
   const title = String(formData.get('title') ?? '').trim();
+  const rawRule = String(formData.get('recurrence_rule') ?? '').trim();
+  const recurrence_rule = isRecurrencePattern(rawRule) ? rawRule : null;
   if (!projectId) return { ok: false, error: 'Missing project id.' };
   if (!title) return { ok: false, error: 'Title required.' };
   try {
-    await projectsApi.checklist.add(projectId, { title });
+    await projectsApi.checklist.add(projectId, { title, recurrence_rule });
   } catch (err) {
     if (err instanceof ApiError) return { ok: false, error: `API ${err.status}` };
     return { ok: false, error: (err as Error).message };

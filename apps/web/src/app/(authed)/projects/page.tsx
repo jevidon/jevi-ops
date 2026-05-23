@@ -3,7 +3,9 @@ import { ScreenHeader } from '@/components/ScreenHeader';
 import { EmptyState } from '@/components/EmptyState';
 import { projectsApi, ApiError, type ProjectListItem } from '@/lib/api';
 
-// /projects — list view. Active projects first, then by most-recently-updated.
+// /projects — list view. Split into Active projects, Retainers, then
+// Paused / Done / Archived (collapsed). Retainers are kept separate
+// because their relevant metric is monthly usage, not cumulative.
 
 const STATUS_LABELS: Record<string, string> = {
   active: 'Active',
@@ -13,13 +15,35 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 function sortProjects(list: ProjectListItem[]): ProjectListItem[] {
-  const statusRank = (s: string) =>
-    s === 'active' ? 0 : s === 'paused' ? 1 : s === 'done' ? 2 : 3;
-  return [...list].sort((a, b) => {
-    const r = statusRank(a.status) - statusRank(b.status);
-    if (r !== 0) return r;
-    return (b.updated_at ?? '').localeCompare(a.updated_at ?? '');
-  });
+  return [...list].sort((a, b) =>
+    (b.updated_at ?? '').localeCompare(a.updated_at ?? ''),
+  );
+}
+
+interface GroupedProjects {
+  activeProjects: ProjectListItem[];
+  retainers: ProjectListItem[];
+  paused: ProjectListItem[];
+  done: ProjectListItem[];
+  archived: ProjectListItem[];
+}
+
+function group(list: ProjectListItem[]): GroupedProjects {
+  const g: GroupedProjects = {
+    activeProjects: [],
+    retainers: [],
+    paused: [],
+    done: [],
+    archived: [],
+  };
+  for (const p of list) {
+    if (p.status === 'paused') g.paused.push(p);
+    else if (p.status === 'done') g.done.push(p);
+    else if (p.status === 'archived') g.archived.push(p);
+    else if (p.engagement_type === 'retainer') g.retainers.push(p);
+    else g.activeProjects.push(p);
+  }
+  return g;
 }
 
 export default async function ProjectsPage() {
@@ -33,9 +57,16 @@ export default async function ProjectsPage() {
     errorMessage = err instanceof ApiError ? `API ${err.status}` : (err as Error).message;
   }
 
+  const grouped = group(projects);
+  const activeCount = grouped.activeProjects.length + grouped.retainers.length;
+
   return (
     <div>
-      <ScreenHeader eyebrow="Active work" title="Projects" meta={`${projects.length} total`} />
+      <ScreenHeader
+        eyebrow="Active work"
+        title="Projects"
+        meta={`${activeCount} active · ${projects.length} total`}
+      />
       <div className="hairline" />
 
       <div className="px-5 lg:px-0 pt-3 flex justify-end">
@@ -55,17 +86,72 @@ export default async function ProjectsPage() {
           body='Create one via voice ("start a project called Reviews v2.4 in Site Nitro") or via the API.'
         />
       ) : (
-        <ul>
-          {projects.map((p) => (
-            <ProjectRow key={p.id} project={p} />
-          ))}
-        </ul>
+        <div className="mt-2">
+          {grouped.activeProjects.length > 0 && (
+            <ProjectGroup label={`Active · ${grouped.activeProjects.length}`} projects={grouped.activeProjects} />
+          )}
+          {grouped.retainers.length > 0 && (
+            <ProjectGroup label={`Retainers · ${grouped.retainers.length}`} projects={grouped.retainers} />
+          )}
+          {grouped.paused.length > 0 && (
+            <CollapsedGroup label={`Paused · ${grouped.paused.length}`} projects={grouped.paused} />
+          )}
+          {grouped.done.length > 0 && (
+            <CollapsedGroup label={`Done · ${grouped.done.length}`} projects={grouped.done} />
+          )}
+          {grouped.archived.length > 0 && (
+            <CollapsedGroup label={`Archived · ${grouped.archived.length}`} projects={grouped.archived} />
+          )}
+        </div>
       )}
     </div>
   );
 }
 
+function ProjectGroup({
+  label,
+  projects,
+}: {
+  label: string;
+  projects: ProjectListItem[];
+}) {
+  return (
+    <section className="mt-4">
+      <div className="px-5 lg:px-0 eyebrow pb-2 border-b border-line">{label}</div>
+      <ul>
+        {projects.map((p) => (
+          <ProjectRow key={p.id} project={p} />
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function CollapsedGroup({
+  label,
+  projects,
+}: {
+  label: string;
+  projects: ProjectListItem[];
+}) {
+  return (
+    <section className="mt-4">
+      <details>
+        <summary className="px-5 lg:px-0 eyebrow pb-2 border-b border-line cursor-pointer list-none hover:text-ink-2 transition-colors">
+          {label}
+        </summary>
+        <ul>
+          {projects.map((p) => (
+            <ProjectRow key={p.id} project={p} />
+          ))}
+        </ul>
+      </details>
+    </section>
+  );
+}
+
 function ProjectRow({ project }: { project: ProjectListItem }) {
+  const isRetainer = project.engagement_type === 'retainer';
   const milestones = project.milestones ?? [];
   const doneCount = milestones.filter((m) => m.status === 'done').length;
   const totalCount = milestones.length;
@@ -107,17 +193,31 @@ function ProjectRow({ project }: { project: ProjectListItem }) {
 
         <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-[10px] uppercase tracking-wider text-ink-3">
           {project.domain?.name && <span>{project.domain.name}</span>}
-          <span>
-            {quoted != null
-              ? `${hoursLogged.toFixed(1)} / ${quoted.toFixed(1)}h`
-              : `${hoursLogged.toFixed(1)}h logged`}
-          </span>
-          {totalCount > 0 && (
+          {isRetainer ? (
+            // For retainers we don't have hours_this_month on the list
+            // endpoint (only the detail endpoint computes it). Surface
+            // cumulative + monthly cap as the rollup signal here; tap
+            // through to the detail page for this-month / last-month.
             <span>
-              {doneCount}/{totalCount} milestones
+              {quoted != null
+                ? `${hoursLogged.toFixed(1)}h logged · ${quoted.toFixed(1)}h/mo cap`
+                : `${hoursLogged.toFixed(1)}h logged · retainer`}
             </span>
+          ) : (
+            <>
+              <span>
+                {quoted != null
+                  ? `${hoursLogged.toFixed(1)} / ${quoted.toFixed(1)}h`
+                  : `${hoursLogged.toFixed(1)}h logged`}
+              </span>
+              {totalCount > 0 && (
+                <span>
+                  {doneCount}/{totalCount} milestones
+                </span>
+              )}
+              {project.target_date && <span>Target {formatRelativeDate(project.target_date)}</span>}
+            </>
           )}
-          {project.target_date && <span>Target {formatRelativeDate(project.target_date)}</span>}
         </div>
       </Link>
     </li>

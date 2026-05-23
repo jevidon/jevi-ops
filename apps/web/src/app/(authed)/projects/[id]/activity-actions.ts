@@ -77,10 +77,14 @@ export async function addActivityAction(
   const entry = String(formData.get('entry') ?? '').trim();
   const rawHours = String(formData.get('hours') ?? '').trim();
   const rawWhen = String(formData.get('logged_at') ?? '').trim();
+  const rawKind = String(formData.get('kind') ?? 'work').trim();
+  const kind: 'work' | 'update' = rawKind === 'update' ? 'update' : 'work';
   if (!projectId) return { ok: false, error: 'Missing project id.' };
-  if (!entry) return { ok: false, error: 'Describe what you did.' };
-  const hours = parseHours(rawHours);
-  if (rawHours && hours === null) {
+  if (!entry) return { ok: false, error: 'Describe what happened.' };
+  // Hours only count on Work entries — Update entries have no hours
+  // field in the UI but defensively ignore anything sent.
+  const hours = kind === 'work' ? parseHours(rawHours) : null;
+  if (kind === 'work' && rawHours && hours === null) {
     return { ok: false, error: 'Hours: use a number, "1h30m", or "45m".' };
   }
   // Optional backfill timestamp. Blank means "use now" (server default).
@@ -92,6 +96,7 @@ export async function addActivityAction(
     await projectsApi.activity.add(projectId, {
       entry,
       hours,
+      kind,
       ...(loggedAt ? { logged_at: loggedAt } : {}),
     });
   } catch (err) {
