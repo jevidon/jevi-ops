@@ -10,6 +10,7 @@ import {
   type SaveResult,
 } from './actions';
 import type { TimeOfDayBucket } from '@/lib/api';
+import { useTransientSaveResult } from '@/lib/use-transient-save-result';
 
 export interface RoutineFormInitial {
   id?: string;
@@ -33,6 +34,7 @@ export function RoutineForm({ initial }: { initial: RoutineFormInitial }) {
     isEdit ? updateRoutineAction : createRoutineAction,
     null,
   );
+  const display = useTransientSaveResult(state);
 
   // Local mirror of the time field so the reminder checkbox can disable
   // itself when no time is set. The form still submits the actual input
@@ -136,12 +138,12 @@ export function RoutineForm({ initial }: { initial: RoutineFormInitial }) {
               Cancel
             </Link>
           )}
-          {state?.ok === false && (
+          {display?.ok === false && (
             <span className="font-mono text-[10px] uppercase tracking-wider text-accent">
-              {state.error}
+              {display.error}
             </span>
           )}
-          {state?.ok === true && isEdit && (
+          {display?.ok === true && isEdit && (
             <span className="font-mono text-[10px] uppercase tracking-wider text-ink-3">
               ✓ Saved
             </span>

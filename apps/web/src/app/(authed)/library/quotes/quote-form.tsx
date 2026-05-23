@@ -3,6 +3,7 @@
 import { useActionState } from 'react';
 import { useFormStatus } from 'react-dom';
 import { createQuoteAction, updateQuoteAction, type SaveResult } from './actions';
+import { useTransientSaveResult } from '@/lib/use-transient-save-result';
 
 interface BookOption {
   id: string;
@@ -41,6 +42,7 @@ export function QuoteForm({
   const isEdit = Boolean(initial.id);
   const action = isEdit ? updateQuoteAction : createQuoteAction;
   const [state, formAction] = useActionState<SaveResult | null, FormData>(action, null);
+  const display = useTransientSaveResult(state);
 
   return (
     <form action={formAction} className="flex flex-col gap-5">
@@ -135,9 +137,9 @@ export function QuoteForm({
         />
       </Field>
 
-      {state && (
-        <div className={`font-mono text-[11px] uppercase tracking-wider ${state.ok ? 'text-ink-2' : 'text-accent'}`}>
-          {state.ok ? 'Saved.' : state.error}
+      {display && (
+        <div className={`font-mono text-[11px] uppercase tracking-wider ${display.ok ? 'text-ink-2' : 'text-accent'}`}>
+          {display.ok ? 'Saved.' : display.error}
         </div>
       )}
 

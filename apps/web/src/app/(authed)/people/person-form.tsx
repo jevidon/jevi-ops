@@ -4,6 +4,7 @@ import { useActionState } from 'react';
 import Link from 'next/link';
 import { createPersonAction, updatePersonAction, deletePersonAction, type SaveResult } from './actions';
 import type { RelationshipType } from '@/lib/api';
+import { useTransientSaveResult } from '@/lib/use-transient-save-result';
 
 // Shared form between /people/new and /people/[id] edit. Switches modes
 // via the presence of `initial.id`. Used directly on the new page and
@@ -35,6 +36,7 @@ export function PersonForm({ initial }: { initial: PersonFormInitial }) {
     isEdit ? updatePersonAction : createPersonAction,
     null,
   );
+  const display = useTransientSaveResult(state);
 
   return (
     <>
@@ -122,12 +124,12 @@ export function PersonForm({ initial }: { initial: PersonFormInitial }) {
               Cancel
             </Link>
           )}
-          {state?.ok === false && (
+          {display?.ok === false && (
             <span className="font-mono text-[10px] uppercase tracking-wider text-accent">
-              {state.error}
+              {display.error}
             </span>
           )}
-          {state?.ok === true && isEdit && (
+          {display?.ok === true && isEdit && (
             <span className="font-mono text-[10px] uppercase tracking-wider text-ink-3">
               ✓ Saved
             </span>

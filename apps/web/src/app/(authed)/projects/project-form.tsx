@@ -4,6 +4,7 @@ import { useActionState, useState } from 'react';
 import { useFormStatus } from 'react-dom';
 import { createProjectAction, updateProjectAction, deleteProjectAction, type SaveResult } from './actions';
 import { PROJECT_COLOR_PALETTE } from '@jerad-ops/shared';
+import { useTransientSaveResult } from '@/lib/use-transient-save-result';
 
 interface DomainOption {
   id: string;
@@ -48,6 +49,8 @@ export function ProjectForm({
   const isEdit = Boolean(initial.id);
   const action = isEdit ? updateProjectAction : createProjectAction;
   const [state, formAction] = useActionState<SaveResult | null, FormData>(action, null);
+  // Auto-clear success messages so consecutive saves each get fresh feedback.
+  const display = useTransientSaveResult(state);
   const [color, setColor] = useState(initial.color);
 
   return (
@@ -214,9 +217,9 @@ export function ProjectForm({
           </div>
         </Field>
 
-        {state && (
-          <div className={`font-mono text-[11px] uppercase tracking-wider ${state.ok ? 'text-ink-2' : 'text-accent'}`}>
-            {state.ok ? 'Saved.' : state.error}
+        {display && (
+          <div className={`font-mono text-[11px] uppercase tracking-wider ${display.ok ? 'text-ink-2' : 'text-accent'}`}>
+            {display.ok ? 'Saved.' : display.error}
           </div>
         )}
 

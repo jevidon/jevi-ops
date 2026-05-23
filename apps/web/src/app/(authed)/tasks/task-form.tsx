@@ -1,6 +1,7 @@
 'use client';
 
 import { useActionState, useState } from 'react';
+import { useTransientSaveResult } from '@/lib/use-transient-save-result';
 import { useFormStatus } from 'react-dom';
 import {
   createTaskFullAction,
@@ -46,6 +47,8 @@ export function TaskForm({
   const isEdit = Boolean(initial.id);
   const action = isEdit ? updateTaskAction : createTaskFullAction;
   const [state, formAction] = useActionState<SaveResult | null, FormData>(action, null);
+  // Auto-clear success messages so back-to-back saves each show fresh feedback.
+  const display = useTransientSaveResult(state);
 
   return (
     <>
@@ -161,13 +164,13 @@ export function TaskForm({
           </select>
         </Field>
 
-        {state && (
+        {display && (
           <div
             className={`font-mono text-[11px] uppercase tracking-wider ${
-              state.ok ? 'text-ink-2' : 'text-accent'
+              display.ok ? 'text-ink-2' : 'text-accent'
             }`}
           >
-            {state.ok ? 'Saved.' : state.error}
+            {display.ok ? 'Saved.' : display.error}
           </div>
         )}
 

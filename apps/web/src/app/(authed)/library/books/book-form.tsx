@@ -4,6 +4,7 @@ import { useActionState, useState } from 'react';
 import { useFormStatus } from 'react-dom';
 import { createBookAction, updateBookAction, deleteBookAction, type SaveResult } from './actions';
 import type { Book } from '@/lib/api';
+import { useTransientSaveResult } from '@/lib/use-transient-save-result';
 
 interface InitialValues {
   id?: string;                 // present → edit mode; absent → create mode
@@ -37,6 +38,7 @@ export function BookForm({ initial }: { initial: InitialValues }) {
   const isEdit = Boolean(initial.id);
   const action = isEdit ? updateBookAction : createBookAction;
   const [state, formAction] = useActionState<SaveResult | null, FormData>(action, null);
+  const display = useTransientSaveResult(state);
 
   return (
     <>
@@ -150,9 +152,9 @@ export function BookForm({ initial }: { initial: InitialValues }) {
           />
         </Field>
 
-        {state && (
-          <div className={`font-mono text-[11px] uppercase tracking-wider ${state.ok ? 'text-ink-2' : 'text-accent'}`}>
-            {state.ok ? 'Saved.' : state.error}
+        {display && (
+          <div className={`font-mono text-[11px] uppercase tracking-wider ${display.ok ? 'text-ink-2' : 'text-accent'}`}>
+            {display.ok ? 'Saved.' : display.error}
           </div>
         )}
 

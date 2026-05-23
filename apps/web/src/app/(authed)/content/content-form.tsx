@@ -4,6 +4,7 @@ import { useActionState, useState } from 'react';
 import { useFormStatus } from 'react-dom';
 import { createContentAction, updateContentAction, deleteContentAction, type SaveResult } from './actions';
 import type { ContentItem, ContentItemStatus, ContentItemType } from '@/lib/api';
+import { useTransientSaveResult } from '@/lib/use-transient-save-result';
 
 interface DomainOption {
   id: string;
@@ -50,6 +51,7 @@ export function ContentForm({
   const isEdit = Boolean(initial.id);
   const action = isEdit ? updateContentAction : createContentAction;
   const [state, formAction] = useActionState<SaveResult | null, FormData>(action, null);
+  const display = useTransientSaveResult(state);
 
   return (
     <>
@@ -144,9 +146,9 @@ export function ContentForm({
           />
         </Field>
 
-        {state && (
-          <div className={`font-mono text-[11px] uppercase tracking-wider ${state.ok ? 'text-ink-2' : 'text-accent'}`}>
-            {state.ok ? 'Saved.' : state.error}
+        {display && (
+          <div className={`font-mono text-[11px] uppercase tracking-wider ${display.ok ? 'text-ink-2' : 'text-accent'}`}>
+            {display.ok ? 'Saved.' : display.error}
           </div>
         )}
 

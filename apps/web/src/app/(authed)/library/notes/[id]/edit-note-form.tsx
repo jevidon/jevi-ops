@@ -4,6 +4,7 @@ import { useActionState, useState } from 'react';
 import { useFormStatus } from 'react-dom';
 import { updateNoteAction, deleteNoteAction, type SaveResult } from './actions';
 import type { NoteSourceType } from '@/lib/api';
+import { useTransientSaveResult } from '@/lib/use-transient-save-result';
 
 interface InitialValues {
   id: string;
@@ -29,6 +30,7 @@ export function EditNoteForm({ initial }: { initial: InitialValues }) {
     updateNoteAction,
     null,
   );
+  const display = useTransientSaveResult(state);
 
   return (
     <>
@@ -99,13 +101,13 @@ export function EditNoteForm({ initial }: { initial: InitialValues }) {
           Needs review
         </label>
 
-        {state && (
+        {display && (
           <div
             className={`font-mono text-[11px] uppercase tracking-wider ${
-              state.ok ? 'text-ink-2' : 'text-accent'
+              display.ok ? 'text-ink-2' : 'text-accent'
             }`}
           >
-            {state.ok ? 'Saved.' : state.error}
+            {display.ok ? 'Saved.' : display.error}
           </div>
         )}
 

@@ -3,6 +3,7 @@
 import { useActionState } from 'react';
 import { useFormStatus } from 'react-dom';
 import { updateDomainAction, type SaveResult } from './actions';
+import { useTransientSaveResult } from '@/lib/use-transient-save-result';
 
 interface InitialValues {
   id: string;
@@ -18,6 +19,7 @@ export function EditDomainForm({ initial }: { initial: InitialValues }) {
     updateDomainAction,
     null,
   );
+  const display = useTransientSaveResult(state);
 
   return (
     <form action={formAction} className="flex flex-col gap-5">
@@ -74,13 +76,13 @@ export function EditDomainForm({ initial }: { initial: InitialValues }) {
         Active (uncheck to hide this domain from lists and observations)
       </label>
 
-      {state && (
+      {display && (
         <div
           className={`font-mono text-[11px] uppercase tracking-wider ${
-            state.ok ? 'text-ink-2' : 'text-accent'
+            display.ok ? 'text-ink-2' : 'text-accent'
           }`}
         >
-          {state.ok ? 'Saved.' : state.error}
+          {display.ok ? 'Saved.' : display.error}
         </div>
       )}
 
