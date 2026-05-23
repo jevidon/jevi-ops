@@ -97,7 +97,14 @@ export interface ProjectDetail {
 }
 
 export const tasksApi = {
-  list: () => api.get<{ tasks: Task[] }>('/api/tasks'),
+  list: (opts?: { content_item_id?: string; project_id?: string; status?: string }) => {
+    const qs = new URLSearchParams();
+    if (opts?.content_item_id) qs.set('content_item_id', opts.content_item_id);
+    if (opts?.project_id) qs.set('project_id', opts.project_id);
+    if (opts?.status) qs.set('status', opts.status);
+    const s = qs.toString();
+    return api.get<{ tasks: Task[] }>(`/api/tasks${s ? `?${s}` : ''}`);
+  },
   get: (id: string) => api.get<Task>(`/api/tasks/${id}`),
   create: (body: Partial<Task> & { title: string }) =>
     api.post<Task>('/api/tasks', body),

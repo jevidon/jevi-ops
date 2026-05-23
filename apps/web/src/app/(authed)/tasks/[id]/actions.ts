@@ -7,44 +7,56 @@ import { tasksApi, ApiError } from '@/lib/api';
 
 export type SaveResult = { ok: true } | { ok: false; error: string };
 
-const UpdateFormSchema = z.object({
-  taskId: z.string().uuid(),
+// Form schema — captures every field the shared TaskForm posts. We accept
+// empty strings for the foreign-key dropdowns (project, content) and turn
+// them into null at the API call so the user can clear an existing link.
+const TaskFormSchema = z.object({
   title: z.string().trim().min(1, 'Title is required'),
   notes: z.string().trim(),
-  due_date: z.string(), // empty string means clear
+  due_date: z.string(),
   due_time: z.string(),
   priority: z.coerce.number().int().min(1).max(4),
-  project_id: z.string(), // empty string means clear
+  project_id: z.string(),
+  content_item_id: z.string(),
 });
 
-export async function updateTaskAction(
-  _prev: SaveResult | null,
-  formData: FormData,
-): Promise<SaveResult> {
-  const parsed = UpdateFormSchema.safeParse({
-    taskId: formData.get('taskId'),
+function readFormFields(formData: FormData) {
+  return TaskFormSchema.safeParse({
     title: formData.get('title'),
     notes: formData.get('notes') ?? '',
     due_date: formData.get('due_date') ?? '',
     due_time: formData.get('due_time') ?? '',
     priority: formData.get('priority') ?? '4',
     project_id: formData.get('project_id') ?? '',
+    content_item_id: formData.get('content_item_id') ?? '',
   });
+}
+
+function toApiPayload(parsed: z.infer<typeof TaskFormSchema>) {
+  return {
+    title: parsed.title,
+    notes: parsed.notes || null,
+    due_date: parsed.due_date || null,
+    due_time: parsed.due_time || null,
+    priority: parsed.priority,
+    project_id: parsed.project_id || null,
+    content_item_id: parsed.content_item_id || null,
+  };
+}
+
+export async function updateTaskAction(
+  _prev: SaveResult | null,
+  formData: FormData,
+): Promise<SaveResult> {
+  const taskId = String(formData.get('taskId') ?? '');
+  if (!taskId) return { ok: false, error: 'Missing task id.' };
+  const parsed = readFormFields(formData);
   if (!parsed.success) {
     const first = parsed.error.errors[0];
     return { ok: false, error: first?.message ?? 'Invalid form' };
   }
-  const { taskId, title, notes, due_date, due_time, priority, project_id } = parsed.data;
-
   try {
-    await tasksApi.update(taskId, {
-      title,
-      notes: notes || null,
-      due_date: due_date || null,
-      due_time: due_time || null,
-      priority,
-      project_id: project_id || null,
-    });
+    await tasksApi.update(taskId, toApiPayload(parsed.data));
   } catch (err) {
     if (err instanceof ApiError) {
       const body = err.body as { error?: string } | null;
@@ -52,11 +64,41 @@ export async function updateTaskAction(
     }
     return { ok: false, error: (err as Error).message };
   }
-
   revalidatePath('/today');
+  revalidatePath('/tasks');
   revalidatePath('/projects');
+  revalidatePath('/content');
   revalidatePath(`/tasks/${taskId}`);
   return { ok: true };
+}
+
+// Full create — used by /tasks/new and the content-detail inline add.
+// Distinct from the simple inline create on /today so the rich form can
+// set project + content_item + due date + priority in one shot.
+export async function createTaskFullAction(
+  _prev: SaveResult | null,
+  formData: FormData,
+): Promise<SaveResult> {
+  const parsed = readFormFields(formData);
+  if (!parsed.success) {
+    const first = parsed.error.errors[0];
+    return { ok: false, error: first?.message ?? 'Invalid form' };
+  }
+  try {
+    const created = await tasksApi.create(toApiPayload(parsed.data));
+    revalidatePath('/today');
+    revalidatePath('/tasks');
+    revalidatePath('/projects');
+    revalidatePath('/content');
+    if (parsed.data.content_item_id) revalidatePath(`/content/${parsed.data.content_item_id}`);
+    redirect(`/tasks/${created.id}`);
+  } catch (err) {
+    if (err instanceof ApiError) {
+      const body = err.body as { error?: string } | null;
+      return { ok: false, error: body?.error ?? `API ${err.status}` };
+    }
+    return { ok: false, error: (err as Error).message };
+  }
 }
 
 export async function deleteTaskAction(formData: FormData): Promise<void> {
@@ -65,10 +107,11 @@ export async function deleteTaskAction(formData: FormData): Promise<void> {
   try {
     await tasksApi.remove(taskId);
   } catch {
-    // best-effort; the redirect below will re-render and show the failure
-    // state on /today only if the row stuck around
+    /* best-effort */
   }
   revalidatePath('/today');
+  revalidatePath('/tasks');
   revalidatePath('/projects');
+  revalidatePath('/content');
   redirect('/today');
 }

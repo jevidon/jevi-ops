@@ -1,12 +1,12 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { ScreenHeader } from '@/components/ScreenHeader';
-import { tasksApi, projectsApi, ApiError } from '@/lib/api';
+import { tasksApi, projectsApi, contentApi, ApiError } from '@/lib/api';
 import type { Task } from '@jerad-ops/shared';
-import { EditTaskForm } from './edit-form';
+import { TaskForm } from '../task-form';
 
 // /tasks/[id] — task detail + edit. Lets you change everything voice would
-// normally set (title, notes, due, priority, project) plus delete.
+// normally set (title, notes, due, priority, project, content_item) plus delete.
 
 export default async function TaskDetailPage({
   params,
@@ -18,11 +18,12 @@ export default async function TaskDetailPage({
   let task: Task | null = null;
   let errorMessage: string | null = null;
   let projects: { id: string; name: string }[] = [];
+  let contentItems: { id: string; title: string }[] = [];
 
-  // Fetch task + projects list (for the project selector) in parallel.
-  const [taskRes, projectsRes] = await Promise.allSettled([
+  const [taskRes, projectsRes, contentRes] = await Promise.allSettled([
     tasksApi.get(id),
     projectsApi.list(),
+    contentApi.list(),
   ]);
 
   if (taskRes.status === 'fulfilled') {
@@ -39,6 +40,15 @@ export default async function TaskDetailPage({
       .filter((p) => p.status === 'active')
       .map((p) => ({ id: p.id, name: p.name }))
       .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  if (contentRes.status === 'fulfilled') {
+    // Pre-filter to "in progress" (anything not done/published) so the
+    // dropdown isn't 100+ historical items.
+    contentItems = contentRes.value.items
+      .filter((c) => c.status !== 'done' && c.status !== 'published')
+      .map((c) => ({ id: c.id, title: c.title }))
+      .sort((a, b) => a.title.localeCompare(b.title));
   }
 
   if (!task) {
@@ -63,8 +73,8 @@ export default async function TaskDetailPage({
   return (
     <div>
       <div className="px-5 lg:px-0 pt-4 pb-1 font-mono text-[10px] uppercase tracking-wider text-ink-3">
-        <Link href="/today" className="hover:text-ink-2 transition-colors">
-          ← Today
+        <Link href="/tasks" className="hover:text-ink-2 transition-colors">
+          ← Tasks
         </Link>
       </div>
 
@@ -76,7 +86,7 @@ export default async function TaskDetailPage({
       <div className="hairline mb-4" />
 
       <div className="px-5 lg:px-0 max-w-xl">
-        <EditTaskForm
+        <TaskForm
           initial={{
             id: task.id,
             title: task.title,
@@ -85,8 +95,10 @@ export default async function TaskDetailPage({
             due_time: task.due_time ?? '',
             priority: task.priority,
             project_id: task.project_id ?? '',
+            content_item_id: task.content_item_id ?? '',
           }}
           projects={projects}
+          contentItems={contentItems}
         />
       </div>
     </div>

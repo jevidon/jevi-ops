@@ -67,6 +67,15 @@ export default async function TasksPage({
       />
       <div className="hairline" />
 
+      <div className="px-5 lg:px-0 pt-3 flex justify-end">
+        <Link
+          href="/tasks/new"
+          className="font-mono text-[11px] uppercase tracking-wider text-ink-3 hover:text-accent transition-colors"
+        >
+          + New task
+        </Link>
+      </div>
+
       <FilterBar status={status} projectFilter={projectFilter} projects={projects} />
 
       {errorMessage ? (

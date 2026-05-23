@@ -2,38 +2,55 @@
 
 import { useActionState, useState } from 'react';
 import { useFormStatus } from 'react-dom';
-import { updateTaskAction, deleteTaskAction, type SaveResult } from './actions';
+import {
+  createTaskFullAction,
+  updateTaskAction,
+  deleteTaskAction,
+  type SaveResult,
+} from './[id]/actions';
 
 interface ProjectOption {
   id: string;
   name: string;
 }
+interface ContentItemOption {
+  id: string;
+  title: string;
+}
 
 interface InitialValues {
-  id: string;
+  id?: string;                 // present → edit mode
   title: string;
   notes: string;
   due_date: string;
   due_time: string;
   priority: number;
   project_id: string;
+  content_item_id: string;
 }
 
-export function EditTaskForm({
+// Shared form used by /tasks/new (create) and /tasks/[id] (edit). The
+// difference is just which server action it submits to + whether the
+// delete-row at the bottom renders.
+export function TaskForm({
   initial,
   projects,
+  contentItems,
 }: {
   initial: InitialValues;
   projects: ProjectOption[];
+  contentItems: ContentItemOption[];
 }) {
-  const [state, formAction] = useActionState(updateTaskAction, null as SaveResult | null);
+  const isEdit = Boolean(initial.id);
+  const action = isEdit ? updateTaskAction : createTaskFullAction;
+  const [state, formAction] = useActionState<SaveResult | null, FormData>(action, null);
 
   return (
     <>
       <form action={formAction} className="flex flex-col gap-5">
-        <input type="hidden" name="taskId" value={initial.id} />
+        {initial.id && <input type="hidden" name="taskId" value={initial.id} />}
 
-        <Field label="Title">
+        <Field label="Title (required)">
           <input
             type="text"
             name="title"
@@ -99,6 +116,19 @@ export function EditTaskForm({
           </Field>
         </div>
 
+        <Field label="Content item (optional — for video / article / podcast tasks)">
+          <select
+            name="content_item_id"
+            defaultValue={initial.content_item_id}
+            className="w-full bg-transparent border border-line focus:border-ink-2 focus:outline-none p-2 font-sans text-[14px] text-ink"
+          >
+            <option value="">(none)</option>
+            {contentItems.map((c) => (
+              <option key={c.id} value={c.id}>{c.title}</option>
+            ))}
+          </select>
+        </Field>
+
         {state && (
           <div
             className={`font-mono text-[11px] uppercase tracking-wider ${
@@ -110,11 +140,13 @@ export function EditTaskForm({
         )}
 
         <div className="flex items-center gap-3 pt-2">
-          <SaveButton />
+          <SaveButton isEdit={isEdit} />
         </div>
       </form>
 
-      <DeleteRow taskId={initial.id} title={initial.title} />
+      {isEdit && initial.id && (
+        <DeleteRow taskId={initial.id} title={initial.title} />
+      )}
     </>
   );
 }
@@ -128,7 +160,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-function SaveButton() {
+function SaveButton({ isEdit }: { isEdit: boolean }) {
   const { pending } = useFormStatus();
   return (
     <button
@@ -136,7 +168,7 @@ function SaveButton() {
       disabled={pending}
       className="bg-ink hover:bg-ink-2 disabled:opacity-50 disabled:cursor-not-allowed text-bg font-sans font-semibold text-[13px] uppercase tracking-wider px-4 py-2.5 transition-colors"
     >
-      {pending ? 'Saving…' : 'Save'}
+      {pending ? 'Saving…' : isEdit ? 'Save' : 'Add task'}
     </button>
   );
 }

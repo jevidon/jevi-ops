@@ -18,6 +18,7 @@ export const TaskSchema = z.object({
   due_time: nullableString(),
   priority: z.number().int().min(1).max(4),
   project_id: z.string().uuid().nullable().optional(),
+  content_item_id: z.string().uuid().nullable().optional(),
   parent_task_id: z.string().uuid().nullable().optional(),
   recurrence_rule: nullableString(),
   reminder_offsets: z.array(z.number()).default([]),
@@ -26,11 +27,17 @@ export const TaskSchema = z.object({
   created_at: z.string().datetime({ offset: true }),
   completed_at: z.string().datetime({ offset: true }).nullable().optional(),
   updated_at: z.string().datetime({ offset: true }),
-  // Optional join — present when API returns project metadata alongside.
+  // Optional joins — present when API returns linked entity metadata.
   project: z.object({
     id: z.string().uuid(),
     name: z.string(),
     color: z.string().nullable().optional(),
+  }).nullable().optional(),
+  content_item: z.object({
+    id: z.string().uuid(),
+    title: z.string(),
+    type: z.string(),
+    status: z.string(),
   }).nullable().optional(),
 });
 
@@ -41,6 +48,7 @@ export const CreateTaskSchema = z.object({
   due_time: nullableString(),
   priority: z.number().int().min(1).max(4).default(4),
   project_id: z.string().uuid().nullable().optional(),
+  content_item_id: z.string().uuid().nullable().optional(),
   parent_task_id: z.string().uuid().nullable().optional(),
   recurrence_rule: nullableString(),
   reminder_offsets: z.array(z.number()).optional(),

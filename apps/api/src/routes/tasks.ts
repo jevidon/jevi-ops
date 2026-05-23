@@ -6,23 +6,30 @@ import { CreateTaskSchema, UpdateTaskSchema } from '@jerad-ops/shared/schemas';
 export const taskRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', app.requireAuth);
 
-  app.get('/api/tasks', async (req) => {
-    const sb = req.supabase!;
-    // Include the linked project's id+name so the Today screen can render
-    // "Reviews v2.4 · 0.5h" next to each task without an N+1 lookup.
-    const { data, error } = await sb
-      .from('tasks')
-      .select('*, project:projects(id, name, color)')
-      .order('created_at', { ascending: false })
-      .limit(500);
-    if (error) throw app.httpErrors.internalServerError(error.message);
-    return { tasks: data ?? [] };
-  });
+  app.get<{ Querystring: { content_item_id?: string; project_id?: string; status?: string } }>(
+    '/api/tasks',
+    async (req) => {
+      const sb = req.supabase!;
+      // Include linked project + content_item metadata so list views can
+      // render context without an N+1 lookup.
+      let q = sb
+        .from('tasks')
+        .select('*, project:projects(id, name, color), content_item:content_items(id, title, type, status)')
+        .order('created_at', { ascending: false })
+        .limit(500);
+      if (req.query.content_item_id) q = q.eq('content_item_id', req.query.content_item_id);
+      if (req.query.project_id) q = q.eq('project_id', req.query.project_id);
+      if (req.query.status) q = q.eq('status', req.query.status);
+      const { data, error } = await q;
+      if (error) throw app.httpErrors.internalServerError(error.message);
+      return { tasks: data ?? [] };
+    },
+  );
 
   app.get<{ Params: { id: string } }>('/api/tasks/:id', async (req, reply) => {
     const { data, error } = await req.supabase!
       .from('tasks')
-      .select('*, project:projects(id, name, color)')
+      .select('*, project:projects(id, name, color), content_item:content_items(id, title, type, status)')
       .eq('id', req.params.id)
       .maybeSingle();
     if (error) throw app.httpErrors.internalServerError(error.message);
