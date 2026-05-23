@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { contentApi, ApiError, type ContentItem, type ContentItemStatus } from '@/lib/api';
 import { PrefsPersist } from '@/components/PrefsPersist';
+import { youtubeThumbnailUrl } from '@/lib/youtube';
 
 // /content — list of content items (videos, articles, podcasts) with
 // status filter chips + sort. The pipeline status is the primary mental
@@ -186,29 +187,49 @@ export default async function ContentPage({
         </div>
       ) : (
         <ul className="px-5 lg:px-0 mt-4">
-          {filtered.map((item) => (
-            <li key={item.id} className="py-3 border-b border-line/40">
-              <Link href={`/content/${item.id}`} className="block hover:opacity-80 transition-opacity">
-                <div className="flex items-baseline justify-between gap-3">
-                  <span className="font-mono text-[10px] uppercase tracking-wider text-ink-3">
-                    {STATUS_LABELS[item.status]}
-                    {item.domain?.name ? ` · ${item.domain.name}` : ''}
-                  </span>
-                  <span className="font-mono text-[10px] uppercase tracking-wider text-ink-3">
-                    {formatDate(item.published_at || item.updated_at)}
-                  </span>
-                </div>
-                <div className="mt-1 font-serif text-[15px] text-ink leading-tight">
-                  {item.title}
-                </div>
-                {item.video_url && (
-                  <div className="mt-1 font-mono text-[10px] uppercase tracking-wider text-ink-3 truncate">
-                    {item.video_url}
+          {filtered.map((item) => {
+            const thumb = item.video_url ? youtubeThumbnailUrl(item.video_url, 'mq') : null;
+            return (
+              <li key={item.id} className="py-3 border-b border-line/40">
+                <Link
+                  href={`/content/${item.id}`}
+                  className="flex gap-3 hover:opacity-80 transition-opacity"
+                >
+                  {/* Thumbnail. 112px wide × 63px tall (16:9). Falls back to a
+                      placeholder so non-YouTube / no-URL rows stay aligned. */}
+                  <div className="w-28 aspect-video bg-surface border border-line shrink-0 overflow-hidden">
+                    {thumb ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={thumb}
+                        alt=""
+                        className="w-full h-full object-cover"
+                        loading="lazy"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center font-mono text-[9px] uppercase tracking-wider text-ink-3">
+                        {item.type.replace('_', ' ')}
+                      </div>
+                    )}
                   </div>
-                )}
-              </Link>
-            </li>
-          ))}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-baseline justify-between gap-3">
+                      <span className="font-mono text-[10px] uppercase tracking-wider text-ink-3">
+                        {STATUS_LABELS[item.status]}
+                        {item.domain?.name ? ` · ${item.domain.name}` : ''}
+                      </span>
+                      <span className="font-mono text-[10px] uppercase tracking-wider text-ink-3 shrink-0">
+                        {formatDate(item.published_at || item.updated_at)}
+                      </span>
+                    </div>
+                    <div className="mt-1 font-serif text-[15px] text-ink leading-tight line-clamp-2">
+                      {item.title}
+                    </div>
+                  </div>
+                </Link>
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>

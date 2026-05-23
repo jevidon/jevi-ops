@@ -4,6 +4,7 @@ import { ScreenHeader } from '@/components/ScreenHeader';
 import { contentApi, domainsApi, tasksApi, ApiError, type ContentItem } from '@/lib/api';
 import type { Task } from '@jerad-ops/shared';
 import { ContentForm } from '../content-form';
+import { youtubeEmbedUrl } from '@/lib/youtube';
 
 // /content/[id] — detail + edit. Status changes (idea→outline→…→done) happen
 // in the form. Outline + video URL live below the metadata so the form is
@@ -76,11 +77,11 @@ export default async function ContentDetailPage({
             Only renders when there's actually something to show. */}
         {(item.video_url || item.article_url) && (
           <section className="mb-10">
-            {item.video_url && youtubeEmbedSrc(item.video_url) && (
+            {item.video_url && youtubeEmbedUrl(item.video_url) && (
               <div className="mb-4 aspect-video bg-surface border border-line overflow-hidden">
                 {/* eslint-disable-next-line jsx-a11y/iframe-has-title */}
                 <iframe
-                  src={youtubeEmbedSrc(item.video_url)!}
+                  src={youtubeEmbedUrl(item.video_url)!}
                   title={item.title}
                   className="w-full h-full"
                   allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
@@ -181,29 +182,3 @@ export default async function ContentDetailPage({
   );
 }
 
-// Convert a YouTube watch/share URL to an embed URL. Returns null for
-// non-YouTube URLs so the caller can decide not to render an iframe.
-//
-// Handles the common shapes:
-//   https://www.youtube.com/watch?v=ID
-//   https://youtu.be/ID
-//   https://youtube.com/shorts/ID
-//   https://www.youtube.com/embed/ID  (already an embed; passes through)
-function youtubeEmbedSrc(url: string): string | null {
-  try {
-    const u = new URL(url);
-    const host = u.hostname.replace(/^www\./, '');
-    let id: string | null = null;
-    if (host === 'youtu.be') {
-      id = u.pathname.replace(/^\//, '').split('/')[0] ?? null;
-    } else if (host === 'youtube.com' || host === 'm.youtube.com') {
-      if (u.pathname === '/watch') id = u.searchParams.get('v');
-      else if (u.pathname.startsWith('/shorts/')) id = u.pathname.replace('/shorts/', '').split('/')[0] ?? null;
-      else if (u.pathname.startsWith('/embed/')) id = u.pathname.replace('/embed/', '').split('/')[0] ?? null;
-    }
-    if (!id || !/^[\w-]{6,}$/.test(id)) return null;
-    return `https://www.youtube.com/embed/${id}`;
-  } catch {
-    return null;
-  }
-}
