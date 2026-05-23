@@ -37,15 +37,19 @@ export const ProjectSchema = z.object({
   updated_at: z.string().datetime({ offset: true }),
 });
 
+// All optional fields are .nullable() so the client can explicitly clear
+// them via PATCH (or send null on create to mean "leave empty"). Without
+// nullable, sending null would fail Zod validation and force the action
+// to branch per-field on "omit vs include" — a footgun.
 export const CreateProjectSchema = z.object({
   name: z.string().min(1),
-  description: z.string().optional(),
-  domain_id: z.string().uuid().optional(),
-  type: ProjectTypeSchema.optional(),
-  client_id: z.string().uuid().optional(),
-  quoted_hours: z.number().optional(),
-  start_date: z.string().date().optional(),
-  target_date: z.string().date().optional(),
+  description: z.string().nullable().optional(),
+  domain_id: z.string().uuid().nullable().optional(),
+  type: ProjectTypeSchema.nullable().optional(),
+  client_id: z.string().uuid().nullable().optional(),
+  quoted_hours: z.number().nullable().optional(),
+  start_date: z.string().date().nullable().optional(),
+  target_date: z.string().date().nullable().optional(),
   color: HexColorSchema.nullable().optional(),
 });
 
