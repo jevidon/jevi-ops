@@ -4,6 +4,7 @@ import { env } from '../lib/env.js';
 import { supabaseAdmin, isSupabaseConfigured } from '../lib/supabase.js';
 import { runObservations } from '../lib/observations.js';
 import { runReminders } from '../lib/reminders.js';
+import { runOverdue } from '../lib/overdue.js';
 import { runDailySummary } from '../lib/daily-summary.js';
 import { isPushoverConfigured } from '../lib/pushover.js';
 
@@ -131,4 +132,38 @@ export const cronRoutes: FastifyPluginAsync = async (app) => {
   };
   app.get('/api/cron/daily-summary', dailySummaryHandler);
   app.post('/api/cron/daily-summary', dailySummaryHandler);
+
+  // /api/cron/overdue — fire hourly during waking hours (e.g., 13-03 UTC =
+  // 7am-9pm Mountain). Picks up tasks that passed their due time 5min-24h
+  // ago. Dedups via reminders_sent.overdue so each task only alerts once.
+  const overdueHandler = async (req: FastifyRequest, reply: import('fastify').FastifyReply) => {
+    if (!env.CRON_SECRET) {
+      return reply.code(503).send({ error: 'cron_disabled', reason: 'CRON_SECRET not set' });
+    }
+    if (!checkSecret(readSecret(req))) {
+      return reply.code(401).send({ error: 'unauthorized' });
+    }
+    if (!isSupabaseConfigured()) {
+      return reply.code(503).send({ error: 'supabase_not_configured' });
+    }
+    if (!isPushoverConfigured()) {
+      return reply.code(200).send({ skipped: 'pushover_not_configured' });
+    }
+
+    try {
+      const result = await runOverdue(supabaseAdmin());
+      if (result.dispatched > 0 || result.failed > 0) {
+        req.log.info({ event: 'overdue_run', ...result }, 'overdue cron dispatched');
+      }
+      return reply.code(200).send(result);
+    } catch (err) {
+      req.log.error({ err }, 'overdue cron failed');
+      return reply.code(500).send({
+        error: 'overdue_failed',
+        message: err instanceof Error ? err.message : 'unknown',
+      });
+    }
+  };
+  app.get('/api/cron/overdue', overdueHandler);
+  app.post('/api/cron/overdue', overdueHandler);
 };

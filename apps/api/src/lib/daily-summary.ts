@@ -105,11 +105,16 @@ export async function runDailySummary(sb: SupabaseClient): Promise<DailySummaryR
 
   const { title, message } = composeMessage(todayLocal, tasks, events, observations, needsReviewCount);
 
+  // If anything urgent (P1) is in the summary, bypass Do Not Disturb so
+  // the morning push wakes the user. Otherwise normal priority.
+  const hasUrgent = tasks.some((t) => t.priority === 1);
+
   const result = await sendPushover({
     title,
     message,
     url: `${env.WEB_APP_URL.replace(/\/$/, '')}/today`,
     url_title: 'Open today',
+    priority: hasUrgent ? 1 : 0,
   });
 
   return {

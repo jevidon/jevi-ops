@@ -21,6 +21,7 @@ interface DueTask {
   id: string;
   title: string;
   status: string;
+  priority: number;              // 1=urgent ... 4=low
   due_date: string | null;       // YYYY-MM-DD
   due_time: string | null;       // HH:MM[:SS]
   reminder_offsets: number[] | null;
@@ -51,7 +52,7 @@ export async function runReminders(sb: SupabaseClient): Promise<ReminderRunResul
 
   const { data, error } = await sb
     .from('tasks')
-    .select('id, title, status, due_date, due_time, reminder_offsets, reminders_sent, project:projects(name)')
+    .select('id, title, status, priority, due_date, due_time, reminder_offsets, reminders_sent, project:projects(name)')
     .eq('status', 'open')
     .not('due_time', 'is', null)
     .in('due_date', dates)
@@ -92,6 +93,10 @@ export async function runReminders(sb: SupabaseClient): Promise<ReminderRunResul
         message: composeMessage(t, offset, dueMoment),
         url: `${env.WEB_APP_URL.replace(/\/$/, '')}/tasks/${t.id}`,
         url_title: 'Open task',
+        // P1 tasks bypass Do Not Disturb. Everything else uses default
+        // priority. Keeps the high-priority signal meaningful by reserving
+        // it for the rare "this is actually urgent" case.
+        priority: t.priority === 1 ? 1 : 0,
       });
 
       if (result.ok) {
