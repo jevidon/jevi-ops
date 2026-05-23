@@ -102,6 +102,7 @@ export default async function TaskDetailPage({
             remind_minutes: task.reminder_offsets?.length
               ? Math.min(...task.reminder_offsets)
               : '',
+            recurrence_rule: task.recurrence_rule ?? '',
           }}
           projects={projects}
           contentItems={contentItems}

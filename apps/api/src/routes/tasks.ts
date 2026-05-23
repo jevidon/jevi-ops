@@ -1,5 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { CreateTaskSchema, UpdateTaskSchema } from '@jerad-ops/shared/schemas';
+import { isRecurrencePattern, nextDueDate } from '@jerad-ops/shared';
 
 // Tasks CRUD. Auth-gated; uses request-scoped Supabase client so RLS applies.
 
@@ -63,8 +64,41 @@ export const taskRoutes: FastifyPluginAsync = async (app) => {
       });
     }
     const update: Record<string, unknown> = { ...parsed.data };
+    let rolledOver = false;
+
     if (parsed.data.status === 'done') {
-      update.completed_at = new Date().toISOString();
+      // Recurring tasks roll forward instead of marking done. Read the
+      // existing recurrence_rule from the DB (don't trust the client to
+      // send it on a plain "check it off" call). If the rule is one we
+      // know how to advance, swap the done → open and bump due_date.
+      // Reminders dedup (reminders_sent) clears so the next occurrence
+      // can fire reminders again.
+      const { data: existing, error: readErr } = await req.supabase!
+        .from('tasks')
+        .select('recurrence_rule, due_date')
+        .eq('id', req.params.id)
+        .maybeSingle();
+      if (readErr) throw app.httpErrors.internalServerError(readErr.message);
+
+      const ruleRaw = existing?.recurrence_rule as string | null | undefined;
+      if (ruleRaw && isRecurrencePattern(ruleRaw)) {
+        const todayIso = new Date().toISOString().slice(0, 10);
+        const next = nextDueDate({
+          currentDue: (existing?.due_date as string | null) ?? null,
+          rule: ruleRaw,
+          todayIso,
+        });
+        update.status = 'open';
+        update.completed_at = null;
+        update.due_date = next;
+        update.reminders_sent = [];
+        // top3_for_date is intentionally cleared too — today's instance
+        // is "done", so it shouldn't keep starring tomorrow's spawn.
+        update.top3_for_date = null;
+        rolledOver = true;
+      } else {
+        update.completed_at = new Date().toISOString();
+      }
     } else if (parsed.data.status === 'open') {
       // Reopening — clear completion timestamp so analytics don't see a
       // stale "completed at" on a row that's actually open.
@@ -77,7 +111,9 @@ export const taskRoutes: FastifyPluginAsync = async (app) => {
       .select('*')
       .single();
     if (error) throw app.httpErrors.internalServerError(error.message);
-    return data;
+    // Surface the rollover so the client can show a "Next: <date>" hint
+    // if it wants to. Adds one field; existing consumers ignore it.
+    return { ...data, recurred: rolledOver };
   });
 
   app.delete<{ Params: { id: string } }>('/api/tasks/:id', async (req, reply) => {

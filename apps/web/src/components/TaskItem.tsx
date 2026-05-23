@@ -1,5 +1,10 @@
 import Link from 'next/link';
 import type { Task } from '@jerad-ops/shared';
+import {
+  RECURRENCE_GLYPH,
+  RECURRENCE_LABELS,
+  isRecurrencePattern,
+} from '@jerad-ops/shared';
 import { toggleTaskDoneAction, toggleTop3Action } from '@/app/(authed)/today/actions';
 import { todayIsoDate } from '@/lib/today';
 
@@ -28,6 +33,11 @@ export function TaskItem({
   const isOverdue = dueLabel?.kind === 'overdue';
   const isTodayDue = dueLabel?.kind === 'today';
   const project = showProject ? task.project : null;
+  // Recurrence indicator. Only render the chip when the rule is a
+  // pattern we know how to advance — surface bogus rules silently.
+  const recurrence = task.recurrence_rule && isRecurrencePattern(task.recurrence_rule)
+    ? task.recurrence_rule
+    : null;
 
   return (
     <div className="flex items-start gap-3 py-2 group">
@@ -65,7 +75,7 @@ export function TaskItem({
         >
           {task.title}
         </Link>
-        {(project || (dueLabel && !isDone)) && (
+        {(project || (dueLabel && !isDone) || recurrence) && (
           <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5">
             {project && (
               <Link
@@ -89,6 +99,14 @@ export function TaskItem({
                 }`}
               >
                 {dueLabel.text}
+              </span>
+            )}
+            {recurrence && (
+              <span
+                className="font-mono text-[10px] uppercase tracking-wider text-ink-3"
+                title={`Repeats ${RECURRENCE_LABELS[recurrence].toLowerCase()} — completing this rolls the due date forward instead of marking done.`}
+              >
+                {RECURRENCE_GLYPH} {RECURRENCE_LABELS[recurrence]}
               </span>
             )}
           </div>

@@ -28,6 +28,7 @@ interface InitialValues {
   project_id: string;
   content_item_id: string;
   remind_minutes: number | '';  // '' = no reminder; only effective when due_time is set
+  recurrence_rule: string;     // '' = no repeat
 }
 
 // Shared form used by /tasks/new (create) and /tasks/[id] (edit). The
@@ -141,6 +142,22 @@ export function TaskForm({
             <option value="15">15 minutes before</option>
             <option value="30">30 minutes before</option>
             <option value="60">1 hour before</option>
+          </select>
+        </Field>
+
+        <Field label="Repeat (recurring tasks roll forward on done instead of completing)">
+          <select
+            name="recurrence_rule"
+            defaultValue={initial.recurrence_rule}
+            className="w-full bg-transparent border border-line focus:border-ink-2 focus:outline-none p-2 font-sans text-[14px] text-ink"
+          >
+            <option value="">Doesn&rsquo;t repeat</option>
+            <option value="daily">Daily</option>
+            <option value="weekdays">Weekdays (Mon-Fri)</option>
+            <option value="weekly">Weekly</option>
+            <option value="biweekly">Every 2 weeks</option>
+            <option value="monthly">Monthly</option>
+            <option value="yearly">Yearly</option>
           </select>
         </Field>
 

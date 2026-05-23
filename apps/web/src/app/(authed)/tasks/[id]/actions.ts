@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
 import { tasksApi, ApiError } from '@/lib/api';
+import { isRecurrencePattern } from '@jerad-ops/shared';
 
 export type SaveResult = { ok: true } | { ok: false; error: string };
 
@@ -23,6 +24,7 @@ const TaskFormSchema = z.object({
   // entries in reminder_offsets); we just don't expose that complexity
   // in the manual UI yet.
   remind_minutes: z.string(),
+  recurrence_rule: z.string(),
 });
 
 function readFormFields(formData: FormData) {
@@ -35,6 +37,7 @@ function readFormFields(formData: FormData) {
     project_id: formData.get('project_id') ?? '',
     content_item_id: formData.get('content_item_id') ?? '',
     remind_minutes: formData.get('remind_minutes') ?? '',
+    recurrence_rule: formData.get('recurrence_rule') ?? '',
   });
 }
 
@@ -43,6 +46,11 @@ function toApiPayload(parsed: z.infer<typeof TaskFormSchema>) {
   const reminder_offsets = Number.isFinite(remindParsed) && remindParsed > 0
     ? [remindParsed]
     : [];
+  // Only forward known patterns to the DB; everything else (including
+  // the empty-string default that means "no repeat") becomes null.
+  const recurrence_rule = isRecurrencePattern(parsed.recurrence_rule)
+    ? parsed.recurrence_rule
+    : null;
   return {
     title: parsed.title,
     notes: parsed.notes || null,
@@ -52,6 +60,7 @@ function toApiPayload(parsed: z.infer<typeof TaskFormSchema>) {
     project_id: parsed.project_id || null,
     content_item_id: parsed.content_item_id || null,
     reminder_offsets,
+    recurrence_rule,
   };
 }
 
