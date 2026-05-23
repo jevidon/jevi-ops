@@ -47,3 +47,27 @@ export const CreateContentItemSchema = z.object({
 });
 
 export const UpdateContentItemSchema = CreateContentItemSchema.partial();
+
+// ─── Checklist items (one per content_item per step) ─────────────────
+
+export const ContentChecklistItemSchema = z.object({
+  id: z.string().uuid(),
+  content_item_id: z.string().uuid(),
+  position: z.number().int(),
+  title: z.string().min(1),
+  done: z.boolean(),
+  done_at: z.string().datetime({ offset: true }).nullable().optional(),
+  created_at: z.string().datetime({ offset: true }),
+  updated_at: z.string().datetime({ offset: true }),
+});
+
+export const CreateContentChecklistItemSchema = z.object({
+  title: z.string().min(1),
+  position: z.number().int().optional(),
+});
+
+export const UpdateContentChecklistItemSchema = z.object({
+  title: z.string().min(1).optional(),
+  done: z.boolean().optional(),
+  position: z.number().int().optional(),
+});

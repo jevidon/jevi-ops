@@ -4,6 +4,7 @@ import { ScreenHeader } from '@/components/ScreenHeader';
 import { contentApi, domainsApi, tasksApi, ApiError, type ContentItem } from '@/lib/api';
 import type { Task } from '@jerad-ops/shared';
 import { ContentForm } from '../content-form';
+import { ChecklistSection } from '../checklist-section';
 import { youtubeEmbedUrl } from '@/lib/youtube';
 
 // /content/[id] — detail + edit. Status changes (idea→outline→…→done) happen
@@ -161,6 +162,11 @@ export default async function ContentDetailPage({
             </ul>
           )}
         </section>
+
+        {/* Per-content workflow checklist. Defaults are seeded by the API
+            on content creation; existing items (created before this feature)
+            get a "+ Add default items" affordance inside the section. */}
+        <ChecklistSection contentId={item.id} items={item.checklist ?? []} />
 
         <div className="mb-2 eyebrow">Edit content</div>
         <ContentForm

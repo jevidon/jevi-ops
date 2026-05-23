@@ -160,6 +160,19 @@ export const contentApi = {
   update: (id: string, body: Partial<ContentItem>) =>
     api.patch<ContentItem>(`/api/content/${id}`, body),
   remove: (id: string) => api.delete(`/api/content/${id}`),
+  checklist: {
+    add: (contentId: string, body: { title: string; position?: number }) =>
+      api.post<ContentChecklistItem>(`/api/content/${contentId}/checklist`, body),
+    update: (
+      contentId: string,
+      itemId: string,
+      body: { title?: string; done?: boolean; position?: number },
+    ) => api.patch<ContentChecklistItem>(`/api/content/${contentId}/checklist/${itemId}`, body),
+    remove: (contentId: string, itemId: string) =>
+      api.delete(`/api/content/${contentId}/checklist/${itemId}`),
+    seedDefaults: (contentId: string) =>
+      api.post<{ inserted: number; reason?: string }>(`/api/content/${contentId}/checklist/seed-defaults`, {}),
+  },
 };
 
 export const domainsApi = {
@@ -364,6 +377,19 @@ export interface ContentItem {
   created_at: string;
   updated_at: string;
   domain?: { id: string; name: string } | null;
+  // Present on GET /api/content/:id only; the list endpoint omits it.
+  checklist?: ContentChecklistItem[];
+}
+
+export interface ContentChecklistItem {
+  id: string;
+  content_item_id: string;
+  position: number;
+  title: string;
+  done: boolean;
+  done_at: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface Book {

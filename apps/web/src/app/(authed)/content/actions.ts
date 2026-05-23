@@ -79,6 +79,62 @@ export async function updateContentAction(
   return { ok: true };
 }
 
+// ─── Checklist actions ────────────────────────────────────────────────
+
+export async function toggleChecklistItemAction(formData: FormData): Promise<void> {
+  const contentId = String(formData.get('contentId') ?? '');
+  const itemId = String(formData.get('itemId') ?? '');
+  const done = formData.get('done') === 'true';
+  if (!contentId || !itemId) return;
+  try {
+    await contentApi.checklist.update(contentId, itemId, { done });
+  } catch {
+    /* best-effort */
+  }
+  revalidatePath(`/content/${contentId}`);
+}
+
+export async function addChecklistItemAction(
+  _prev: SaveResult | null,
+  formData: FormData,
+): Promise<SaveResult> {
+  const contentId = String(formData.get('contentId') ?? '');
+  const title = String(formData.get('title') ?? '').trim();
+  if (!contentId) return { ok: false, error: 'Missing content id.' };
+  if (!title) return { ok: false, error: 'Title required.' };
+  try {
+    await contentApi.checklist.add(contentId, { title });
+  } catch (err) {
+    if (err instanceof ApiError) return { ok: false, error: `API ${err.status}` };
+    return { ok: false, error: (err as Error).message };
+  }
+  revalidatePath(`/content/${contentId}`);
+  return { ok: true };
+}
+
+export async function deleteChecklistItemAction(formData: FormData): Promise<void> {
+  const contentId = String(formData.get('contentId') ?? '');
+  const itemId = String(formData.get('itemId') ?? '');
+  if (!contentId || !itemId) return;
+  try {
+    await contentApi.checklist.remove(contentId, itemId);
+  } catch {
+    /* best-effort */
+  }
+  revalidatePath(`/content/${contentId}`);
+}
+
+export async function seedDefaultsAction(formData: FormData): Promise<void> {
+  const contentId = String(formData.get('contentId') ?? '');
+  if (!contentId) return;
+  try {
+    await contentApi.checklist.seedDefaults(contentId);
+  } catch {
+    /* best-effort */
+  }
+  revalidatePath(`/content/${contentId}`);
+}
+
 export async function deleteContentAction(formData: FormData): Promise<void> {
   const id = String(formData.get('id') ?? '');
   if (!id) return;
