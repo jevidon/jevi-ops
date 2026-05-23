@@ -14,7 +14,7 @@ export const libraryRoutes: FastifyPluginAsync = async (app) => {
 
   // ─── Notes ────────────────────────────────────────────────────────────
 
-  app.get<{ Querystring: { source_type?: string; needs_review?: string; limit?: string } }>(
+  app.get<{ Querystring: { source_type?: string; needs_review?: string; tag?: string; limit?: string } }>(
     '/api/notes',
     async (req) => {
       const limit = Math.min(parseInt(req.query.limit ?? '500', 10) || 500, 2000);
@@ -25,6 +25,9 @@ export const libraryRoutes: FastifyPluginAsync = async (app) => {
         .limit(limit);
       if (req.query.source_type) q = q.eq('source_type', req.query.source_type);
       if (req.query.needs_review === 'true') q = q.eq('needs_review', true);
+      // tags is a text[] column — .contains() generates the @> operator
+      // which matches rows whose array includes every element we pass.
+      if (req.query.tag) q = q.contains('tags', [req.query.tag]);
       const { data, error } = await q;
       if (error) throw app.httpErrors.internalServerError(error.message);
       return { notes: data ?? [] };
@@ -75,13 +78,15 @@ export const libraryRoutes: FastifyPluginAsync = async (app) => {
 
   // ─── Quotes ────────────────────────────────────────────────────────────
 
-  app.get<{ Querystring: { limit?: string } }>('/api/quotes', async (req) => {
+  app.get<{ Querystring: { tag?: string; limit?: string } }>('/api/quotes', async (req) => {
     const limit = Math.min(parseInt(req.query.limit ?? '500', 10) || 500, 2000);
-    const { data, error } = await req.supabase!
+    let qb = req.supabase!
       .from('quotes')
       .select('*, book:books(id, title, author), annotations:quote_annotations(id)')
       .order('created_at', { ascending: false })
       .limit(limit);
+    if (req.query.tag) qb = qb.contains('tags', [req.query.tag]);
+    const { data, error } = await qb;
     if (error) throw app.httpErrors.internalServerError(error.message);
     // Compress annotation rows down to a count for the list view.
     type AnnoRow = { id: string };
@@ -277,6 +282,44 @@ export const libraryRoutes: FastifyPluginAsync = async (app) => {
     if (!bookRes.data) return reply.code(404).send({ error: 'not_found' });
     if (quotesRes.error) throw app.httpErrors.internalServerError(quotesRes.error.message);
     return { book: bookRes.data, quotes: quotesRes.data ?? [] };
+  });
+
+  // ─── Tag aggregation ──────────────────────────────────────────────────
+  //
+  // Returns every distinct tag across the user's notes + quotes with a
+  // per-source count, sorted by total count desc. The Readwise import gave
+  // a lot of items tag arrays — this lets the UI render a tag cloud and
+  // filter by clicking. We aggregate in JS rather than via a Postgres
+  // function so we don't need a new migration; with ~1500 rows total it's
+  // a single column-scan-and-count, well under a second.
+
+  app.get('/api/library/tags', async (req) => {
+    const sb = req.supabase!;
+    const [notesRes, quotesRes] = await Promise.all([
+      sb.from('notes').select('tags').limit(5000),
+      sb.from('quotes').select('tags').limit(5000),
+    ]);
+    if (notesRes.error) throw app.httpErrors.internalServerError(notesRes.error.message);
+    if (quotesRes.error) throw app.httpErrors.internalServerError(quotesRes.error.message);
+
+    const tally = new Map<string, { tag: string; notes: number; quotes: number }>();
+    function bump(tags: string[] | null | undefined, key: 'notes' | 'quotes') {
+      for (const raw of tags ?? []) {
+        const tag = (raw ?? '').trim();
+        if (!tag) continue;
+        const existing = tally.get(tag) ?? { tag, notes: 0, quotes: 0 };
+        existing[key] += 1;
+        tally.set(tag, existing);
+      }
+    }
+    type TagsRow = { tags?: string[] | null };
+    for (const r of (notesRes.data ?? []) as TagsRow[]) bump(r.tags, 'notes');
+    for (const r of (quotesRes.data ?? []) as TagsRow[]) bump(r.tags, 'quotes');
+
+    const tags = Array.from(tally.values())
+      .map((t) => ({ ...t, total: t.notes + t.quotes }))
+      .sort((a, b) => b.total - a.total || a.tag.localeCompare(b.tag));
+    return { tags };
   });
 
   // ─── Unified library feed (all sources, chronological) ────────────────

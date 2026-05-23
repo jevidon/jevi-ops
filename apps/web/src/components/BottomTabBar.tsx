@@ -5,16 +5,16 @@ import { usePathname } from 'next/navigation';
 
 // Spec §4 prescribed six tabs (Today, Domains, Projects, Content, People,
 // Library). Tasks replaces Domains-as-primary because tasks are the daily
-// driver. People is still a stub so we surface Content (real, with pipeline
-// + filter + edit) in its slot; People reclaims the slot once its CRM UI
-// ships. Domains is still reachable via direct URL.
+// driver. Search took one slot once the library grew past ~1500 items;
+// People reclaimed its slot once the CRM shipped. Domains is still
+// reachable via direct URL and the desktop rail.
 const TABS = [
   { href: '/today', label: 'Today' },
   { href: '/tasks', label: 'Tasks' },
   { href: '/projects', label: 'Projects' },
-  { href: '/content', label: 'Content' },
-  { href: '/domains', label: 'Domains' },
+  { href: '/people', label: 'People' },
   { href: '/library', label: 'Library' },
+  { href: '/search', label: 'Search' },
 ] as const;
 
 export function BottomTabBar() {

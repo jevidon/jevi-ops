@@ -4,19 +4,45 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { signOutAction } from '@/app/sign-in/actions';
 
+// Synthesizes a Cmd+J keypress so the global TextCapturePalette opens.
+// Cheaper than refactoring the palette to expose a shared open() — we
+// only need to do this from two places (this button + the keyboard
+// shortcut itself).
+function dispatchOpenCapture() {
+  const evt = new KeyboardEvent('keydown', {
+    key: 'j',
+    code: 'KeyJ',
+    metaKey: typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform),
+    ctrlKey: typeof navigator === 'undefined' || !/Mac/i.test(navigator.platform),
+    bubbles: true,
+  });
+  window.dispatchEvent(evt);
+}
+
+function CaptureRailButton() {
+  return (
+    <button
+      type="button"
+      onClick={dispatchOpenCapture}
+      className="w-full flex items-center justify-between px-6 py-3 font-mono text-[10px] uppercase tracking-wider text-ink-3 hover:text-ink-2 transition-colors"
+    >
+      <span>Capture</span>
+      <span className="text-ink-3">⌘J</span>
+    </button>
+  );
+}
+
 // Left-rail nav for desktop viewports (lg:+). Mirrors the bottom tab bar's
 // tabs list but presented vertically with active-tab indication on the left
 // edge. Hidden on mobile (BottomTabBar takes over).
-
-// Content's pipeline UI shipped; People is still a stub. Surface Content
-// in the nav and route People via direct URL until People's CRM UI is real.
 const TABS = [
   { href: '/today', label: 'Today' },
   { href: '/tasks', label: 'Tasks' },
   { href: '/projects', label: 'Projects' },
   { href: '/content', label: 'Content' },
-  { href: '/domains', label: 'Domains' },
+  { href: '/people', label: 'People' },
   { href: '/library', label: 'Library' },
+  { href: '/domains', label: 'Domains' },
 ] as const;
 
 export function DesktopRail({
@@ -68,11 +94,23 @@ export function DesktopRail({
         </ul>
       </nav>
 
-      {/* Utility links — Ask + Notifications + Settings */}
+      {/* Utility links — Capture + Search + Ask + Notifications + Settings.
+          Capture is the only one that doesn't navigate — clicking it
+          dispatches a Cmd+J keyboard event so the global palette opens. */}
       <div className="border-t border-line">
+        <CaptureRailButton />
+        <Link
+          href="/search"
+          className={`flex items-center justify-between px-6 py-3 font-mono text-[10px] uppercase tracking-wider border-t border-line transition-colors ${
+            pathname === '/search' || pathname.startsWith('/search/') ? 'text-ink' : 'text-ink-3 hover:text-ink-2'
+          }`}
+        >
+          <span>Search</span>
+          <span className="text-ink-3">⌘K</span>
+        </Link>
         <Link
           href="/chat"
-          className={`block px-6 py-3 font-mono text-[10px] uppercase tracking-wider transition-colors ${
+          className={`block px-6 py-3 font-mono text-[10px] uppercase tracking-wider border-t border-line transition-colors ${
             pathname === '/chat' ? 'text-ink' : 'text-ink-3 hover:text-ink-2'
           }`}
         >

@@ -7,12 +7,15 @@ import {
   domainsApi,
   ApiError,
   type ProjectDetail,
-  type Milestone,
   type ActivityLogEntry,
 } from '@/lib/api';
 import { isToday } from '@/lib/today';
 import { ProjectColorPicker } from './color-picker';
 import { ProjectForm } from '../project-form';
+import { MilestonesSection } from './milestones-section';
+import { ChecklistSection } from './checklist-section';
+import { LogTimeForm } from './log-time-form';
+import { deleteActivityAction } from './activity-actions';
 
 // /projects/[id] — project detail. Mirrors the mockup's project detail:
 // header with status/hours/target, weighted milestone progress, open tasks,
@@ -62,7 +65,7 @@ export default async function ProjectDetailPage({
     );
   }
 
-  const { project, milestones, tasks, activity } = detail;
+  const { project, milestones, tasks, activity, checklist } = detail;
   const openTasks = tasks.filter((t) => t.status === 'open');
   const doneTasks = tasks
     .filter((t) => t.status === 'done')
@@ -129,38 +132,49 @@ export default async function ProjectDetailPage({
         </div>
       </Section>
 
-      {/* Milestones */}
-      {milestones.length > 0 && (
-        <Section
-          label={`Milestones · ${formatMilestoneProgress(milestones)}`}
-        >
-          <ul>
-            {milestones.map((m) => (
-              <MilestoneRow key={m.id} milestone={m} />
-            ))}
-          </ul>
-        </Section>
-      )}
+      {/* Milestones — always visible; the section itself shows an empty
+          state + add form when there are none. */}
+      <MilestonesSection projectId={project.id} milestones={milestones} />
 
-      {/* Open tasks */}
-      <Section label={`Open tasks · ${openTasks.length}`}>
+      {/* Open tasks — section header carries the "+ Add task" link so
+          you can spin off real, due-dated, reminded tasks from anywhere
+          inside the project. Mirrors the content detail page. */}
+      <section className="px-5 lg:px-0 pt-6">
+        <div className="eyebrow pb-2 border-b border-line mb-3 flex items-baseline justify-between">
+          <span>Open tasks · {openTasks.length}</span>
+          <Link
+            href={`/tasks/new?project_id=${project.id}`}
+            className="font-mono text-[10px] uppercase tracking-wider text-ink-3 hover:text-accent transition-colors"
+          >
+            + Add task
+          </Link>
+        </div>
         {openTasks.length === 0 ? (
           <p className="font-sans text-[13px] text-ink-3 italic py-1">No open tasks.</p>
         ) : (
           openTasks.map((t) => <TaskItem key={t.id} task={t} showStar={false} showProject={false} />)
         )}
-      </Section>
+      </section>
 
-      {/* Activity log */}
+      {/* Per-project ad-hoc checklist. Use for granular sub-steps below
+          the bar for a full task. Separate from milestones (which roll
+          up into project %) and tasks (which have due dates + reminders). */}
+      <ChecklistSection projectId={project.id} items={checklist} />
+
+      {/* Activity log — inline form for manual time entries above the
+          feed. Voice still works ("log 30 min on X reviewing PR…") but
+          the form is the fastest path on desktop. */}
       <Section label={`Activity · ${activity.length}`}>
+        <LogTimeForm projectId={project.id} />
         {activity.length === 0 ? (
           <p className="font-sans text-[13px] text-ink-3 italic py-1">
-            No activity logged. Voice command: "log thirty minutes on {project.name} reviewing PR feedback".
+            No activity logged yet. Use the form above, or say{' '}
+            <span className="font-mono">log thirty minutes on {project.name} reviewing PR feedback</span>.
           </p>
         ) : (
           <ul>
             {activity.map((a) => (
-              <ActivityRow key={a.id} entry={a} />
+              <ActivityRow key={a.id} entry={a} projectId={project.id} />
             ))}
           </ul>
         )}
@@ -226,48 +240,7 @@ function Section({ label, children }: { label: string; children: React.ReactNode
   );
 }
 
-function MilestoneRow({ milestone }: { milestone: Milestone }) {
-  const isDone = milestone.status === 'done';
-  return (
-    <li className="flex items-start gap-3 py-2.5 border-b border-line/40 last:border-b-0">
-      <span
-        className={`mt-0.5 flex h-5 w-5 items-center justify-center border ${
-          isDone ? 'border-ink-2 bg-ink-2' : 'border-line'
-        }`}
-        aria-hidden
-      >
-        {isDone && (
-          <svg viewBox="0 0 16 16" className="h-3 w-3 text-bg">
-            <path
-              d="M3 8l3 3 7-7"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
-        )}
-      </span>
-      <div className="flex-1 min-w-0">
-        <div
-          className={`font-sans text-[14px] leading-snug ${
-            isDone ? 'text-ink-3 line-through decoration-ink-3/60' : 'text-ink'
-          }`}
-        >
-          {milestone.title}
-        </div>
-        {milestone.weight !== 1 && (
-          <div className="mt-0.5 font-mono text-[10px] uppercase tracking-wider text-ink-3">
-            weight {milestone.weight}
-          </div>
-        )}
-      </div>
-    </li>
-  );
-}
-
-function ActivityRow({ entry }: { entry: ActivityLogEntry }) {
+function ActivityRow({ entry, projectId }: { entry: ActivityLogEntry; projectId: string }) {
   const when = new Date(entry.logged_at).toLocaleString('en-US', {
     timeZone: 'America/Denver',
     month: 'short',
@@ -275,31 +248,39 @@ function ActivityRow({ entry }: { entry: ActivityLogEntry }) {
     hour: 'numeric',
     minute: '2-digit',
   });
+  const hours = Number(entry.hours_logged ?? 0);
   return (
-    <li className="flex items-start gap-4 py-2.5 border-b border-line/40 last:border-b-0">
+    <li className="flex items-start gap-4 py-2.5 border-b border-line/40 last:border-b-0 group">
       <span className="font-mono text-[10px] uppercase tracking-wider text-ink-3 w-24 pt-1 shrink-0">
         {when}
       </span>
       <div className="flex-1 min-w-0">
         <div className="font-sans text-[13px] text-ink leading-snug">{entry.entry}</div>
-        {entry.hours_logged != null && Number(entry.hours_logged) > 0 && (
+        {hours > 0 && (
           <div className="mt-0.5 font-mono text-[10px] uppercase tracking-wider text-ink-3">
-            {Number(entry.hours_logged).toFixed(2)}h
+            {hours.toFixed(2)}h
             {entry.source === 'voice' && ' · voice'}
+            {entry.source === 'manual' && ' · manual'}
           </div>
         )}
       </div>
+      <form
+        action={deleteActivityAction}
+        className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+      >
+        <input type="hidden" name="project_id" value={projectId} />
+        <input type="hidden" name="entry_id" value={entry.id} />
+        <button
+          type="submit"
+          aria-label="Delete entry"
+          title={hours > 0 ? `Delete · rolls back ${hours.toFixed(2)}h` : 'Delete entry'}
+          className="font-mono text-[10px] uppercase tracking-wider text-ink-3 hover:text-accent transition-colors pt-1"
+        >
+          ✕
+        </button>
+      </form>
     </li>
   );
-}
-
-function formatMilestoneProgress(milestones: Milestone[]): string {
-  const totalWeight = milestones.reduce((s, m) => s + m.weight, 0);
-  if (totalWeight === 0) return '0%';
-  const doneWeight = milestones
-    .filter((m) => m.status === 'done')
-    .reduce((s, m) => s + m.weight, 0);
-  return `${Math.round((doneWeight / totalWeight) * 100)}%`;
 }
 
 function formatTargetDate(iso: string): string {

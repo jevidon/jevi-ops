@@ -89,11 +89,23 @@ export interface ProjectListItem extends Project {
   color?: string | null;
 }
 
+export interface ProjectChecklistItem {
+  id: string;
+  project_id: string;
+  position: number;
+  title: string;
+  done: boolean;
+  done_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface ProjectDetail {
   project: Project & { domain?: { id: string; name: string } | null };
   milestones: Milestone[];
   tasks: Task[];
   activity: ActivityLogEntry[];
+  checklist: ProjectChecklistItem[];
 }
 
 export const tasksApi = {
@@ -135,6 +147,36 @@ export const projectsApi = {
   create: (body: ProjectCreate) => api.post<Project>('/api/projects', body),
   update: (id: string, body: ProjectUpdate) => api.patch<Project>(`/api/projects/${id}`, body),
   remove: (id: string) => api.delete(`/api/projects/${id}`),
+  milestones: {
+    create: (projectId: string, body: { title: string; weight?: number; position?: number }) =>
+      api.post<Milestone>(`/api/projects/${projectId}/milestones`, body),
+    update: (
+      projectId: string,
+      milestoneId: string,
+      body: { title?: string; status?: 'open' | 'done'; weight?: number; position?: number },
+    ) => api.patch<Milestone>(`/api/projects/${projectId}/milestones/${milestoneId}`, body),
+    remove: (projectId: string, milestoneId: string) =>
+      api.delete(`/api/projects/${projectId}/milestones/${milestoneId}`),
+  },
+  checklist: {
+    add: (projectId: string, body: { title: string; position?: number }) =>
+      api.post<ProjectChecklistItem>(`/api/projects/${projectId}/checklist`, body),
+    update: (
+      projectId: string,
+      itemId: string,
+      body: { title?: string; done?: boolean; position?: number },
+    ) => api.patch<ProjectChecklistItem>(`/api/projects/${projectId}/checklist/${itemId}`, body),
+    remove: (projectId: string, itemId: string) =>
+      api.delete(`/api/projects/${projectId}/checklist/${itemId}`),
+  },
+  activity: {
+    add: (
+      projectId: string,
+      body: { entry: string; hours?: number | null; logged_at?: string },
+    ) => api.post<ActivityLogEntry>(`/api/projects/${projectId}/activity`, body),
+    remove: (projectId: string, entryId: string) =>
+      api.delete(`/api/projects/${projectId}/activity/${entryId}`),
+  },
 };
 
 export interface DomainUpdate {
@@ -408,14 +450,23 @@ export interface Book {
   quote_count?: number;
 }
 
+export interface TagAggregate {
+  tag: string;
+  notes: number;
+  quotes: number;
+  total: number;
+}
+
 export const libraryApi = {
   feed: (limit = 500) =>
     api.get<{ items: FeedItem[] }>(`/api/library/feed?limit=${limit}`),
+  tags: () => api.get<{ tags: TagAggregate[] }>('/api/library/tags'),
   notes: {
-    list: (opts?: { source_type?: string; needs_review?: boolean }) => {
+    list: (opts?: { source_type?: string; needs_review?: boolean; tag?: string }) => {
       const qs = new URLSearchParams();
       if (opts?.source_type) qs.set('source_type', opts.source_type);
       if (opts?.needs_review) qs.set('needs_review', 'true');
+      if (opts?.tag) qs.set('tag', opts.tag);
       const q = qs.toString();
       return api.get<{ notes: Note[] }>(`/api/notes${q ? `?${q}` : ''}`);
     },
@@ -424,7 +475,12 @@ export const libraryApi = {
     remove: (id: string) => api.delete(`/api/notes/${id}`),
   },
   quotes: {
-    list: () => api.get<{ quotes: Quote[] }>('/api/quotes'),
+    list: (opts?: { tag?: string }) => {
+      const qs = new URLSearchParams();
+      if (opts?.tag) qs.set('tag', opts.tag);
+      const q = qs.toString();
+      return api.get<{ quotes: Quote[] }>(`/api/quotes${q ? `?${q}` : ''}`);
+    },
     get: (id: string) =>
       api.get<{ quote: Quote; annotations: QuoteAnnotation[] }>(`/api/quotes/${id}`),
     create: (body: {
@@ -461,6 +517,193 @@ export const libraryApi = {
       api.patch<Book>(`/api/books/${id}`, body),
     remove: (id: string) => api.delete(`/api/books/${id}`),
   },
+};
+
+// ─── People CRM ──────────────────────────────────────────────────────────
+
+export type RelationshipType =
+  | 'client' | 'family' | 'church' | 'friend' | 'team' | 'vendor' | 'other';
+
+export interface Person {
+  id: string;
+  name: string;
+  relationship_type: RelationshipType | null;
+  email: string | null;
+  phone: string | null;
+  company: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+  // Synthesized on list endpoint:
+  interaction_count?: number;
+  fact_count?: number;
+}
+
+export type PersonFactType =
+  | 'anniversary' | 'birthday' | 'kid_name' | 'shared' | 'follow_up' | 'other';
+
+export interface PersonFact {
+  id: string;
+  person_id: string;
+  fact_type: PersonFactType;
+  fact_value: string;
+  source_ref: string | null;
+  date_relevant: string | null;
+  recurring: boolean;
+  created_at: string;
+}
+
+export type PersonInteractionType =
+  | 'email' | 'call' | 'in_person' | 'text' | 'meeting' | 'other';
+
+export interface PersonInteraction {
+  id: string;
+  person_id: string;
+  interaction_type: PersonInteractionType;
+  notes: string | null;
+  occurred_at: string;
+}
+
+export interface PersonDetail {
+  person: Person;
+  facts: PersonFact[];
+  interactions: PersonInteraction[];
+  notes: { id: string; title: string | null; body: string; source_type: string; created_at: string }[];
+  projects: { id: string; name: string; status: string; color: string | null }[];
+}
+
+export interface PersonCreate {
+  name: string;
+  relationship_type?: RelationshipType | null;
+  email?: string | null;
+  phone?: string | null;
+  company?: string | null;
+  notes?: string | null;
+}
+
+export const peopleApi = {
+  list: (opts?: { relationship_type?: RelationshipType }) => {
+    const qs = new URLSearchParams();
+    if (opts?.relationship_type) qs.set('relationship_type', opts.relationship_type);
+    const q = qs.toString();
+    return api.get<{ people: Person[] }>(`/api/people${q ? `?${q}` : ''}`);
+  },
+  get: (id: string) => api.get<PersonDetail>(`/api/people/${id}`),
+  create: (body: PersonCreate) => api.post<Person>('/api/people', body),
+  update: (id: string, body: Partial<PersonCreate>) => api.patch<Person>(`/api/people/${id}`, body),
+  remove: (id: string) => api.delete(`/api/people/${id}`),
+  facts: {
+    add: (personId: string, body: {
+      fact_type: PersonFactType;
+      fact_value: string;
+      date_relevant?: string | null;
+      recurring?: boolean;
+    }) => api.post<PersonFact>(`/api/people/${personId}/facts`, body),
+    update: (personId: string, factId: string, body: Partial<{
+      fact_type: PersonFactType;
+      fact_value: string;
+      date_relevant: string | null;
+      recurring: boolean;
+    }>) => api.patch<PersonFact>(`/api/people/${personId}/facts/${factId}`, body),
+    remove: (personId: string, factId: string) =>
+      api.delete(`/api/people/${personId}/facts/${factId}`),
+  },
+  interactions: {
+    add: (personId: string, body: {
+      interaction_type: PersonInteractionType;
+      notes?: string | null;
+      occurred_at?: string | null;
+    }) => api.post<PersonInteraction>(`/api/people/${personId}/interactions`, body),
+    update: (personId: string, interactionId: string, body: Partial<{
+      interaction_type: PersonInteractionType;
+      notes: string | null;
+      occurred_at: string | null;
+    }>) => api.patch<PersonInteraction>(`/api/people/${personId}/interactions/${interactionId}`, body),
+    remove: (personId: string, interactionId: string) =>
+      api.delete(`/api/people/${personId}/interactions/${interactionId}`),
+  },
+};
+
+// ─── Search ──────────────────────────────────────────────────────────────
+
+export interface SearchNoteHit {
+  id: string;
+  title: string | null;
+  body: string;
+  source_type: NoteSourceType;
+  created_at: string;
+}
+
+export interface SearchQuoteHit {
+  id: string;
+  text: string;
+  source_author: string | null;
+  created_at: string;
+  book?: { id: string; title: string; author: string | null } | null;
+}
+
+export interface SearchTaskHit {
+  id: string;
+  title: string;
+  notes: string | null;
+  status: 'open' | 'done';
+  due_date: string | null;
+  created_at: string;
+  project?: { id: string; name: string; color: string | null } | null;
+}
+
+export interface SearchContentHit {
+  id: string;
+  title: string;
+  type: ContentItemType;
+  status: ContentItemStatus;
+  outline_md: string | null;
+  updated_at: string;
+  domain?: { id: string; name: string } | null;
+}
+
+export interface SearchBookHit {
+  id: string;
+  title: string;
+  author: string | null;
+  status: 'reading' | 'finished' | 'abandoned' | 'want_to_read';
+  created_at: string;
+}
+
+export interface SearchProjectHit {
+  id: string;
+  name: string;
+  description: string | null;
+  status: 'active' | 'paused' | 'done' | 'archived';
+  color: string | null;
+  created_at: string;
+  domain?: { id: string; name: string } | null;
+}
+
+export interface SearchPersonHit {
+  id: string;
+  name: string;
+  relationship_type: RelationshipType | null;
+  email: string | null;
+  company: string | null;
+  notes: string | null;
+  updated_at: string;
+}
+
+export interface SearchResults {
+  query: string;
+  notes: SearchNoteHit[];
+  quotes: SearchQuoteHit[];
+  tasks: SearchTaskHit[];
+  content: SearchContentHit[];
+  books: SearchBookHit[];
+  projects: SearchProjectHit[];
+  people: SearchPersonHit[];
+}
+
+export const searchApi = {
+  search: (q: string) =>
+    api.get<SearchResults>(`/api/search?q=${encodeURIComponent(q)}`),
 };
 
 // ─── Observations ────────────────────────────────────────────────────────

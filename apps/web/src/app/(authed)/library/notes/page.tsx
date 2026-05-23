@@ -2,9 +2,10 @@ import Link from 'next/link';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { ScreenHeader } from '@/components/ScreenHeader';
-import { libraryApi, ApiError, type Note, type NoteSourceType } from '@/lib/api';
+import { libraryApi, ApiError, type Note, type NoteSourceType, type TagAggregate } from '@/lib/api';
 import { LibraryTabBar } from '../library-tab-bar';
 import { PrefsPersist } from '@/components/PrefsPersist';
+import { TagCloud } from '../tag-cloud';
 
 const SOURCE_TYPE_LABELS: Record<NoteSourceType, string> = {
   own_thought: 'Own thought',
@@ -27,22 +28,28 @@ const SOURCE_TYPE_FILTERS: Array<{ value: NoteSourceType | 'all'; label: string 
 export default async function NotesPage({
   searchParams,
 }: {
-  searchParams: Promise<{ source_type?: string; needs_review?: string }>;
+  searchParams: Promise<{ source_type?: string; needs_review?: string; tag?: string }>;
 }) {
   const params = await searchParams;
 
   // Restore last-used filter from cookies if the URL has no params. Same
   // pattern as /library/books — written by <PrefsPersist /> below.
-  if (params.source_type === undefined && params.needs_review === undefined) {
+  if (
+    params.source_type === undefined &&
+    params.needs_review === undefined &&
+    params.tag === undefined
+  ) {
     const jar = await cookies();
     const savedSourceType = jar.get('notes_source_type')?.value;
     const savedNeedsReview = jar.get('notes_needs_review')?.value;
+    const savedTag = jar.get('notes_tag')?.value;
     const validSavedSourceType = savedSourceType && SOURCE_TYPE_FILTERS.find((f) => f.value === savedSourceType)
       ? savedSourceType
       : undefined;
     const qs = new URLSearchParams();
     if (validSavedSourceType && validSavedSourceType !== 'all') qs.set('source_type', validSavedSourceType);
     if (savedNeedsReview === 'true') qs.set('needs_review', 'true');
+    if (savedTag) qs.set('tag', savedTag);
     if (qs.toString()) redirect(`/library/notes?${qs.toString()}`);
   }
 
@@ -52,31 +59,46 @@ export default async function NotesPage({
       : 'all'
   ) as NoteSourceType | 'all';
   const needsReviewOnly = params.needs_review === 'true';
+  const tagFilter = params.tag?.trim() || null;
 
+  // Fetch notes + tag aggregates in parallel. The tag cloud doesn't change
+  // when the source_type filter changes — we want to surface all tags
+  // regardless of the active source filter so the user can broaden their
+  // selection in one click rather than having to clear filters first.
   let notes: Note[] = [];
+  let tagAggregates: TagAggregate[] = [];
   let errorMessage: string | null = null;
   try {
-    const opts: { source_type?: string; needs_review?: boolean } = {};
+    const opts: { source_type?: string; needs_review?: boolean; tag?: string } = {};
     if (filter !== 'all') opts.source_type = filter;
     if (needsReviewOnly) opts.needs_review = true;
-    notes = (await libraryApi.notes.list(opts)).notes;
+    if (tagFilter) opts.tag = tagFilter;
+    const [notesRes, tagsRes] = await Promise.all([
+      libraryApi.notes.list(opts),
+      libraryApi.tags(),
+    ]);
+    notes = notesRes.notes;
+    tagAggregates = tagsRes.tags;
   } catch (err) {
     errorMessage = err instanceof ApiError ? `API ${err.status}` : (err as Error).message;
   }
 
-  const buildHref = (overrides: { source_type?: string; needs_review?: boolean }) => {
+  const buildHref = (overrides: { source_type?: string; needs_review?: boolean; tag?: string | null }) => {
     const params = new URLSearchParams();
     const st = overrides.source_type ?? (filter === 'all' ? undefined : filter);
     if (st) params.set('source_type', st);
     const nr = overrides.needs_review ?? needsReviewOnly;
     if (nr) params.set('needs_review', 'true');
+    // null = explicit clear; undefined = inherit current.
+    const tg = overrides.tag === undefined ? tagFilter : overrides.tag;
+    if (tg) params.set('tag', tg);
     const qs = params.toString();
     return qs ? `/library/notes?${qs}` : '/library/notes';
   };
 
   return (
     <div>
-      <PrefsPersist cookiePrefix="notes" paramNames={['source_type', 'needs_review']} />
+      <PrefsPersist cookiePrefix="notes" paramNames={['source_type', 'needs_review', 'tag']} />
       <ScreenHeader eyebrow="Library" title="Notes" meta={`${notes.length} entries`} />
       <div className="hairline" />
 
@@ -112,6 +134,17 @@ export default async function NotesPage({
         </Link>
       </div>
 
+      {tagAggregates.length > 0 && (
+        <div className="px-5 lg:px-0 pt-2">
+          <TagCloud
+            tags={tagAggregates}
+            selectedTag={tagFilter}
+            source="notes"
+            buildHref={(tag) => buildHref({ tag: tag ?? null })}
+          />
+        </div>
+      )}
+
       {errorMessage ? (
         <div className="px-5 lg:px-0 mt-6 font-sans text-[13px] text-ink-3">Error: {errorMessage}</div>
       ) : notes.length === 0 ? (
@@ -145,6 +178,30 @@ export default async function NotesPage({
                   {n.body}
                 </div>
               </Link>
+              {n.tags && n.tags.length > 0 && (
+                <div className="mt-1.5 flex flex-wrap gap-1">
+                  {n.tags.slice(0, 5).map((t) => (
+                    <Link
+                      key={t}
+                      // Clicking a row tag swaps the active tag filter to that
+                      // tag — a one-click "show me everything else with this".
+                      href={buildHref({ tag: t })}
+                      className={`px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider border transition-colors ${
+                        tagFilter === t
+                          ? 'bg-ink text-bg border-ink'
+                          : 'border-line text-ink-3 hover:text-ink hover:border-ink-2'
+                      }`}
+                    >
+                      #{t}
+                    </Link>
+                  ))}
+                  {n.tags.length > 5 && (
+                    <span className="px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider text-ink-3">
+                      +{n.tags.length - 5}
+                    </span>
+                  )}
+                </div>
+              )}
             </li>
           ))}
         </ul>

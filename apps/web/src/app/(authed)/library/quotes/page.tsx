@@ -2,9 +2,10 @@ import Link from 'next/link';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { ScreenHeader } from '@/components/ScreenHeader';
-import { libraryApi, ApiError, type Quote, type Book } from '@/lib/api';
+import { libraryApi, ApiError, type Quote, type Book, type TagAggregate } from '@/lib/api';
 import { LibraryTabBar } from '../library-tab-bar';
 import { PrefsPersist } from '@/components/PrefsPersist';
+import { TagCloud } from '../tag-cloud';
 
 // /library/quotes — flat list of every saved quote (Readwise highlights +
 // voice-captured + manual). Supports filtering by source_type and by book,
@@ -32,16 +33,22 @@ const SORT_OPTIONS: Array<{ value: SortKey; label: string }> = [
 export default async function QuotesListPage({
   searchParams,
 }: {
-  searchParams: Promise<{ source_type?: string; book_id?: string; sort?: string }>;
+  searchParams: Promise<{ source_type?: string; book_id?: string; sort?: string; tag?: string }>;
 }) {
   const params = await searchParams;
 
   // Cookie restore — same pattern as /library/books and /library/notes.
-  if (params.source_type === undefined && params.book_id === undefined && params.sort === undefined) {
+  if (
+    params.source_type === undefined &&
+    params.book_id === undefined &&
+    params.sort === undefined &&
+    params.tag === undefined
+  ) {
     const jar = await cookies();
     const savedSourceType = jar.get('quotes_source_type')?.value;
     const savedBookId = jar.get('quotes_book_id')?.value;
     const savedSort = jar.get('quotes_sort')?.value;
+    const savedTag = jar.get('quotes_tag')?.value;
     const validSavedSourceType = savedSourceType && SOURCE_TYPE_FILTERS.find((f) => f.value === savedSourceType)
       ? savedSourceType
       : undefined;
@@ -52,6 +59,7 @@ export default async function QuotesListPage({
     if (validSavedSourceType && validSavedSourceType !== 'all') qs.set('source_type', validSavedSourceType);
     if (savedBookId) qs.set('book_id', savedBookId);
     if (validSavedSort && validSavedSort !== 'recent') qs.set('sort', validSavedSort);
+    if (savedTag) qs.set('tag', savedTag);
     if (qs.toString()) redirect(`/library/quotes?${qs.toString()}`);
   }
 
@@ -66,18 +74,27 @@ export default async function QuotesListPage({
       ? params.sort
       : 'recent'
   ) as SortKey;
+  const tagFilter = params.tag?.trim() || null;
 
-  // Fetch quotes + books in parallel. Books list powers the dropdown filter.
+  // Fetch quotes + books + tag aggregates in parallel. Tag filter is
+  // applied server-side (it can drastically cut the result set with 1500+
+  // quotes); source_type and book_id stay client-side because those are
+  // also used by the in-memory dropdown logic.
   let quotes: Quote[] = [];
   let books: Book[] = [];
+  let tagAggregates: TagAggregate[] = [];
   let errorMessage: string | null = null;
   try {
-    const [quotesRes, booksRes] = await Promise.all([
-      libraryApi.quotes.list(),
+    const listOpts: { tag?: string } = {};
+    if (tagFilter) listOpts.tag = tagFilter;
+    const [quotesRes, booksRes, tagsRes] = await Promise.all([
+      libraryApi.quotes.list(listOpts),
       libraryApi.books.list(),
+      libraryApi.tags(),
     ]);
     quotes = quotesRes.quotes;
     books = booksRes.books;
+    tagAggregates = tagsRes.tags;
   } catch (err) {
     errorMessage = err instanceof ApiError ? `API ${err.status}` : (err as Error).message;
   }
@@ -98,14 +115,21 @@ export default async function QuotesListPage({
   // the dropdown short and useful.
   const booksWithQuotes = books.filter((b) => (b.quote_count ?? 0) > 0);
 
-  const buildHref = (overrides: { source_type?: SourceTypeFilter; book_id?: string; sort?: SortKey }) => {
+  const buildHref = (overrides: {
+    source_type?: SourceTypeFilter;
+    book_id?: string;
+    sort?: SortKey;
+    tag?: string | null;
+  }) => {
     const qs = new URLSearchParams();
     const st = overrides.source_type ?? sourceTypeFilter;
     const bk = overrides.book_id ?? bookFilter;
     const so = overrides.sort ?? sort;
+    const tg = overrides.tag === undefined ? tagFilter : overrides.tag;
     if (st !== 'all') qs.set('source_type', st);
     if (bk) qs.set('book_id', bk);
     if (so !== 'recent') qs.set('sort', so);
+    if (tg) qs.set('tag', tg);
     const str = qs.toString();
     return str ? `/library/quotes?${str}` : '/library/quotes';
   };
@@ -114,7 +138,7 @@ export default async function QuotesListPage({
     <div>
       <PrefsPersist
         cookiePrefix="quotes"
-        paramNames={['source_type', 'book_id', 'sort']}
+        paramNames={['source_type', 'book_id', 'sort', 'tag']}
       />
       <ScreenHeader
         eyebrow="Library"
@@ -188,6 +212,15 @@ export default async function QuotesListPage({
             )}
           </div>
         )}
+
+        {tagAggregates.length > 0 && (
+          <TagCloud
+            tags={tagAggregates}
+            selectedTag={tagFilter}
+            source="quotes"
+            buildHref={(tag) => buildHref({ tag: tag ?? null })}
+          />
+        )}
       </div>
 
       {errorMessage ? (
@@ -216,6 +249,28 @@ export default async function QuotesListPage({
                   )}
                 </div>
               </Link>
+              {q.tags && q.tags.length > 0 && (
+                <div className="mt-1.5 flex flex-wrap gap-1">
+                  {q.tags.slice(0, 5).map((t) => (
+                    <Link
+                      key={t}
+                      href={buildHref({ tag: t })}
+                      className={`px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider border transition-colors ${
+                        tagFilter === t
+                          ? 'bg-ink text-bg border-ink'
+                          : 'border-line text-ink-3 hover:text-ink hover:border-ink-2'
+                      }`}
+                    >
+                      #{t}
+                    </Link>
+                  ))}
+                  {q.tags.length > 5 && (
+                    <span className="px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider text-ink-3">
+                      +{q.tags.length - 5}
+                    </span>
+                  )}
+                </div>
+              )}
             </li>
           ))}
         </ul>

@@ -1,5 +1,12 @@
 import type { FastifyPluginAsync } from 'fastify';
-import { CreateProjectSchema, UpdateProjectSchema } from '@jerad-ops/shared/schemas';
+import {
+  CreateProjectSchema,
+  UpdateProjectSchema,
+  CreateMilestoneSchema,
+  UpdateMilestoneSchema,
+  CreateProjectChecklistItemSchema,
+  UpdateProjectChecklistItemSchema,
+} from '@jerad-ops/shared/schemas';
 
 export const projectRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', app.requireAuth);
@@ -20,7 +27,7 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
     const id = req.params.id;
     const sb = req.supabase!;
 
-    const [projectRes, milestonesRes, tasksRes, activityRes] = await Promise.all([
+    const [projectRes, milestonesRes, tasksRes, activityRes, checklistRes] = await Promise.all([
       sb
         .from('projects')
         .select('*, domain:stewardship_domains(id, name)')
@@ -29,6 +36,7 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
       sb.from('milestones').select('*').eq('project_id', id).order('position', { ascending: true }),
       sb.from('tasks').select('*').eq('project_id', id).order('created_at', { ascending: false }).limit(500),
       sb.from('activity_log').select('*').eq('project_id', id).order('logged_at', { ascending: false }).limit(200),
+      sb.from('project_checklist_items').select('*').eq('project_id', id).order('position', { ascending: true }),
     ]);
 
     if (projectRes.error) throw app.httpErrors.internalServerError(projectRes.error.message);
@@ -36,12 +44,14 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
     if (milestonesRes.error) throw app.httpErrors.internalServerError(milestonesRes.error.message);
     if (tasksRes.error) throw app.httpErrors.internalServerError(tasksRes.error.message);
     if (activityRes.error) throw app.httpErrors.internalServerError(activityRes.error.message);
+    if (checklistRes.error) throw app.httpErrors.internalServerError(checklistRes.error.message);
 
     return {
       project: projectRes.data,
       milestones: milestonesRes.data ?? [],
       tasks: tasksRes.data ?? [],
       activity: activityRes.data ?? [],
+      checklist: checklistRes.data ?? [],
     };
   });
 
@@ -93,4 +103,255 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
     if (error) throw app.httpErrors.internalServerError(error.message);
     return reply.code(204).send();
   });
+
+  // ─── Milestones ──────────────────────────────────────────────────────
+  //
+  // Nested under /api/projects/:id so the project_id stays in the path
+  // and the body only ever carries the editable fields. Position defaults
+  // to "end of list" when omitted; status flips stamp/clear completed_at
+  // so the UI doesn't have to manage that field separately.
+
+  app.post<{ Params: { id: string } }>(
+    '/api/projects/:id/milestones',
+    async (req, reply) => {
+      const parsed = CreateMilestoneSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return reply.code(400).send({ error: 'invalid_payload', details: parsed.error.flatten().fieldErrors });
+      }
+      // Default position = current count, i.e. append at end.
+      let position = parsed.data.position;
+      if (position == null) {
+        const { count } = await req.supabase!
+          .from('milestones')
+          .select('id', { count: 'exact', head: true })
+          .eq('project_id', req.params.id);
+        position = count ?? 0;
+      }
+      const { data, error } = await req.supabase!
+        .from('milestones')
+        .insert({
+          project_id: req.params.id,
+          title: parsed.data.title,
+          weight: parsed.data.weight ?? 1,
+          position,
+        })
+        .select('*')
+        .single();
+      if (error) throw app.httpErrors.internalServerError(error.message);
+      return reply.code(201).send(data);
+    },
+  );
+
+  app.patch<{ Params: { id: string; milestoneId: string } }>(
+    '/api/projects/:id/milestones/:milestoneId',
+    async (req, reply) => {
+      const parsed = UpdateMilestoneSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return reply.code(400).send({ error: 'invalid_payload', details: parsed.error.flatten().fieldErrors });
+      }
+      if (Object.keys(parsed.data).length === 0) {
+        return reply.code(400).send({ error: 'empty_payload' });
+      }
+      const update: Record<string, unknown> = { ...parsed.data };
+      // Stamp/clear completed_at when the status flips, so the UI never
+      // has to manage that field directly.
+      if (parsed.data.status === 'done') update.completed_at = new Date().toISOString();
+      if (parsed.data.status === 'open') update.completed_at = null;
+      const { data, error } = await req.supabase!
+        .from('milestones')
+        .update(update)
+        .eq('id', req.params.milestoneId)
+        .eq('project_id', req.params.id)
+        .select('*')
+        .single();
+      if (error) throw app.httpErrors.internalServerError(error.message);
+      return data;
+    },
+  );
+
+  app.delete<{ Params: { id: string; milestoneId: string } }>(
+    '/api/projects/:id/milestones/:milestoneId',
+    async (req, reply) => {
+      const { error } = await req.supabase!
+        .from('milestones')
+        .delete()
+        .eq('id', req.params.milestoneId)
+        .eq('project_id', req.params.id);
+      if (error) throw app.httpErrors.internalServerError(error.message);
+      return reply.code(204).send();
+    },
+  );
+
+  // ─── Project checklist items ─────────────────────────────────────────
+  //
+  // Same shape + behavior as content_checklist_items: append-by-default
+  // positioning, status flip stamps done_at. Lighter-weight than tasks
+  // (no due date, no project_id link) and not weighted (so they don't
+  // affect project %).
+
+  app.post<{ Params: { id: string } }>(
+    '/api/projects/:id/checklist',
+    async (req, reply) => {
+      const parsed = CreateProjectChecklistItemSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return reply.code(400).send({ error: 'invalid_payload', details: parsed.error.flatten().fieldErrors });
+      }
+      let position = parsed.data.position;
+      if (position == null) {
+        const { count } = await req.supabase!
+          .from('project_checklist_items')
+          .select('id', { count: 'exact', head: true })
+          .eq('project_id', req.params.id);
+        position = count ?? 0;
+      }
+      const { data, error } = await req.supabase!
+        .from('project_checklist_items')
+        .insert({
+          project_id: req.params.id,
+          title: parsed.data.title,
+          position,
+        })
+        .select('*')
+        .single();
+      if (error) throw app.httpErrors.internalServerError(error.message);
+      return reply.code(201).send(data);
+    },
+  );
+
+  app.patch<{ Params: { id: string; itemId: string } }>(
+    '/api/projects/:id/checklist/:itemId',
+    async (req, reply) => {
+      const parsed = UpdateProjectChecklistItemSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return reply.code(400).send({ error: 'invalid_payload', details: parsed.error.flatten().fieldErrors });
+      }
+      const update: Record<string, unknown> = { ...parsed.data };
+      if (parsed.data.done === true) update.done_at = new Date().toISOString();
+      if (parsed.data.done === false) update.done_at = null;
+      const { data, error } = await req.supabase!
+        .from('project_checklist_items')
+        .update(update)
+        .eq('id', req.params.itemId)
+        .eq('project_id', req.params.id)
+        .select('*')
+        .single();
+      if (error) throw app.httpErrors.internalServerError(error.message);
+      return data;
+    },
+  );
+
+  app.delete<{ Params: { id: string; itemId: string } }>(
+    '/api/projects/:id/checklist/:itemId',
+    async (req, reply) => {
+      const { error } = await req.supabase!
+        .from('project_checklist_items')
+        .delete()
+        .eq('id', req.params.itemId)
+        .eq('project_id', req.params.id);
+      if (error) throw app.httpErrors.internalServerError(error.message);
+      return reply.code(204).send();
+    },
+  );
+
+  // ─── Activity log (manual time tracking) ─────────────────────────────
+  //
+  // Mirrors what the voice executor's logActivity does: insert a row
+  // into activity_log, then bump projects.hours_logged so the rollup
+  // stays in sync. The source field separates this path ('manual') from
+  // 'voice' so we can tell entries apart on the activity feed.
+  //
+  // Race note: read-then-update on projects.hours_logged is fine because
+  // this is a single-user system. If it ever becomes multi-writer, swap
+  // for an atomic RPC.
+
+  app.post<{ Params: { id: string }; Body: { entry?: string; hours?: number; logged_at?: string } }>(
+    '/api/projects/:id/activity',
+    async (req, reply) => {
+      const entry = String(req.body?.entry ?? '').trim();
+      if (!entry) {
+        return reply.code(400).send({ error: 'invalid_payload', details: { entry: ['required'] } });
+      }
+      const rawHours = req.body?.hours;
+      const hours =
+        typeof rawHours === 'number' && Number.isFinite(rawHours) && rawHours >= 0
+          ? rawHours
+          : null;
+
+      const insert: Record<string, unknown> = {
+        project_id: req.params.id,
+        entry,
+        source: 'manual',
+      };
+      if (hours !== null) insert.hours_logged = hours;
+      if (req.body?.logged_at) insert.logged_at = req.body.logged_at;
+
+      const { data, error } = await req.supabase!
+        .from('activity_log')
+        .insert(insert)
+        .select('*')
+        .single();
+      if (error) throw app.httpErrors.internalServerError(error.message);
+
+      if (hours !== null && hours > 0) {
+        const { data: row, error: readErr } = await req.supabase!
+          .from('projects')
+          .select('hours_logged')
+          .eq('id', req.params.id)
+          .single();
+        if (!readErr) {
+          const current = Number(row?.hours_logged ?? 0);
+          const { error: updateErr } = await req.supabase!
+            .from('projects')
+            .update({ hours_logged: current + hours })
+            .eq('id', req.params.id);
+          if (updateErr) {
+            req.log.warn(
+              { err: updateErr.message, projectId: req.params.id, hours },
+              'activity log row landed but project hours_logged bump failed',
+            );
+          }
+        }
+      }
+
+      return reply.code(201).send(data);
+    },
+  );
+
+  app.delete<{ Params: { id: string; entryId: string } }>(
+    '/api/projects/:id/activity/:entryId',
+    async (req, reply) => {
+      // Roll back the hours_logged contribution when an entry is deleted
+      // so the rollup stays honest. Read the entry first, decrement only
+      // if it had hours.
+      const { data: existing, error: readErr } = await req.supabase!
+        .from('activity_log')
+        .select('hours_logged')
+        .eq('id', req.params.entryId)
+        .eq('project_id', req.params.id)
+        .maybeSingle();
+      if (readErr) throw app.httpErrors.internalServerError(readErr.message);
+      if (!existing) return reply.code(404).send({ error: 'not_found' });
+
+      const hours = Number(existing.hours_logged ?? 0);
+      const { error } = await req.supabase!
+        .from('activity_log')
+        .delete()
+        .eq('id', req.params.entryId)
+        .eq('project_id', req.params.id);
+      if (error) throw app.httpErrors.internalServerError(error.message);
+
+      if (hours > 0) {
+        const { data: row } = await req.supabase!
+          .from('projects')
+          .select('hours_logged')
+          .eq('id', req.params.id)
+          .single();
+        const current = Number(row?.hours_logged ?? 0);
+        const next = Math.max(0, current - hours);
+        await req.supabase!.from('projects').update({ hours_logged: next }).eq('id', req.params.id);
+      }
+
+      return reply.code(204).send();
+    },
+  );
 };
