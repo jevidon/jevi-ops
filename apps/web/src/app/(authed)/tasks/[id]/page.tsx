@@ -96,6 +96,12 @@ export default async function TaskDetailPage({
             priority: task.priority,
             project_id: task.project_id ?? '',
             content_item_id: task.content_item_id ?? '',
+            // Surface the first reminder offset in the single-select UI.
+            // Multi-offset reminders (set via voice) keep all offsets but
+            // we show the smallest one as the "primary" in the form.
+            remind_minutes: task.reminder_offsets?.length
+              ? Math.min(...task.reminder_offsets)
+              : '',
           }}
           projects={projects}
           contentItems={contentItems}

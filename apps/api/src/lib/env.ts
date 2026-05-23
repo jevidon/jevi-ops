@@ -69,6 +69,14 @@ const EnvSchema = z.object({
   // rejects requests without a valid token. See apps/api/src/lib/oauth-bridge.ts.
   // Generate with: openssl rand -hex 32
   OAUTH_BRIDGE_SECRET: z.string().min(32).optional(),
+
+  // Pushover credentials for task due-time reminders. Both required for
+  // /api/cron/reminders to actually dispatch — if either is missing the
+  // cron just logs and exits cleanly so it's safe to enable Pushover later.
+  // PUSHOVER_USER_KEY = your personal user key from the Pushover app.
+  // PUSHOVER_API_TOKEN = the application/API token from pushover.net.
+  PUSHOVER_USER_KEY: z.string().optional(),
+  PUSHOVER_API_TOKEN: z.string().optional(),
 });
 
 const parsed = EnvSchema.safeParse(process.env);

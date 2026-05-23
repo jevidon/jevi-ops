@@ -68,6 +68,7 @@ export default async function NewTaskPage({
             priority: 4,
             project_id: preProject ?? '',
             content_item_id: preContent ?? '',
+            remind_minutes: '',
           }}
           projects={projects}
           contentItems={contentItems}

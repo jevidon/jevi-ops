@@ -18,6 +18,11 @@ const TaskFormSchema = z.object({
   priority: z.coerce.number().int().min(1).max(4),
   project_id: z.string(),
   content_item_id: z.string(),
+  // Single-offset reminder picker on the form. Multi-offset reminders
+  // are still supported via the voice parser (which can produce multiple
+  // entries in reminder_offsets); we just don't expose that complexity
+  // in the manual UI yet.
+  remind_minutes: z.string(),
 });
 
 function readFormFields(formData: FormData) {
@@ -29,10 +34,15 @@ function readFormFields(formData: FormData) {
     priority: formData.get('priority') ?? '4',
     project_id: formData.get('project_id') ?? '',
     content_item_id: formData.get('content_item_id') ?? '',
+    remind_minutes: formData.get('remind_minutes') ?? '',
   });
 }
 
 function toApiPayload(parsed: z.infer<typeof TaskFormSchema>) {
+  const remindParsed = parsed.remind_minutes ? parseInt(parsed.remind_minutes, 10) : NaN;
+  const reminder_offsets = Number.isFinite(remindParsed) && remindParsed > 0
+    ? [remindParsed]
+    : [];
   return {
     title: parsed.title,
     notes: parsed.notes || null,
@@ -41,6 +51,7 @@ function toApiPayload(parsed: z.infer<typeof TaskFormSchema>) {
     priority: parsed.priority,
     project_id: parsed.project_id || null,
     content_item_id: parsed.content_item_id || null,
+    reminder_offsets,
   };
 }
 

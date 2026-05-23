@@ -27,6 +27,7 @@ interface InitialValues {
   priority: number;
   project_id: string;
   content_item_id: string;
+  remind_minutes: number | '';  // '' = no reminder; only effective when due_time is set
 }
 
 // Shared form used by /tasks/new (create) and /tasks/[id] (edit). The
@@ -126,6 +127,20 @@ export function TaskForm({
             {contentItems.map((c) => (
               <option key={c.id} value={c.id}>{c.title}</option>
             ))}
+          </select>
+        </Field>
+
+        <Field label="Remind me (Pushover; requires a due time)">
+          <select
+            name="remind_minutes"
+            defaultValue={initial.remind_minutes === '' ? '' : String(initial.remind_minutes)}
+            className="w-full bg-transparent border border-line focus:border-ink-2 focus:outline-none p-2 font-sans text-[14px] text-ink"
+          >
+            <option value="">No reminder</option>
+            <option value="5">5 minutes before</option>
+            <option value="15">15 minutes before</option>
+            <option value="30">30 minutes before</option>
+            <option value="60">1 hour before</option>
           </select>
         </Field>
 
