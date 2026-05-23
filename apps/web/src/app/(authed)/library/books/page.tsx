@@ -1,7 +1,10 @@
 import Link from 'next/link';
+import { cookies } from 'next/headers';
+import { redirect } from 'next/navigation';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { libraryApi, ApiError, type Book } from '@/lib/api';
 import { LibraryTabBar } from '../library-tab-bar';
+import { BookPrefsPersist } from './persist-prefs';
 
 // /library/books — reading log. Supports filtering by reading status and
 // sorting by title / author / finished date / rating / recently added via
@@ -32,6 +35,28 @@ export default async function BooksPage({
   searchParams: Promise<{ status?: string; sort?: string }>;
 }) {
   const params = await searchParams;
+
+  // If the URL has no filter/sort params, check whether the user has a
+  // saved preference in cookies and redirect to that view. Cookies are
+  // written client-side by <BookPrefsPersist /> whenever the URL changes.
+  // This makes the chip state "sticky" across navigation and reloads
+  // without polluting the canonical URL with default values.
+  if (params.status === undefined && params.sort === undefined) {
+    const jar = await cookies();
+    const savedStatus = jar.get('books_status')?.value;
+    const savedSort = jar.get('books_sort')?.value;
+    const validSavedStatus = savedStatus && STATUS_FILTERS.find((f) => f.value === savedStatus)
+      ? savedStatus
+      : undefined;
+    const validSavedSort = savedSort && SORT_OPTIONS.find((s) => s.value === savedSort)
+      ? savedSort
+      : undefined;
+    const qs = new URLSearchParams();
+    if (validSavedStatus && validSavedStatus !== 'all') qs.set('status', validSavedStatus);
+    if (validSavedSort && validSavedSort !== 'title') qs.set('sort', validSavedSort);
+    if (qs.toString()) redirect(`/library/books?${qs.toString()}`);
+  }
+
   const status = (
     params.status && STATUS_FILTERS.find((f) => f.value === params.status)
       ? params.status
@@ -73,6 +98,7 @@ export default async function BooksPage({
 
   return (
     <div>
+      <BookPrefsPersist />
       <ScreenHeader
         eyebrow="Library"
         title="Books"
