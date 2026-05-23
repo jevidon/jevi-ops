@@ -4,6 +4,7 @@ import { env } from '../lib/env.js';
 import { supabaseAdmin, isSupabaseConfigured } from '../lib/supabase.js';
 import { runObservations } from '../lib/observations.js';
 import { runReminders } from '../lib/reminders.js';
+import { runDailySummary } from '../lib/daily-summary.js';
 import { isPushoverConfigured } from '../lib/pushover.js';
 
 // /api/cron/* — secret-gated endpoints external schedulers hit on a cadence.
@@ -97,4 +98,37 @@ export const cronRoutes: FastifyPluginAsync = async (app) => {
   };
   app.get('/api/cron/reminders', remindersHandler);
   app.post('/api/cron/reminders', remindersHandler);
+
+  // /api/cron/daily-summary — fire once daily (XCloud cron at 7am Mountain)
+  // to send a single Pushover summarizing tasks due, events, observations,
+  // and any needs_review notes. Bails cleanly if there's nothing to report
+  // or if Pushover isn't configured.
+  const dailySummaryHandler = async (req: FastifyRequest, reply: import('fastify').FastifyReply) => {
+    if (!env.CRON_SECRET) {
+      return reply.code(503).send({ error: 'cron_disabled', reason: 'CRON_SECRET not set' });
+    }
+    if (!checkSecret(readSecret(req))) {
+      return reply.code(401).send({ error: 'unauthorized' });
+    }
+    if (!isSupabaseConfigured()) {
+      return reply.code(503).send({ error: 'supabase_not_configured' });
+    }
+    if (!isPushoverConfigured()) {
+      return reply.code(200).send({ skipped: 'pushover_not_configured' });
+    }
+
+    try {
+      const result = await runDailySummary(supabaseAdmin());
+      req.log.info({ event: 'daily_summary_run', ...result }, 'daily summary cron complete');
+      return reply.code(200).send(result);
+    } catch (err) {
+      req.log.error({ err }, 'daily summary cron failed');
+      return reply.code(500).send({
+        error: 'daily_summary_failed',
+        message: err instanceof Error ? err.message : 'unknown',
+      });
+    }
+  };
+  app.get('/api/cron/daily-summary', dailySummaryHandler);
+  app.post('/api/cron/daily-summary', dailySummaryHandler);
 };
