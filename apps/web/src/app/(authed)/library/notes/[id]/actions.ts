@@ -48,7 +48,16 @@ export async function updateNoteAction(
       needs_review,
     });
   } catch (err) {
-    if (err instanceof ApiError) return { ok: false, error: `API ${err.status}` };
+    if (err instanceof ApiError) {
+      // Surface Zod field errors so the UI doesn't just say "API 400" —
+      // makes future schema mismatches debuggable in one click.
+      const body = err.body as { error?: string; details?: Record<string, string[]> } | null;
+      const detailParts = body?.details
+        ? Object.entries(body.details).map(([k, v]) => `${k}: ${v.join('|')}`)
+        : [];
+      const detail = detailParts.length ? ` — ${detailParts.join('; ')}` : '';
+      return { ok: false, error: `API ${err.status} ${body?.error ?? ''}${detail}`.trim() };
+    }
     return { ok: false, error: (err as Error).message };
   }
 
