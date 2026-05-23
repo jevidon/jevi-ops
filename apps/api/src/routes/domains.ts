@@ -1,8 +1,8 @@
 import type { FastifyPluginAsync } from 'fastify';
+import { UpdateDomainSchema } from '@jerad-ops/shared/schemas';
 
-// Read-only domain endpoint. Single-user system, so we surface every active
-// domain. Editing/CRUD on domains lands later once we have the Domain detail
-// screen with failure-pattern editor.
+// Domain CRUD. Single-user system, so we surface every active domain on
+// list. Editing happens via the /domains/[id] detail page on the web side.
 
 export const domainRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', app.requireAuth);
@@ -15,5 +15,37 @@ export const domainRoutes: FastifyPluginAsync = async (app) => {
       .order('name', { ascending: true });
     if (error) throw app.httpErrors.internalServerError(error.message);
     return { domains: data ?? [] };
+  });
+
+  app.get<{ Params: { id: string } }>('/api/domains/:id', async (req, reply) => {
+    const { data, error } = await req.supabase!
+      .from('stewardship_domains')
+      .select('*')
+      .eq('id', req.params.id)
+      .maybeSingle();
+    if (error) throw app.httpErrors.internalServerError(error.message);
+    if (!data) return reply.code(404).send({ error: 'not_found' });
+    return data;
+  });
+
+  app.patch<{ Params: { id: string } }>('/api/domains/:id', async (req, reply) => {
+    const parsed = UpdateDomainSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: 'invalid_payload',
+        details: parsed.error.flatten().fieldErrors,
+      });
+    }
+    if (Object.keys(parsed.data).length === 0) {
+      return reply.code(400).send({ error: 'empty_payload' });
+    }
+    const { data, error } = await req.supabase!
+      .from('stewardship_domains')
+      .update(parsed.data)
+      .eq('id', req.params.id)
+      .select('*')
+      .single();
+    if (error) throw app.httpErrors.internalServerError(error.message);
+    return data;
   });
 };

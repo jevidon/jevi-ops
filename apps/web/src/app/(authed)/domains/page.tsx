@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { EmptyState } from '@/components/EmptyState';
 import { domainsApi, ApiError } from '@/lib/api';
@@ -57,24 +58,29 @@ function DomainRow({ domain }: { domain: Domain }) {
     : 0;
 
   return (
-    <li className="px-5 lg:px-0 py-5 border-b border-line">
-      <div className="font-serif text-[20px] text-ink leading-tight">{domain.name}</div>
+    <li className="border-b border-line">
+      <Link
+        href={`/domains/${domain.id}`}
+        className="block px-5 lg:px-0 py-5 hover:bg-surface/40 transition-colors"
+      >
+        <div className="font-serif text-[20px] text-ink leading-tight">{domain.name}</div>
 
-      {domain.fruit_definition && (
-        <div className="mt-1 font-sans text-[13px] text-ink-2 leading-relaxed">
-          {domain.fruit_definition}
+        {domain.fruit_definition && (
+          <div className="mt-1 font-sans text-[13px] text-ink-2 leading-relaxed">
+            {domain.fruit_definition}
+          </div>
+        )}
+
+        {domain.expected_cadence && (
+          <div className="mt-2 font-mono text-[10px] uppercase tracking-wider text-ink-3">
+            Cadence · {domain.expected_cadence}
+          </div>
+        )}
+
+        <div className="mt-1 font-mono text-[10px] uppercase tracking-wider text-ink-3">
+          {patternCount} failure {patternCount === 1 ? 'pattern' : 'patterns'} watched
         </div>
-      )}
-
-      {domain.expected_cadence && (
-        <div className="mt-2 font-mono text-[10px] uppercase tracking-wider text-ink-3">
-          Cadence · {domain.expected_cadence}
-        </div>
-      )}
-
-      <div className="mt-1 font-mono text-[10px] uppercase tracking-wider text-ink-3">
-        {patternCount} failure {patternCount === 1 ? 'pattern' : 'patterns'} watched
-      </div>
+      </Link>
     </li>
   );
 }

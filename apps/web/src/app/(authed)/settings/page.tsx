@@ -55,9 +55,14 @@ export default async function SettingsPage({
           <Hint>Couldn't read status: {statusError}</Hint>
         ) : !status.configured ? (
           <Hint>
-            Set <code className="font-mono">GOOGLE_OAUTH_CLIENT_ID</code> and{' '}
-            <code className="font-mono">GOOGLE_OAUTH_CLIENT_SECRET</code> in <code>.env</code>{' '}
-            before connecting.
+            Set <code className="font-mono">GOOGLE_OAUTH_CLIENT_ID</code>,{' '}
+            <code className="font-mono">GOOGLE_OAUTH_CLIENT_SECRET</code>, and{' '}
+            <code className="font-mono">GOOGLE_OAUTH_REDIRECT_URI</code> in{' '}
+            <code>.env</code> before connecting. All three must be present —
+            the redirect URI must be the absolute callback URL, e.g.{' '}
+            <code className="font-mono">
+              https://api.your-domain.com/api/auth/google/callback
+            </code>.
           </Hint>
         ) : status.connected ? (
           <ConnectedView status={status} />

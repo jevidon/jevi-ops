@@ -111,8 +111,18 @@ export const projectsApi = {
   get: (id: string) => api.get<ProjectDetail>(`/api/projects/${id}`),
 };
 
+export interface DomainUpdate {
+  name?: string;
+  description?: string | null;
+  fruit_definition?: string | null;
+  expected_cadence?: string | null;
+  active?: boolean;
+}
+
 export const domainsApi = {
   list: () => api.get<{ domains: Domain[] }>('/api/domains'),
+  get: (id: string) => api.get<Domain>(`/api/domains/${id}`),
+  update: (id: string, body: DomainUpdate) => api.patch<Domain>(`/api/domains/${id}`, body),
 };
 
 export interface VoiceCaptureResponse {
