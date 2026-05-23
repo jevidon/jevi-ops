@@ -21,6 +21,9 @@ export async function updateNoteAction(
   const body = String(formData.get('body') ?? '').trim();
   if (!body) return { ok: false, error: 'Body is required.' };
 
+  // Title is optional. Empty string → null so the DB clears any prior value.
+  const title = String(formData.get('title') ?? '').trim() || null;
+
   const rawSourceType = String(formData.get('source_type') ?? 'own_thought');
   const source_type = (VALID_SOURCE_TYPES as string[]).includes(rawSourceType)
     ? (rawSourceType as NoteSourceType)
@@ -37,6 +40,7 @@ export async function updateNoteAction(
 
   try {
     await libraryApi.notes.update(id, {
+      title,
       body,
       source_type,
       source_reference: source_reference ?? null,

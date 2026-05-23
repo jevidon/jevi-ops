@@ -7,6 +7,7 @@ import type { NoteSourceType } from '@/lib/api';
 
 interface InitialValues {
   id: string;
+  title: string;
   body: string;
   source_type: NoteSourceType;
   source_reference: string;
@@ -33,6 +34,17 @@ export function EditNoteForm({ initial }: { initial: InitialValues }) {
     <>
       <form action={formAction} className="flex flex-col gap-5">
         <input type="hidden" name="id" value={initial.id} />
+
+        <Field label="Title (optional)">
+          <input
+            type="text"
+            name="title"
+            defaultValue={initial.title}
+            placeholder="Short headline. Leave blank for voice captures."
+            autoComplete="off"
+            className="w-full bg-transparent border-b border-line focus:border-ink-2 focus:outline-none py-1.5 font-sans text-[15px] text-ink"
+          />
+        </Field>
 
         <Field label="Body">
           <textarea

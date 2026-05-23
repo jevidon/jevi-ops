@@ -134,9 +134,16 @@ export default async function NotesPage({
               </div>
               <Link
                 href={`/library/notes/${n.id}`}
-                className="mt-1 block font-sans text-[14px] text-ink leading-snug hover:text-accent transition-colors line-clamp-3"
+                className="mt-1 block hover:text-accent transition-colors"
               >
-                {n.body}
+                {n.title?.trim() && (
+                  <div className="font-serif text-[15px] text-ink leading-tight">
+                    {n.title}
+                  </div>
+                )}
+                <div className="font-sans text-[14px] text-ink leading-snug line-clamp-3">
+                  {n.body}
+                </div>
               </Link>
             </li>
           ))}

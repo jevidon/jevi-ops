@@ -14,6 +14,7 @@ export const NoteSourceTypeSchema = z.enum([
 
 export const NoteSchema = z.object({
   id: z.string().uuid(),
+  title: z.string().nullable().optional(),
   body: z.string().min(1),
   source_type: NoteSourceTypeSchema,
   source_reference: z.string().nullable().optional(),
@@ -26,6 +27,7 @@ export const NoteSchema = z.object({
 });
 
 export const CreateNoteSchema = z.object({
+  title: z.string().nullable().optional(),
   body: z.string().min(1),
   source_type: NoteSourceTypeSchema.default('own_thought'),
   // Nullable so clients can clear a previously-set value via PATCH. The

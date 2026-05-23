@@ -53,9 +53,14 @@ export default async function NoteDetailPage({
     .filter(Boolean)
     .join(' · ');
 
-  // Truncate the title so a long-bodied note doesn't blow up the header.
-  const title =
-    note.body.length > 80 ? note.body.slice(0, 80).trimEnd() + '…' : note.body;
+  // Prefer the explicit title (set on Obsidian imports + manually-edited
+  // notes). Fall back to a body preview for voice captures and untitled
+  // legacy notes.
+  const headerTitle = note.title?.trim()
+    ? note.title
+    : note.body.length > 80
+      ? note.body.slice(0, 80).trimEnd() + '…'
+      : note.body;
 
   return (
     <div>
@@ -67,7 +72,7 @@ export default async function NoteDetailPage({
 
       <ScreenHeader
         eyebrow={meta}
-        title={title}
+        title={headerTitle}
         meta={`Saved ${new Date(note.created_at).toLocaleDateString('en-US', { timeZone: 'America/Denver', month: 'short', day: 'numeric', year: 'numeric' })}`}
       />
       <div className="hairline mb-6" />
@@ -114,6 +119,7 @@ export default async function NoteDetailPage({
         <EditNoteForm
           initial={{
             id: note.id,
+            title: note.title ?? '',
             body: note.body,
             source_type: note.source_type,
             source_reference: note.source_reference ?? '',

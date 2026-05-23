@@ -717,8 +717,12 @@ async function insertRow(sb: SupabaseClient, file: ParsedFile, route: Route): Pr
     if (error) throw new Error(`quotes insert failed: ${error.message}`);
     return;
   }
-  // note
+  // note — preserve the Obsidian filename (without .md) as the title so
+  // it shows up in headers and lists. Voice captures don't go through
+  // this importer, so they keep title=null.
+  const title = stripMdExt(file.basename);
   const { error } = await sb.from('notes').insert({
+    title: title || null,
     body: file.bodyOriginal,
     source_type: route.source_type,
     source_reference: route.source_reference ?? null,

@@ -241,6 +241,7 @@ export type NoteSourceType =
 
 export interface Note {
   id: string;
+  title: string | null;
   body: string;
   source_type: NoteSourceType;
   source_reference: string | null;
