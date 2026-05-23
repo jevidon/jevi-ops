@@ -299,7 +299,7 @@ export interface FeedItem {
 }
 
 export const libraryApi = {
-  feed: (limit = 60) =>
+  feed: (limit = 500) =>
     api.get<{ items: FeedItem[] }>(`/api/library/feed?limit=${limit}`),
   notes: {
     list: (opts?: { source_type?: string; needs_review?: boolean }) => {

@@ -15,7 +15,7 @@ export const libraryRoutes: FastifyPluginAsync = async (app) => {
   app.get<{ Querystring: { source_type?: string; needs_review?: string; limit?: string } }>(
     '/api/notes',
     async (req) => {
-      const limit = Math.min(parseInt(req.query.limit ?? '100', 10) || 100, 500);
+      const limit = Math.min(parseInt(req.query.limit ?? '500', 10) || 500, 2000);
       let q = req.supabase!
         .from('notes')
         .select('*, project:projects(id, name, color), person:people(id, name), quote:quotes(id, text)')
@@ -74,7 +74,7 @@ export const libraryRoutes: FastifyPluginAsync = async (app) => {
   // ─── Quotes ────────────────────────────────────────────────────────────
 
   app.get<{ Querystring: { limit?: string } }>('/api/quotes', async (req) => {
-    const limit = Math.min(parseInt(req.query.limit ?? '100', 10) || 100, 500);
+    const limit = Math.min(parseInt(req.query.limit ?? '500', 10) || 500, 2000);
     const { data, error } = await req.supabase!
       .from('quotes')
       .select('*, book:books(id, title, author), annotations:quote_annotations(id)')
@@ -158,7 +158,7 @@ export const libraryRoutes: FastifyPluginAsync = async (app) => {
   // ─── Journal entries (read-only for now; create happens via voice) ────
 
   app.get<{ Querystring: { limit?: string } }>('/api/journal-entries', async (req) => {
-    const limit = Math.min(parseInt(req.query.limit ?? '100', 10) || 100, 500);
+    const limit = Math.min(parseInt(req.query.limit ?? '500', 10) || 500, 2000);
     const { data, error } = await req.supabase!
       .from('journal_entries')
       .select('*')
@@ -171,7 +171,10 @@ export const libraryRoutes: FastifyPluginAsync = async (app) => {
   // ─── Unified library feed (all sources, chronological) ────────────────
 
   app.get<{ Querystring: { limit?: string } }>('/api/library/feed', async (req) => {
-    const limit = Math.min(parseInt(req.query.limit ?? '60', 10) || 60, 200);
+    // Raised from 200 → 2000 to accommodate bulk-imported vaults. At that
+    // scale we'll eventually need pagination, but for now letting the UI
+    // ask for everything is simpler than building an infinite-scroll feed.
+    const limit = Math.min(parseInt(req.query.limit ?? '60', 10) || 60, 2000);
     const sb = req.supabase!;
     const [notes, quotes, annotations, journal] = await Promise.all([
       sb.from('notes').select('id, body, source_type, created_at').order('created_at', { ascending: false }).limit(limit),
