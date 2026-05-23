@@ -38,6 +38,15 @@ export default async function ProjectsPage() {
       <ScreenHeader eyebrow="Active work" title="Projects" meta={`${projects.length} total`} />
       <div className="hairline" />
 
+      <div className="px-5 lg:px-0 pt-3 flex justify-end">
+        <Link
+          href="/projects/new"
+          className="font-mono text-[11px] uppercase tracking-wider text-ink-3 hover:text-accent transition-colors"
+        >
+          + New project
+        </Link>
+      </div>
+
       {errorMessage ? (
         <EmptyState title="Couldn't load projects" body={errorMessage} />
       ) : projects.length === 0 ? (

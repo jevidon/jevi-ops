@@ -4,6 +4,7 @@ import { ScreenHeader } from '@/components/ScreenHeader';
 import { TaskItem } from '@/components/TaskItem';
 import {
   projectsApi,
+  domainsApi,
   ApiError,
   type ProjectDetail,
   type Milestone,
@@ -11,6 +12,7 @@ import {
 } from '@/lib/api';
 import { isToday } from '@/lib/today';
 import { ProjectColorPicker } from './color-picker';
+import { ProjectForm } from '../project-form';
 
 // /projects/[id] — project detail. Mirrors the mockup's project detail:
 // header with status/hours/target, weighted milestone progress, open tasks,
@@ -31,10 +33,16 @@ export default async function ProjectDetailPage({
   const { id } = await params;
 
   let detail: ProjectDetail | null = null;
+  let domains: { id: string; name: string }[] = [];
   let errorMessage: string | null = null;
 
   try {
-    detail = await projectsApi.get(id);
+    const [detailRes, domainsRes] = await Promise.all([
+      projectsApi.get(id),
+      domainsApi.list(),
+    ]);
+    detail = detailRes;
+    domains = domainsRes.domains.map((d) => ({ id: d.id, name: d.name }));
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) {
       notFound();
@@ -178,6 +186,33 @@ export default async function ProjectDetailPage({
           </details>
         </section>
       )}
+
+      {/* Edit + delete — collapsed by default to keep the focus on
+          the project's content above. Click to expand. */}
+      <section className="px-5 lg:px-0 mt-12 max-w-2xl">
+        <details className="border border-line">
+          <summary className="cursor-pointer px-3 py-2 font-mono text-[10px] uppercase tracking-wider text-ink-3 hover:text-ink-2 transition-colors list-none">
+            Edit project ▾
+          </summary>
+          <div className="px-4 pb-4 pt-3 border-t border-line">
+            <ProjectForm
+              domains={domains}
+              initial={{
+                id: project.id,
+                name: project.name,
+                description: project.description ?? '',
+                domain_id: project.domain_id ?? '',
+                type: (project.type as '' | 'client' | 'internal' | 'content') ?? '',
+                status: project.status as 'active' | 'paused' | 'done' | 'archived',
+                quoted_hours: project.quoted_hours != null ? String(project.quoted_hours) : '',
+                start_date: project.start_date ?? '',
+                target_date: project.target_date ?? '',
+                color: project.color ?? '',
+              }}
+            />
+          </div>
+        </details>
+      </section>
     </div>
   );
 }

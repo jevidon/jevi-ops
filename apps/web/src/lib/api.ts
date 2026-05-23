@@ -113,9 +113,28 @@ export const tasksApi = {
   remove: (id: string) => api.delete(`/api/tasks/${id}`),
 };
 
+export interface ProjectCreate {
+  name: string;
+  description?: string | null;
+  domain_id?: string | null;
+  type?: 'client' | 'internal' | 'content' | null;
+  client_id?: string | null;
+  quoted_hours?: number | null;
+  start_date?: string | null;
+  target_date?: string | null;
+  color?: string | null;
+}
+
+export interface ProjectUpdate extends Partial<ProjectCreate> {
+  status?: 'active' | 'paused' | 'done' | 'archived';
+}
+
 export const projectsApi = {
   list: () => api.get<{ projects: ProjectListItem[] }>('/api/projects'),
   get: (id: string) => api.get<ProjectDetail>(`/api/projects/${id}`),
+  create: (body: ProjectCreate) => api.post<Project>('/api/projects', body),
+  update: (id: string, body: ProjectUpdate) => api.patch<Project>(`/api/projects/${id}`, body),
+  remove: (id: string) => api.delete(`/api/projects/${id}`),
 };
 
 export interface DomainUpdate {

@@ -81,4 +81,16 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
     if (error) throw app.httpErrors.internalServerError(error.message);
     return data;
   });
+
+  app.delete<{ Params: { id: string } }>('/api/projects/:id', async (req, reply) => {
+    // tasks.project_id has ON DELETE SET NULL so child tasks are preserved
+    // and just unlinked. Milestones cascade-delete via their FK. Activity
+    // log entries lose their project_id but rows stick around.
+    const { error } = await req.supabase!
+      .from('projects')
+      .delete()
+      .eq('id', req.params.id);
+    if (error) throw app.httpErrors.internalServerError(error.message);
+    return reply.code(204).send();
+  });
 };
