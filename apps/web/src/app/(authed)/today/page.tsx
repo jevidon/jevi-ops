@@ -3,8 +3,15 @@ import { AccountChip } from '@/components/AccountChip';
 import { TaskItem } from '@/components/TaskItem';
 import { AddTaskForm } from './add-task-form';
 import Link from 'next/link';
-import { tasksApi, calendarApi, notificationsApi, observationsApi, ApiError, type CalendarEvent, type Notification, type Observation } from '@/lib/api';
+import { tasksApi, calendarApi, notificationsApi, observationsApi, libraryApi, ApiError, type CalendarEvent, type Notification, type Observation, type Note } from '@/lib/api';
 import { dismissObservationAction } from './actions';
+import {
+  classifyAsOwnThoughtAction,
+  classifyAsReadingAction,
+  classifyAsMeetingAction,
+  classifyAsBrainstormAction,
+  clearReviewFlagAction,
+} from './needs-review-actions';
 import { todayIsoDate, isToday } from '@/lib/today';
 import type { Task } from '@jerad-ops/shared';
 
@@ -80,18 +87,20 @@ export default async function TodayPage() {
   let events: CalendarEvent[] = [];
   let notifications: Notification[] = [];
   let observations: Observation[] = [];
+  let needsReview: Note[] = [];
   let unreadCount = 0;
   let errorMessage: string | null = null;
 
   // Fetch in parallel — task list is the priority, everything else is
   // non-fatal (Google might not be connected, observations cron might not
   // have run, etc.).
-  const [taskRes, eventRes, notifRes, countRes, obsRes] = await Promise.allSettled([
+  const [taskRes, eventRes, notifRes, countRes, obsRes, reviewRes] = await Promise.allSettled([
     tasksApi.list(),
     calendarApi.upcoming(4),
     notificationsApi.list('unread', 3),
     notificationsApi.count(),
     observationsApi.list(true, 5),
+    libraryApi.notes.list({ needs_review: true }),
   ]);
   if (taskRes.status === 'fulfilled') {
     tasks = taskRes.value.tasks;
@@ -103,6 +112,7 @@ export default async function TodayPage() {
   if (notifRes.status === 'fulfilled') notifications = notifRes.value.notifications;
   if (countRes.status === 'fulfilled') unreadCount = countRes.value.unread;
   if (obsRes.status === 'fulfilled') observations = obsRes.value.observations;
+  if (reviewRes.status === 'fulfilled') needsReview = reviewRes.value.notes;
 
   const { top3, inbox, doneToday } = splitTasks(tasks);
   const emptySlots = Math.max(0, 3 - top3.length);
@@ -193,6 +203,20 @@ export default async function TodayPage() {
           <Section label="Resurfacing">
             <Hint>One journal entry, quote, or saved verse rotates here daily.</Hint>
           </Section>
+
+          {needsReview.length > 0 && (
+            <Section
+              label={`Needs review · ${needsReview.length}`}
+              actionHref="/library/notes?needs_review=true"
+              actionLabel="View all"
+            >
+              <ul className="flex flex-col gap-3">
+                {needsReview.slice(0, 6).map((n) => (
+                  <NeedsReviewRow key={n.id} note={n} />
+                ))}
+              </ul>
+            </Section>
+          )}
 
           <Section
             label={`Notifications${unreadCount > 0 ? ` · ${unreadCount} unread` : ''}`}
@@ -404,6 +428,74 @@ function ObservationCard({ observation }: { observation: Observation }) {
         </div>
       </div>
     </li>
+  );
+}
+
+// One row in the Needs Review rail. Each classify button is its own
+// form so the buttons stay independent and the action runs server-side.
+function NeedsReviewRow({ note }: { note: Note }) {
+  const headline = note.title?.trim()
+    ? note.title
+    : note.body.length > 70
+      ? note.body.slice(0, 70).trimEnd() + '…'
+      : note.body;
+
+  return (
+    <li className="border border-line p-3">
+      <Link
+        href={`/library/notes/${note.id}`}
+        className="block font-serif text-[14px] text-ink leading-snug hover:text-accent transition-colors mb-2"
+      >
+        {headline}
+      </Link>
+      {note.body && note.title && (
+        <div className="font-sans text-[12px] text-ink-2 leading-snug line-clamp-2 mb-2">
+          {note.body}
+        </div>
+      )}
+      <div className="flex flex-wrap gap-1.5">
+        <ClassifyChip action={classifyAsOwnThoughtAction} id={note.id} label="Own" />
+        <ClassifyChip action={classifyAsReadingAction} id={note.id} label="Reading" />
+        <ClassifyChip action={classifyAsMeetingAction} id={note.id} label="Meeting" />
+        <ClassifyChip action={classifyAsBrainstormAction} id={note.id} label="Brainstorm" />
+        <ClassifyChip
+          action={clearReviewFlagAction}
+          id={note.id}
+          label="✓ Clear"
+          subtle
+        />
+      </div>
+    </li>
+  );
+}
+
+// Each chip is a tiny form wrapping a single submit button. Distinct
+// component to keep the JSX inside NeedsReviewRow readable.
+function ClassifyChip({
+  action,
+  id,
+  label,
+  subtle = false,
+}: {
+  action: (formData: FormData) => Promise<void>;
+  id: string;
+  label: string;
+  subtle?: boolean;
+}) {
+  return (
+    <form action={action}>
+      <input type="hidden" name="id" value={id} />
+      <button
+        type="submit"
+        className={`px-2 py-0.5 border font-mono text-[10px] uppercase tracking-wider transition-colors ${
+          subtle
+            ? 'border-line text-ink-3 hover:border-ink-2 hover:text-ink-2'
+            : 'border-line text-ink-2 hover:border-ink hover:text-ink hover:bg-surface'
+        }`}
+      >
+        {label}
+      </button>
+    </form>
   );
 }
 
