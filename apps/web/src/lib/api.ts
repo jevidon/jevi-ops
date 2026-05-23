@@ -119,6 +119,23 @@ export interface DomainUpdate {
   active?: boolean;
 }
 
+export const contentApi = {
+  list: (opts?: { status?: string; domain_id?: string; type?: string }) => {
+    const qs = new URLSearchParams();
+    if (opts?.status) qs.set('status', opts.status);
+    if (opts?.domain_id) qs.set('domain_id', opts.domain_id);
+    if (opts?.type) qs.set('type', opts.type);
+    const s = qs.toString();
+    return api.get<{ items: ContentItem[] }>(`/api/content${s ? `?${s}` : ''}`);
+  },
+  get: (id: string) => api.get<ContentItem>(`/api/content/${id}`),
+  create: (body: Partial<ContentItem> & { title: string }) =>
+    api.post<ContentItem>('/api/content', body),
+  update: (id: string, body: Partial<ContentItem>) =>
+    api.patch<ContentItem>(`/api/content/${id}`, body),
+  remove: (id: string) => api.delete(`/api/content/${id}`),
+};
+
 export const domainsApi = {
   list: () => api.get<{ domains: Domain[] }>('/api/domains'),
   get: (id: string) => api.get<Domain>(`/api/domains/${id}`),
@@ -297,6 +314,29 @@ export interface FeedItem {
   id: string;
   at: string;
   payload: Record<string, unknown>;
+}
+
+export type ContentItemStatus =
+  | 'idea' | 'outline' | 'filming' | 'editing'
+  | 'published' | 'derivatives_pending' | 'done';
+
+export type ContentItemType =
+  | 'video' | 'article' | 'short_clip' | 'podcast_episode' | 'newsletter';
+
+export interface ContentItem {
+  id: string;
+  title: string;
+  domain_id: string | null;
+  type: ContentItemType;
+  status: ContentItemStatus;
+  outline_md: string | null;
+  video_url: string | null;
+  published_at: string | null;
+  parent_id: string | null;
+  derivative_type: string | null;
+  created_at: string;
+  updated_at: string;
+  domain?: { id: string; name: string } | null;
 }
 
 export interface Book {

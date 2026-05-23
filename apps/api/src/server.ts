@@ -19,6 +19,7 @@ import { notificationRoutes } from './routes/notifications.js';
 import { observationRoutes } from './routes/observations.js';
 import { cronRoutes } from './routes/cron.js';
 import { libraryRoutes } from './routes/library.js';
+import { contentRoutes } from './routes/content.js';
 
 export async function buildServer() {
   const app = Fastify({
@@ -58,6 +59,7 @@ export async function buildServer() {
   await app.register(observationRoutes);
   await app.register(cronRoutes);
   await app.register(libraryRoutes);
+  await app.register(contentRoutes);
 
   app.get('/', async () => ({
     name: 'jerad-ops/api',

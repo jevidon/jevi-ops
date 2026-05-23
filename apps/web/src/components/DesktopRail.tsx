@@ -8,13 +8,14 @@ import { signOutAction } from '@/app/sign-in/actions';
 // tabs list but presented vertically with active-tab indication on the left
 // edge. Hidden on mobile (BottomTabBar takes over).
 
-// Tasks replaces Content in the primary nav until Content's pipeline UI lands.
+// Content's pipeline UI shipped; People is still a stub. Surface Content
+// in the nav and route People via direct URL until People's CRM UI is real.
 const TABS = [
   { href: '/today', label: 'Today' },
   { href: '/tasks', label: 'Tasks' },
   { href: '/projects', label: 'Projects' },
+  { href: '/content', label: 'Content' },
   { href: '/domains', label: 'Domains' },
-  { href: '/people', label: 'People' },
   { href: '/library', label: 'Library' },
 ] as const;
 

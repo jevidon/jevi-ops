@@ -4,15 +4,16 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
 // Spec §4 prescribed six tabs (Today, Domains, Projects, Content, People,
-// Library). Swapped Content → Tasks because Tasks is core to daily use and
-// Content has no UI yet (Phase 2 feature). Content is still reachable by
-// direct URL until its kanban + derivative spawn UI lands.
+// Library). Tasks replaces Domains-as-primary because tasks are the daily
+// driver. People is still a stub so we surface Content (real, with pipeline
+// + filter + edit) in its slot; People reclaims the slot once its CRM UI
+// ships. Domains is still reachable via direct URL.
 const TABS = [
   { href: '/today', label: 'Today' },
   { href: '/tasks', label: 'Tasks' },
   { href: '/projects', label: 'Projects' },
+  { href: '/content', label: 'Content' },
   { href: '/domains', label: 'Domains' },
-  { href: '/people', label: 'People' },
   { href: '/library', label: 'Library' },
 ] as const;
 
