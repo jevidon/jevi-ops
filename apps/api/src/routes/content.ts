@@ -3,8 +3,12 @@ import {
   CreateContentItemSchema, UpdateContentItemSchema,
   CreateContentChecklistItemSchema, UpdateContentChecklistItemSchema,
 } from '@jerad-ops/shared/schemas';
-import { defaultChecklistItemsFor } from '../lib/content-checklist-templates.js';
-import type { ContentItemType } from '@jerad-ops/shared';
+import {
+  defaultChecklistItemsFor,
+  targetStatusForTitle,
+  maxStatus,
+} from '../lib/content-checklist-templates.js';
+import type { ContentItemType, ContentItemStatus } from '@jerad-ops/shared';
 
 // Content items CRUD — videos, articles, podcasts, etc. Joins domain on
 // fetch so the UI can show the channel name + color without a second
@@ -157,6 +161,38 @@ export const contentRoutes: FastifyPluginAsync = async (app) => {
         .select('*')
         .single();
       if (error) throw app.httpErrors.internalServerError(error.message);
+
+      // Auto-progress the parent content_item's status when a known
+      // checklist title gets checked off. Forward-only: never regress on
+      // an uncheck or out-of-order check. Failures here are non-fatal —
+      // the checklist update already succeeded.
+      if (parsed.data.done === true) {
+        const target = targetStatusForTitle(data.title as string);
+        if (target) {
+          const itemRes = await req.supabase!
+            .from('content_items')
+            .select('status')
+            .eq('id', req.params.id)
+            .maybeSingle();
+          if (!itemRes.error && itemRes.data) {
+            const current = itemRes.data.status as ContentItemStatus;
+            const next = maxStatus(current, target);
+            if (next !== current) {
+              const { error: progErr } = await req.supabase!
+                .from('content_items')
+                .update({ status: next, updated_at: new Date().toISOString() })
+                .eq('id', req.params.id);
+              if (progErr) {
+                req.log.warn(
+                  { err: progErr.message, contentId: req.params.id, target },
+                  'status auto-progression failed',
+                );
+              }
+            }
+          }
+        }
+      }
+
       return data;
     },
   );
