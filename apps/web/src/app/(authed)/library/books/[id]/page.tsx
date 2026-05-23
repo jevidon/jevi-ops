@@ -88,13 +88,21 @@ export default async function BookDetailPage({
         </div>
 
         {/* Highlights */}
+        <div className="flex items-baseline justify-between mb-4">
+          <div className="eyebrow">Highlights</div>
+          <Link
+            href={`/library/quotes/new?book_id=${book.id}`}
+            className="font-mono text-[10px] uppercase tracking-wider text-ink-3 hover:text-accent transition-colors"
+          >
+            + Add highlight
+          </Link>
+        </div>
         {quotes.length === 0 ? (
           <div className="font-sans text-[13px] text-ink-3 italic">
             No highlights for this book yet.
           </div>
         ) : (
           <div>
-            <div className="eyebrow mb-4">Highlights</div>
             <ul className="space-y-6">
               {quotes.map((q) => (
                 <li key={q.id} className="border-l-2 border-line pl-4">

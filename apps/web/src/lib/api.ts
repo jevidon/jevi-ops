@@ -333,6 +333,19 @@ export const libraryApi = {
     list: () => api.get<{ quotes: Quote[] }>('/api/quotes'),
     get: (id: string) =>
       api.get<{ quote: Quote; annotations: QuoteAnnotation[] }>(`/api/quotes/${id}`),
+    create: (body: {
+      text: string;
+      book_id?: string | null;
+      page_number?: number | null;
+      chapter?: string | null;
+      source_type?: string | null;
+      source_ref?: string | null;
+      source_author?: string | null;
+      tags?: string[];
+      added_via?: string;
+    }) => api.post<Quote>('/api/quotes', body),
+    update: (id: string, body: Partial<Quote>) =>
+      api.patch<Quote>(`/api/quotes/${id}`, body),
     remove: (id: string) => api.delete(`/api/quotes/${id}`),
   },
   annotations: {

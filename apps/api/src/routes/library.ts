@@ -3,6 +3,7 @@ import {
   CreateNoteSchema, UpdateNoteSchema,
   CreateQuoteAnnotationSchema, UpdateQuoteAnnotationSchema,
   CreateBookSchema, UpdateBookSchema,
+  CreateQuoteSchema, UpdateQuoteSchema,
 } from '@jerad-ops/shared/schemas';
 
 // Library CRUD — notes, quotes, quote_annotations, journal_entries, books.
@@ -110,6 +111,38 @@ export const libraryRoutes: FastifyPluginAsync = async (app) => {
     if (!quoteRes.data) return reply.code(404).send({ error: 'not_found' });
     if (annoRes.error) throw app.httpErrors.internalServerError(annoRes.error.message);
     return { quote: quoteRes.data, annotations: annoRes.data ?? [] };
+  });
+
+  app.post('/api/quotes', async (req, reply) => {
+    const parsed = CreateQuoteSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'invalid_payload', details: parsed.error.flatten().fieldErrors });
+    }
+    const { data, error } = await req.supabase!
+      .from('quotes')
+      .insert(parsed.data)
+      .select('*')
+      .single();
+    if (error) throw app.httpErrors.internalServerError(error.message);
+    return reply.code(201).send(data);
+  });
+
+  app.patch<{ Params: { id: string } }>('/api/quotes/:id', async (req, reply) => {
+    const parsed = UpdateQuoteSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'invalid_payload', details: parsed.error.flatten().fieldErrors });
+    }
+    if (Object.keys(parsed.data).length === 0) {
+      return reply.code(400).send({ error: 'empty_payload' });
+    }
+    const { data, error } = await req.supabase!
+      .from('quotes')
+      .update(parsed.data)
+      .eq('id', req.params.id)
+      .select('*')
+      .single();
+    if (error) throw app.httpErrors.internalServerError(error.message);
+    return data;
   });
 
   app.delete<{ Params: { id: string } }>('/api/quotes/:id', async (req, reply) => {

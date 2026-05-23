@@ -35,6 +35,26 @@ export const QuoteSchema = z.object({
   created_at: z.string().datetime({ offset: true }),
 });
 
+// Source types and added_via values that the DB CHECK constraint accepts —
+// strict subsets of the Zod enums above (which include some Phase-2
+// values like 'sermon' that the 0001 migration doesn't cover yet).
+const DB_SOURCE_TYPES = ['book', 'article', 'podcast', 'conversation', 'other'] as const;
+const DB_ADDED_VIA = ['voice', 'readwise_import', 'manual', 'journal_extraction'] as const;
+
+export const CreateQuoteSchema = z.object({
+  text: z.string().min(1),
+  book_id: z.string().uuid().nullable().optional(),
+  page_number: z.number().int().nullable().optional(),
+  chapter: z.string().nullable().optional(),
+  source_type: z.enum(DB_SOURCE_TYPES).nullable().optional(),
+  source_ref: z.string().nullable().optional(),     // legacy column name
+  source_author: z.string().nullable().optional(),
+  tags: z.array(z.string()).optional(),
+  added_via: z.enum(DB_ADDED_VIA).optional(),
+});
+
+export const UpdateQuoteSchema = CreateQuoteSchema.partial();
+
 // ─── Quote annotations ──────────────────────────────────────────────────
 
 export const AnnotationContextSchema = z.enum([

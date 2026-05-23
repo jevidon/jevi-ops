@@ -162,6 +162,12 @@ export default async function QuotesListPage({
               </Link>
             ))}
           </div>
+          <Link
+            href="/library/quotes/new"
+            className="ml-auto font-mono text-[11px] uppercase tracking-wider text-ink-3 hover:text-accent transition-colors"
+          >
+            + Add highlight
+          </Link>
         </div>
 
         {booksWithQuotes.length > 0 && (

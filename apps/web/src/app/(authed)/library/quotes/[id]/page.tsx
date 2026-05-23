@@ -10,6 +10,7 @@ import {
 } from '@/lib/api';
 import { AddAnnotationForm } from './add-annotation-form';
 import { deleteAnnotationAction, deleteQuoteAction } from './actions';
+import { QuoteForm } from '../quote-form';
 
 // /library/quotes/[id] — quote at top in serif italic, then annotations
 // chronologically with context labels. Bottom: add-annotation form. Header
@@ -31,12 +32,19 @@ export default async function QuoteDetailPage({
 
   let quote: Quote | null = null;
   let annotations: QuoteAnnotation[] = [];
+  let books: { id: string; title: string; author: string | null }[] = [];
   let errorMessage: string | null = null;
 
   try {
-    const res = await libraryApi.quotes.get(id);
-    quote = res.quote;
-    annotations = res.annotations;
+    // Fetch the quote (with annotations) and the books list in parallel —
+    // the books list powers the dropdown inside the edit form.
+    const [quoteRes, booksRes] = await Promise.all([
+      libraryApi.quotes.get(id),
+      libraryApi.books.list(),
+    ]);
+    quote = quoteRes.quote;
+    annotations = quoteRes.annotations;
+    books = booksRes.books.map((b) => ({ id: b.id, title: b.title, author: b.author }));
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) notFound();
     errorMessage = err instanceof ApiError ? `API ${err.status}` : (err as Error).message;
@@ -85,6 +93,31 @@ export default async function QuoteDetailPage({
       <div className="hairline mb-6" />
 
       <div className="px-5 lg:px-0 max-w-2xl">
+        {/* Edit panel — collapsed by default to keep the focus on the
+            quote text + annotations. Open it to fix transcription
+            errors, change page number, add tags, rebind to a book, etc. */}
+        <details className="mb-8 border border-line">
+          <summary className="cursor-pointer px-3 py-2 font-mono text-[10px] uppercase tracking-wider text-ink-3 hover:text-ink-2 transition-colors list-none">
+            Edit highlight ▾
+          </summary>
+          <div className="px-4 pb-4 pt-3 border-t border-line">
+            <QuoteForm
+              books={books}
+              initial={{
+                id: quote.id,
+                text: quote.text,
+                book_id: quote.book?.id ?? '',
+                source_type: quote.source_type ?? '',
+                source_author: quote.source_author ?? '',
+                source_ref: quote.source_reference ?? '',
+                page_number: quote.page_number != null ? String(quote.page_number) : '',
+                chapter: quote.chapter ?? '',
+                tags: (quote.tags ?? []).join(', '),
+              }}
+            />
+          </div>
+        </details>
+
         {/* Thoughts / annotations */}
         <section>
           <div className="eyebrow mb-3">
