@@ -317,6 +317,93 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
     },
   );
 
+  app.patch<{
+    Params: { id: string; entryId: string };
+    Body: { entry?: string; hours?: number | null; logged_at?: string };
+  }>(
+    '/api/projects/:id/activity/:entryId',
+    async (req, reply) => {
+      // Read the existing row to compute the hours delta. If the user
+      // changes 1.5h → 2.0h, projects.hours_logged must move +0.5; if
+      // they clear hours entirely, it must roll back the old amount.
+      const { data: existing, error: readErr } = await req.supabase!
+        .from('activity_log')
+        .select('hours_logged')
+        .eq('id', req.params.entryId)
+        .eq('project_id', req.params.id)
+        .maybeSingle();
+      if (readErr) throw app.httpErrors.internalServerError(readErr.message);
+      if (!existing) return reply.code(404).send({ error: 'not_found' });
+
+      const update: Record<string, unknown> = {};
+      if (typeof req.body?.entry === 'string') {
+        const trimmed = req.body.entry.trim();
+        if (!trimmed) {
+          return reply.code(400).send({ error: 'invalid_payload', details: { entry: ['required'] } });
+        }
+        update.entry = trimmed;
+      }
+      // hours: undefined → no change. null → clear (treat as 0). number → set.
+      let newHours: number | null | undefined;
+      if (req.body && 'hours' in req.body) {
+        const raw = req.body.hours;
+        if (raw === null) {
+          newHours = null;
+          update.hours_logged = null;
+        } else if (typeof raw === 'number' && Number.isFinite(raw) && raw >= 0) {
+          newHours = raw;
+          update.hours_logged = raw;
+        } else {
+          return reply.code(400).send({ error: 'invalid_payload', details: { hours: ['must be a non-negative number or null'] } });
+        }
+      }
+      if (req.body?.logged_at) {
+        update.logged_at = req.body.logged_at;
+      }
+      if (Object.keys(update).length === 0) {
+        return reply.code(400).send({ error: 'empty_payload' });
+      }
+
+      const { data, error } = await req.supabase!
+        .from('activity_log')
+        .update(update)
+        .eq('id', req.params.entryId)
+        .eq('project_id', req.params.id)
+        .select('*')
+        .single();
+      if (error) throw app.httpErrors.internalServerError(error.message);
+
+      // Apply the hours delta to projects.hours_logged. Only runs when
+      // the user actually touched the hours field (newHours !== undefined).
+      if (newHours !== undefined) {
+        const oldHours = Number(existing.hours_logged ?? 0);
+        const effectiveNew = newHours ?? 0;
+        const delta = effectiveNew - oldHours;
+        if (delta !== 0) {
+          const { data: row } = await req.supabase!
+            .from('projects')
+            .select('hours_logged')
+            .eq('id', req.params.id)
+            .single();
+          const current = Number(row?.hours_logged ?? 0);
+          const next = Math.max(0, current + delta);
+          const { error: bumpErr } = await req.supabase!
+            .from('projects')
+            .update({ hours_logged: next })
+            .eq('id', req.params.id);
+          if (bumpErr) {
+            req.log.warn(
+              { err: bumpErr.message, projectId: req.params.id, delta },
+              'activity row updated but project hours_logged bump failed',
+            );
+          }
+        }
+      }
+
+      return data;
+    },
+  );
+
   app.delete<{ Params: { id: string; entryId: string } }>(
     '/api/projects/:id/activity/:entryId',
     async (req, reply) => {

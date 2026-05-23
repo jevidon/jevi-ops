@@ -3,11 +3,13 @@
 import { useActionState, useEffect, useRef } from 'react';
 import { addActivityAction, type SaveResult } from './activity-actions';
 
-// Inline "log time" form mounted above the activity list. Two inputs:
-// `entry` (what you did) + `hours` (free-form: 1.5, "1h30m", "45m").
-// Submitting refreshes the activity list and bumps the project's total
-// hours via the server action. Description-only entries (no hours) are
-// allowed — useful for status notes ("client called, requested scope change").
+// Inline "log time" form mounted above the activity list. Three inputs:
+// `entry` (what you did), `hours` (free-form: 1.5, "1h30m", "45m"), and
+// an optional `logged_at` (datetime-local) for backfilling — leave blank
+// and the server stamps "now". Submitting refreshes the activity list
+// and bumps the project's total hours via the server action.
+// Description-only entries (no hours) are allowed — useful for status
+// notes ("client called, requested scope change").
 
 export function LogTimeForm({ projectId }: { projectId: string }) {
   const [state, formAction, pending] = useActionState<SaveResult | null, FormData>(
@@ -50,6 +52,14 @@ export function LogTimeForm({ projectId }: { projectId: string }) {
           aria-label="Hours (e.g. 1.5, 1h30m, 45m)"
           title="Hours — enter a number (1.5), or '1h30m', '45m'"
           className="w-24 bg-transparent border-b border-line focus:border-accent focus:outline-none py-1.5 font-mono text-[13px] text-ink text-center placeholder:text-ink-3/60"
+        />
+        <input
+          type="datetime-local"
+          name="logged_at"
+          disabled={pending}
+          aria-label="When"
+          title="When (optional — leave blank to stamp 'now')"
+          className="bg-transparent border-b border-line focus:border-accent focus:outline-none py-1.5 font-mono text-[12px] text-ink-2"
         />
         <button
           type="submit"

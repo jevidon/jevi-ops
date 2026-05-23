@@ -7,7 +7,6 @@ import {
   domainsApi,
   ApiError,
   type ProjectDetail,
-  type ActivityLogEntry,
 } from '@/lib/api';
 import { isToday } from '@/lib/today';
 import { ProjectColorPicker } from './color-picker';
@@ -15,7 +14,7 @@ import { ProjectForm } from '../project-form';
 import { MilestonesSection } from './milestones-section';
 import { ChecklistSection } from './checklist-section';
 import { LogTimeForm } from './log-time-form';
-import { deleteActivityAction } from './activity-actions';
+import { ActivityRow } from './activity-row';
 
 // /projects/[id] — project detail. Mirrors the mockup's project detail:
 // header with status/hours/target, weighted milestone progress, open tasks,
@@ -172,11 +171,18 @@ export default async function ProjectDetailPage({
             <span className="font-mono">log thirty minutes on {project.name} reviewing PR feedback</span>.
           </p>
         ) : (
-          <ul>
-            {activity.map((a) => (
-              <ActivityRow key={a.id} entry={a} projectId={project.id} />
-            ))}
-          </ul>
+          <>
+            <ul>
+              {activity.map((a) => (
+                <ActivityRow key={a.id} entry={a} projectId={project.id} />
+              ))}
+            </ul>
+            {/* Help text for the click-to-edit affordance, since it's a
+                new pattern and not entirely obvious. */}
+            <div className="mt-2 font-mono text-[10px] uppercase tracking-wider text-ink-3 italic">
+              Click any row to edit the entry, hours, or timestamp.
+            </div>
+          </>
         )}
       </Section>
 
@@ -237,49 +243,6 @@ function Section({ label, children }: { label: string; children: React.ReactNode
       <div className="eyebrow pb-2 border-b border-line mb-3">{label}</div>
       {children}
     </section>
-  );
-}
-
-function ActivityRow({ entry, projectId }: { entry: ActivityLogEntry; projectId: string }) {
-  const when = new Date(entry.logged_at).toLocaleString('en-US', {
-    timeZone: 'America/Denver',
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  });
-  const hours = Number(entry.hours_logged ?? 0);
-  return (
-    <li className="flex items-start gap-4 py-2.5 border-b border-line/40 last:border-b-0 group">
-      <span className="font-mono text-[10px] uppercase tracking-wider text-ink-3 w-24 pt-1 shrink-0">
-        {when}
-      </span>
-      <div className="flex-1 min-w-0">
-        <div className="font-sans text-[13px] text-ink leading-snug">{entry.entry}</div>
-        {hours > 0 && (
-          <div className="mt-0.5 font-mono text-[10px] uppercase tracking-wider text-ink-3">
-            {hours.toFixed(2)}h
-            {entry.source === 'voice' && ' · voice'}
-            {entry.source === 'manual' && ' · manual'}
-          </div>
-        )}
-      </div>
-      <form
-        action={deleteActivityAction}
-        className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
-      >
-        <input type="hidden" name="project_id" value={projectId} />
-        <input type="hidden" name="entry_id" value={entry.id} />
-        <button
-          type="submit"
-          aria-label="Delete entry"
-          title={hours > 0 ? `Delete · rolls back ${hours.toFixed(2)}h` : 'Delete entry'}
-          className="font-mono text-[10px] uppercase tracking-wider text-ink-3 hover:text-accent transition-colors pt-1"
-        >
-          ✕
-        </button>
-      </form>
-    </li>
   );
 }
 

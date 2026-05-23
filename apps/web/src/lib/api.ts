@@ -174,6 +174,11 @@ export const projectsApi = {
       projectId: string,
       body: { entry: string; hours?: number | null; logged_at?: string },
     ) => api.post<ActivityLogEntry>(`/api/projects/${projectId}/activity`, body),
+    update: (
+      projectId: string,
+      entryId: string,
+      body: { entry?: string; hours?: number | null; logged_at?: string },
+    ) => api.patch<ActivityLogEntry>(`/api/projects/${projectId}/activity/${entryId}`, body),
     remove: (projectId: string, entryId: string) =>
       api.delete(`/api/projects/${projectId}/activity/${entryId}`),
   },
