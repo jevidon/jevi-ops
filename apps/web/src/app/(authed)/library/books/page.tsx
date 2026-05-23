@@ -34,7 +34,11 @@ export default async function BooksPage() {
           No books yet. Readwise imports + voice book captures land here.
         </div>
       ) : (
-        <ul className="px-5 lg:px-0 mt-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-4 gap-y-6">
+        // Denser grid — Readwise/Kindle cover images are ~200px wide, so
+        // larger cards just stretch them. Mobile shows 3-up, scales to 5
+        // from md+ where 5 still gives each card ~150px which matches the
+        // cover image's native resolution.
+        <ul className="px-5 lg:px-0 mt-4 grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-x-3 gap-y-5">
           {books.map((b) => (
             <BookCard key={b.id} book={b} />
           ))}
