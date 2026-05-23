@@ -18,6 +18,7 @@ interface InitialValues {
   status: ContentItemStatus;
   outline_md: string;
   video_url: string;
+  article_url: string;
   published_at: string;        // YYYY-MM-DD for the date input
 }
 
@@ -110,6 +111,16 @@ export function ContentForm({
             name="video_url"
             defaultValue={initial.video_url}
             placeholder="https://youtube.com/watch?v=..."
+            className="w-full bg-transparent border-b border-line focus:border-ink-2 focus:outline-none py-1.5 font-sans text-[13px] text-ink"
+          />
+        </Field>
+
+        <Field label="Article URL (companion blog post / Substack / etc.)">
+          <input
+            type="url"
+            name="article_url"
+            defaultValue={initial.article_url}
+            placeholder="https://..."
             className="w-full bg-transparent border-b border-line focus:border-ink-2 focus:outline-none py-1.5 font-sans text-[13px] text-ink"
           />
         </Field>

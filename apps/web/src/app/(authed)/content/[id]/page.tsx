@@ -71,6 +71,48 @@ export default async function ContentDetailPage({
       <div className="hairline mb-6" />
 
       <div className="px-5 lg:px-0 max-w-2xl">
+        {/* Video embed + links — surface above tasks so the content itself
+            is the first thing on the page (it's what the page is about).
+            Only renders when there's actually something to show. */}
+        {(item.video_url || item.article_url) && (
+          <section className="mb-10">
+            {item.video_url && youtubeEmbedSrc(item.video_url) && (
+              <div className="mb-4 aspect-video bg-surface border border-line overflow-hidden">
+                {/* eslint-disable-next-line jsx-a11y/iframe-has-title */}
+                <iframe
+                  src={youtubeEmbedSrc(item.video_url)!}
+                  title={item.title}
+                  className="w-full h-full"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                  allowFullScreen
+                />
+              </div>
+            )}
+            <div className="flex flex-wrap gap-x-4 gap-y-2 font-mono text-[10px] uppercase tracking-wider text-ink-3">
+              {item.video_url && (
+                <a
+                  href={item.video_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="hover:text-accent transition-colors break-all"
+                >
+                  ↗ Video URL
+                </a>
+              )}
+              {item.article_url && (
+                <a
+                  href={item.article_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="hover:text-accent transition-colors break-all"
+                >
+                  ↗ Article URL
+                </a>
+              )}
+            </div>
+          </section>
+        )}
+
         {/* Linked tasks — surface above the edit form so the user sees
             their checklist of TODOs at a glance. */}
         <section className="mb-10">
@@ -130,10 +172,38 @@ export default async function ContentDetailPage({
             status: item.status,
             outline_md: item.outline_md ?? '',
             video_url: item.video_url ?? '',
+            article_url: item.article_url ?? '',
             published_at: publishedDate,
           }}
         />
       </div>
     </div>
   );
+}
+
+// Convert a YouTube watch/share URL to an embed URL. Returns null for
+// non-YouTube URLs so the caller can decide not to render an iframe.
+//
+// Handles the common shapes:
+//   https://www.youtube.com/watch?v=ID
+//   https://youtu.be/ID
+//   https://youtube.com/shorts/ID
+//   https://www.youtube.com/embed/ID  (already an embed; passes through)
+function youtubeEmbedSrc(url: string): string | null {
+  try {
+    const u = new URL(url);
+    const host = u.hostname.replace(/^www\./, '');
+    let id: string | null = null;
+    if (host === 'youtu.be') {
+      id = u.pathname.replace(/^\//, '').split('/')[0] ?? null;
+    } else if (host === 'youtube.com' || host === 'm.youtube.com') {
+      if (u.pathname === '/watch') id = u.searchParams.get('v');
+      else if (u.pathname.startsWith('/shorts/')) id = u.pathname.replace('/shorts/', '').split('/')[0] ?? null;
+      else if (u.pathname.startsWith('/embed/')) id = u.pathname.replace('/embed/', '').split('/')[0] ?? null;
+    }
+    if (!id || !/^[\w-]{6,}$/.test(id)) return null;
+    return `https://www.youtube.com/embed/${id}`;
+  } catch {
+    return null;
+  }
 }

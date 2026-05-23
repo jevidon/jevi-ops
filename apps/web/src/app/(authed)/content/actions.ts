@@ -22,12 +22,13 @@ function readContentFields(formData: FormData) {
   const domain_id = String(formData.get('domain_id') ?? '').trim() || null;
   const outline_md = String(formData.get('outline_md') ?? '').trim() || null;
   const video_url = String(formData.get('video_url') ?? '').trim() || null;
+  const article_url = String(formData.get('article_url') ?? '').trim() || null;
   const publishedRaw = String(formData.get('published_at') ?? '').trim();
   // Form gives YYYY-MM-DD; DB needs timestamptz. Pin to noon UTC to stay
   // on the chosen day regardless of viewer timezone.
   const published_at = publishedRaw ? `${publishedRaw}T12:00:00Z` : null;
 
-  return { title, type, status, domain_id, outline_md, video_url, published_at };
+  return { title, type, status, domain_id, outline_md, video_url, article_url, published_at };
 }
 
 export async function createContentAction(

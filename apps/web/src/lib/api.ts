@@ -357,6 +357,7 @@ export interface ContentItem {
   status: ContentItemStatus;
   outline_md: string | null;
   video_url: string | null;
+  article_url: string | null;
   published_at: string | null;
   parent_id: string | null;
   derivative_type: string | null;

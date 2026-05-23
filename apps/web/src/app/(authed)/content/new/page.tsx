@@ -44,6 +44,7 @@ export default async function NewContentPage({
             status: 'idea',
             outline_md: '',
             video_url: '',
+            article_url: '',
             published_at: '',
           }}
         />

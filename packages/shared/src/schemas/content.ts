@@ -23,6 +23,7 @@ export const ContentItemSchema = z.object({
   status: ContentItemStatusSchema,
   outline_md: z.string().nullable().optional(),
   video_url: z.string().nullable().optional(),
+  article_url: z.string().nullable().optional(),
   published_at: z.string().datetime({ offset: true }).nullable().optional(),
   parent_id: z.string().uuid().nullable().optional(),
   derivative_type: z.string().nullable().optional(),
@@ -39,6 +40,7 @@ export const CreateContentItemSchema = z.object({
   status: ContentItemStatusSchema.optional(),
   outline_md: z.string().nullable().optional(),
   video_url: z.string().nullable().optional(),
+  article_url: z.string().nullable().optional(),
   published_at: z.string().nullable().optional(), // ISO date or datetime; DB column is timestamptz
   parent_id: z.string().uuid().nullable().optional(),
   derivative_type: z.string().nullable().optional(),
