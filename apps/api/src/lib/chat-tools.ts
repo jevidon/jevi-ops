@@ -267,6 +267,212 @@ function endOfWeek(d: Date): Date {
   return endOfDay(x);
 }
 
+// ─── search_people ──────────────────────────────────────────────────────
+//
+// Lookup against the People CRM. Returns people matching the filter
+// along with their facts (birthdays/anniversaries/kids/follow-ups) and
+// recent interactions. One tool covers both "who do I know named Randy"
+// (multi-result list) and "tell me about Randy" (single match with full
+// detail), with the caller using name_contains for both.
+
+const searchPeople: ChatTool = {
+  name: 'search_people',
+  description: "Look up people (the user's CRM) by name, relationship type, or company. Returns each matching person plus their facts (birthdays, anniversaries, kid names, follow-ups) and last 5 interactions. Use this for questions like 'when is Randy's birthday', 'who do I know at Acme', 'when did I last talk to Sam', 'what's my client list'.",
+  input_schema: {
+    type: 'object',
+    properties: {
+      name_contains: { type: 'string', description: 'Substring to match in the person\'s name (case-insensitive)' },
+      relationship_type: {
+        type: 'string',
+        enum: ['client', 'family', 'church', 'friend', 'team', 'vendor', 'other'],
+        description: 'Filter by relationship',
+      },
+      company_contains: { type: 'string', description: 'Substring to match in the company/org field' },
+    },
+  },
+  handler: async (input, sb) => {
+    let q = sb
+      .from('people')
+      .select('id, name, relationship_type, email, phone, company, notes, updated_at')
+      .order('name', { ascending: true })
+      .limit(20);
+    if (typeof input.name_contains === 'string') q = q.ilike('name', `%${input.name_contains}%`);
+    if (typeof input.relationship_type === 'string') q = q.eq('relationship_type', input.relationship_type);
+    if (typeof input.company_contains === 'string') q = q.ilike('company', `%${input.company_contains}%`);
+    const { data: people, error } = await q;
+    if (error) return { error: error.message };
+    if (!people || people.length === 0) return { matches: 0, results: [] };
+
+    // Fan out to facts + interactions in one batch each. Cheaper than
+    // per-person queries when the result set is small.
+    const ids = people.map((p) => p.id);
+    const [factsRes, intRes] = await Promise.all([
+      sb.from('person_facts')
+        .select('person_id, fact_type, fact_value, date_relevant, recurring')
+        .in('person_id', ids)
+        .order('date_relevant', { ascending: true, nullsFirst: false }),
+      sb.from('person_interactions')
+        .select('person_id, interaction_type, notes, occurred_at')
+        .in('person_id', ids)
+        .order('occurred_at', { ascending: false })
+        .limit(ids.length * 5),
+    ]);
+
+    const factsBy = new Map<string, unknown[]>();
+    for (const f of factsRes.data ?? []) {
+      const list = factsBy.get(f.person_id) ?? [];
+      list.push({
+        type: f.fact_type,
+        value: f.fact_value,
+        date: f.date_relevant,
+        recurring: f.recurring,
+      });
+      factsBy.set(f.person_id, list);
+    }
+    const intsBy = new Map<string, unknown[]>();
+    for (const i of intRes.data ?? []) {
+      const list = intsBy.get(i.person_id) ?? [];
+      // Trim each person to their 5 most recent.
+      if (list.length < 5) {
+        list.push({
+          type: i.interaction_type,
+          notes: i.notes,
+          occurred_at: i.occurred_at,
+        });
+      }
+      intsBy.set(i.person_id, list);
+    }
+
+    const results = people.map((p) => ({
+      ...p,
+      facts: factsBy.get(p.id) ?? [],
+      recent_interactions: intsBy.get(p.id) ?? [],
+    }));
+    return { matches: results.length, results };
+  },
+};
+
+// ─── search_routines ────────────────────────────────────────────────────
+//
+// Daily habits + streak data. Useful for questions like "what's my
+// streak on read the Bible", "did I take meds today", "which routines
+// haven't I done today".
+
+const searchRoutines: ChatTool = {
+  name: 'search_routines',
+  description: 'Search the user\'s daily routines (habits with streak tracking). Returns each routine with current streak, longest streak, whether it\'s done today, and recent completion history. Use for questions about habits, streaks, daily routines, or "did I do X today".',
+  input_schema: {
+    type: 'object',
+    properties: {
+      name_contains: { type: 'string', description: 'Substring to match in the routine name' },
+      time_of_day: {
+        type: 'string',
+        enum: ['morning', 'afternoon', 'evening', 'anytime'],
+        description: 'Filter to routines in a specific time bucket',
+      },
+      include_archived: { type: 'boolean', description: 'Include archived (inactive) routines' },
+    },
+  },
+  handler: async (input, sb) => {
+    let q = sb
+      .from('routines')
+      .select('id, name, description, time_of_day, specific_time, active, completions:routine_completions(completed_date)')
+      .order('position', { ascending: true });
+    if (input.include_archived !== true) q = q.eq('active', true);
+    if (typeof input.name_contains === 'string') q = q.ilike('name', `%${input.name_contains}%`);
+    if (typeof input.time_of_day === 'string') q = q.eq('time_of_day', input.time_of_day);
+    const { data, error } = await q;
+    if (error) return { error: error.message };
+
+    // Compute today + last-90-day stats inline. We mirror what
+    // routine-stats.ts does in shared but keep this self-contained so
+    // the chat tool doesn't depend on a workspace import.
+    const todayIso = todayInTz('America/Denver');
+    type Row = {
+      id: string;
+      name: string;
+      description: string | null;
+      time_of_day: string;
+      specific_time: string | null;
+      active: boolean;
+      completions?: { completed_date: string }[];
+    };
+
+    const results = ((data ?? []) as Row[]).map((r) => {
+      const dates = (r.completions ?? [])
+        .map((c) => c.completed_date)
+        .sort()
+        .reverse();
+      const set = new Set(dates);
+      const done_today = set.has(todayIso);
+
+      // Current streak: walks back from today (or yesterday if today
+      // isn't done yet — same forgiveness rule as the UI).
+      let current = 0;
+      let cursor = todayIso;
+      if (!set.has(cursor)) {
+        cursor = shiftDay(cursor, -1);
+        if (!set.has(cursor)) cursor = '';
+      }
+      while (cursor && set.has(cursor)) {
+        current += 1;
+        cursor = shiftDay(cursor, -1);
+      }
+
+      // Last 7d / 30d windows.
+      const last7 = dates.filter((d) => daysBetween(d, todayIso) < 7).length;
+      const last30 = dates.filter((d) => daysBetween(d, todayIso) < 30).length;
+
+      return {
+        id: r.id,
+        name: r.name,
+        description: r.description,
+        time_of_day: r.time_of_day,
+        specific_time: r.specific_time,
+        active: r.active,
+        done_today,
+        current_streak: current,
+        completions_7d: last7,
+        completions_30d: last30,
+        total_completions: dates.length,
+        recent_completions: dates.slice(0, 10),
+      };
+    });
+    return { matches: results.length, today: todayIso, results };
+  },
+};
+
+function todayInTz(tz: string): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(new Date());
+  const g = (t: string) => parts.find((p) => p.type === t)?.value ?? '';
+  return `${g('year')}-${g('month')}-${g('day')}`;
+}
+
+function shiftDay(iso: string, n: number): string {
+  const y = parseInt(iso.slice(0, 4), 10);
+  const m = parseInt(iso.slice(5, 7), 10) - 1;
+  const d = parseInt(iso.slice(8, 10), 10);
+  const date = new Date(Date.UTC(y, m, d + n));
+  return date.toISOString().slice(0, 10);
+}
+
+function daysBetween(fromIso: string, toIso: string): number {
+  const from = Date.UTC(
+    parseInt(fromIso.slice(0, 4), 10),
+    parseInt(fromIso.slice(5, 7), 10) - 1,
+    parseInt(fromIso.slice(8, 10), 10),
+  );
+  const to = Date.UTC(
+    parseInt(toIso.slice(0, 4), 10),
+    parseInt(toIso.slice(5, 7), 10) - 1,
+    parseInt(toIso.slice(8, 10), 10),
+  );
+  return Math.round((to - from) / 86_400_000);
+}
+
 // ─── Registry ──────────────────────────────────────────────────────────
 
 export const CHAT_TOOLS: ChatTool[] = [
@@ -276,6 +482,8 @@ export const CHAT_TOOLS: ChatTool[] = [
   searchAnnotations,
   getProjectSummary,
   getRecentEvents,
+  searchPeople,
+  searchRoutines,
 ];
 
 export function toolDefsForAnthropic(): Anthropic.Tool[] {
