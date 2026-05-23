@@ -1,7 +1,10 @@
 import Link from 'next/link';
+import { cookies } from 'next/headers';
+import { redirect } from 'next/navigation';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { libraryApi, ApiError, type Note, type NoteSourceType } from '@/lib/api';
 import { LibraryTabBar } from '../library-tab-bar';
+import { PrefsPersist } from '@/components/PrefsPersist';
 
 const SOURCE_TYPE_LABELS: Record<NoteSourceType, string> = {
   own_thought: 'Own thought',
@@ -27,6 +30,22 @@ export default async function NotesPage({
   searchParams: Promise<{ source_type?: string; needs_review?: string }>;
 }) {
   const params = await searchParams;
+
+  // Restore last-used filter from cookies if the URL has no params. Same
+  // pattern as /library/books — written by <PrefsPersist /> below.
+  if (params.source_type === undefined && params.needs_review === undefined) {
+    const jar = await cookies();
+    const savedSourceType = jar.get('notes_source_type')?.value;
+    const savedNeedsReview = jar.get('notes_needs_review')?.value;
+    const validSavedSourceType = savedSourceType && SOURCE_TYPE_FILTERS.find((f) => f.value === savedSourceType)
+      ? savedSourceType
+      : undefined;
+    const qs = new URLSearchParams();
+    if (validSavedSourceType && validSavedSourceType !== 'all') qs.set('source_type', validSavedSourceType);
+    if (savedNeedsReview === 'true') qs.set('needs_review', 'true');
+    if (qs.toString()) redirect(`/library/notes?${qs.toString()}`);
+  }
+
   const filter = (
     params.source_type && SOURCE_TYPE_FILTERS.find((f) => f.value === params.source_type)
       ? params.source_type
@@ -57,6 +76,7 @@ export default async function NotesPage({
 
   return (
     <div>
+      <PrefsPersist cookiePrefix="notes" paramNames={['source_type', 'needs_review']} />
       <ScreenHeader eyebrow="Library" title="Notes" meta={`${notes.length} entries`} />
       <div className="hairline" />
 

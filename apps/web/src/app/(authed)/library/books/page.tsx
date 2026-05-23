@@ -4,7 +4,7 @@ import { redirect } from 'next/navigation';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { libraryApi, ApiError, type Book } from '@/lib/api';
 import { LibraryTabBar } from '../library-tab-bar';
-import { BookPrefsPersist } from './persist-prefs';
+import { PrefsPersist } from '@/components/PrefsPersist';
 
 // /library/books — reading log. Supports filtering by reading status and
 // sorting by title / author / finished date / rating / recently added via
@@ -98,7 +98,7 @@ export default async function BooksPage({
 
   return (
     <div>
-      <BookPrefsPersist />
+      <PrefsPersist cookiePrefix="books" paramNames={['status', 'sort']} />
       <ScreenHeader
         eyebrow="Library"
         title="Books"
