@@ -78,6 +78,17 @@ export function RoutinesTodayList({
   );
 }
 
+// Today's local date in YYYY-MM-DD, in America/Denver. Used to decide
+// whether a `last_missed_sent_date` value is "today" for the badge.
+function todayIsoInAppTz(): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Denver',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(new Date());
+  const g = (t: string) => parts.find((p) => p.type === t)?.value ?? '';
+  return `${g('year')}-${g('month')}-${g('day')}`;
+}
+
 function RoutineTodayRow({
   routine,
   compact,
@@ -88,6 +99,10 @@ function RoutineTodayRow({
   const { stats } = routine;
   const isDone = stats.done_today;
   const timeLabel = formatTime(routine.specific_time);
+  // A routine is "currently missed" only if today's cron flagged it AND
+  // it still isn't done. Once you check it off the streak still resets
+  // (the missed ping already fired) but we stop yelling about it.
+  const isMissed = !isDone && routine.last_missed_sent_date === todayIsoInAppTz();
 
   return (
     <li className={`flex items-center gap-3 ${compact ? 'py-1' : 'py-2'}`}>
@@ -112,13 +127,21 @@ function RoutineTodayRow({
         href={`/routines/${routine.id}`}
         className={`flex-1 min-w-0 font-sans ${
           compact ? 'text-[13px]' : 'text-[14px]'
-        } ${isDone ? 'text-ink-3 line-through decoration-ink-3/60' : 'text-ink'} hover:text-accent transition-colors flex items-baseline gap-2`}
+        } ${isDone ? 'text-ink-3 line-through decoration-ink-3/60' : isMissed ? 'text-accent' : 'text-ink'} hover:text-accent transition-colors flex items-baseline gap-2`}
       >
         <span className="truncate">{routine.name}</span>
+        {isMissed && (
+          <span
+            className="font-mono text-[10px] uppercase tracking-wider shrink-0 text-accent"
+            title="A missed-routine Pushover was sent today and the routine is still unchecked."
+          >
+            ⚠ missed
+          </span>
+        )}
         {timeLabel && (
           <span
             className={`font-mono text-[10px] uppercase tracking-wider shrink-0 ${
-              isDone ? 'text-ink-3' : 'text-ink-2'
+              isDone ? 'text-ink-3' : isMissed ? 'text-accent/80' : 'text-ink-2'
             }`}
             title={routine.reminder_enabled ? 'Reminder Pushover fires at this time' : undefined}
           >

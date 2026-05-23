@@ -26,9 +26,11 @@ interface RoutineRow {
   id: string;
   name: string;
   description: string | null;
+  time_of_day: 'morning' | 'afternoon' | 'evening' | 'anytime' | null;
   specific_time: string | null;       // HH:MM[:SS]
   reminder_enabled: boolean;
   last_reminder_sent_date: string | null;
+  last_missed_sent_date: string | null;
   active: boolean;
 }
 
@@ -38,6 +40,38 @@ export interface RoutineReminderResult {
   failed: number;
   skipped_done: number;
 }
+
+export interface RoutineMissedResult {
+  considered: number;
+  dispatched: number;
+  failed: number;
+}
+
+// Bucket deadlines in minutes-since-midnight (America/Denver). When the
+// local clock crosses one of these and the routine isn't done, we send
+// a missed ping. Tuned to "reasonable end of the window" rather than
+// hard time-of-day boundaries.
+//
+//   morning  → end at 12:00 (noon)
+//   afternoon → end at 17:00 (5pm)
+//   evening  → end at 22:00 (10pm)
+//   anytime  → no deadline, no missed ping
+const BUCKET_DEADLINE_MIN: Record<string, number | null> = {
+  morning: 12 * 60,
+  afternoon: 17 * 60,
+  evening: 22 * 60,
+  anytime: null,
+};
+
+// How long after the deadline we still consider firing a missed ping.
+// Past this, the cron stays quiet — old missed events are stale (you
+// already know you skipped it). A 30-minute trailing window means a
+// few skipped cron ticks won't drop the notification.
+const MISSED_FIRE_TRAIL_MIN = 30;
+
+// For exact-time routines, the "deadline" is specific_time + this many
+// minutes. After that, missed fires (within MISSED_FIRE_TRAIL_MIN).
+const EXACT_TIME_GRACE_MIN = 60;
 
 export async function runRoutineReminders(sb: SupabaseClient): Promise<RoutineReminderResult> {
   if (!isPushoverConfigured()) {
@@ -52,7 +86,7 @@ export async function runRoutineReminders(sb: SupabaseClient): Promise<RoutineRe
   // `neq` with null behaves surprisingly; explicit JS check is clearer.
   const { data, error } = await sb
     .from('routines')
-    .select('id, name, description, specific_time, reminder_enabled, last_reminder_sent_date, active')
+    .select('id, name, description, time_of_day, specific_time, reminder_enabled, last_reminder_sent_date, last_missed_sent_date, active')
     .eq('active', true)
     .eq('reminder_enabled', true)
     .not('specific_time', 'is', null);
@@ -128,6 +162,127 @@ export async function runRoutineReminders(sb: SupabaseClient): Promise<RoutineRe
     failed,
     skipped_done: skippedDone,
   };
+}
+
+// ─── Missed-routine pings ──────────────────────────────────────────────
+//
+// Runs alongside runRoutineReminders() on the same per-minute cron.
+// For every active routine that has a deadline (either a specific_time
+// or a time_of_day bucket that isn't 'anytime'), if NOW is past the
+// deadline by less than MISSED_FIRE_TRAIL_MIN, the routine isn't done
+// today, and we haven't already fired today's missed ping, send a
+// distinct Pushover (priority 1, siren sound).
+
+export async function runRoutineMissed(sb: SupabaseClient): Promise<RoutineMissedResult> {
+  if (!isPushoverConfigured()) {
+    return { considered: 0, dispatched: 0, failed: 0 };
+  }
+
+  const todayIso = todayInTz(USER_TZ);
+  const nowMinutes = nowMinutesInTz(USER_TZ);
+
+  // Candidates: active routines with either a specific_time set OR a
+  // time_of_day bucket that has a deadline. We can't easily express
+  // "specific_time IS NOT NULL OR time_of_day IN (morning/afternoon/evening)"
+  // in a single PostgREST query, so we fetch all active routines that
+  // haven't already had today's missed sent, then filter in JS. With
+  // <100 routines this is fine.
+  const { data, error } = await sb
+    .from('routines')
+    .select('id, name, description, time_of_day, specific_time, reminder_enabled, last_reminder_sent_date, last_missed_sent_date, active')
+    .eq('active', true);
+  if (error) throw new Error(`routines query failed: ${error.message}`);
+
+  const all = (data ?? []) as RoutineRow[];
+  // Pre-filter to rows that haven't fired today AND have a deadline.
+  const eligible = all.filter((r) => {
+    if (r.last_missed_sent_date === todayIso) return false;
+    const deadline = computeDeadlineMinutes(r);
+    if (deadline == null) return false;
+    // NOW must be past the deadline, but within the trailing window.
+    return nowMinutes >= deadline && nowMinutes <= deadline + MISSED_FIRE_TRAIL_MIN;
+  });
+
+  if (eligible.length === 0) {
+    return { considered: 0, dispatched: 0, failed: 0 };
+  }
+
+  // Batch-fetch today's completions for the candidates.
+  let completedSet = new Set<string>();
+  const { data: doneRows, error: doneErr } = await sb
+    .from('routine_completions')
+    .select('routine_id')
+    .in('routine_id', eligible.map((r) => r.id))
+    .eq('completed_date', todayIso);
+  if (!doneErr && doneRows) {
+    completedSet = new Set(doneRows.map((r: { routine_id: string }) => r.routine_id));
+  }
+
+  let dispatched = 0;
+  let failed = 0;
+
+  for (const r of eligible) {
+    if (completedSet.has(r.id)) {
+      // Already done — no missed ping. Still mark sent so we don't keep
+      // rechecking the same row every minute through the trailing window.
+      await sb
+        .from('routines')
+        .update({ last_missed_sent_date: todayIso })
+        .eq('id', r.id);
+      continue;
+    }
+
+    const result = await sendPushover({
+      title: `⚠️ Missed · ${r.name}`,
+      message: missedMessage(r),
+      url: `${env.WEB_APP_URL.replace(/\/$/, '')}/routines/${r.id}`,
+      url_title: 'Check it off',
+      // priority 1 bypasses Do Not Disturb on iOS; the siren sound makes
+      // it audibly distinct from regular reminders.
+      priority: 1,
+      sound: 'siren',
+    });
+
+    if (result.ok) {
+      const { error: updErr } = await sb
+        .from('routines')
+        .update({ last_missed_sent_date: todayIso })
+        .eq('id', r.id);
+      if (updErr) failed += 1;
+      else dispatched += 1;
+    } else {
+      failed += 1;
+    }
+  }
+
+  return { considered: eligible.length, dispatched, failed };
+}
+
+function computeDeadlineMinutes(r: RoutineRow): number | null {
+  // Specific time wins. specific_time + grace = deadline.
+  if (r.specific_time) {
+    const base = parseTimeToMinutes(r.specific_time);
+    if (base == null) return null;
+    return base + EXACT_TIME_GRACE_MIN;
+  }
+  // Bucket-only routines fall back to the bucket's end-of-window.
+  if (r.time_of_day && r.time_of_day in BUCKET_DEADLINE_MIN) {
+    return BUCKET_DEADLINE_MIN[r.time_of_day] ?? null;
+  }
+  return null;
+}
+
+function missedMessage(r: RoutineRow): string {
+  if (r.specific_time) {
+    return `Was due at ${formatTime(r.specific_time)} — still open.`;
+  }
+  const bucket = r.time_of_day ?? 'anytime';
+  const labels: Record<string, string> = {
+    morning: 'morning window has passed',
+    afternoon: 'afternoon window has passed',
+    evening: 'evening window has passed',
+  };
+  return labels[bucket] ?? 'window has passed';
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────

@@ -538,6 +538,7 @@ export interface Routine {
   specific_time: string | null;       // HH:MM[:SS], app-tz interpreted
   reminder_enabled: boolean;
   last_reminder_sent_date: string | null;
+  last_missed_sent_date: string | null;
   created_at: string;
   updated_at: string;
 }

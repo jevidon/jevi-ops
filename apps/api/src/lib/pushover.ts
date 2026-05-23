@@ -13,6 +13,10 @@ export interface PushoverMessage {
   // -2 silent, -1 quiet, 0 normal (default), 1 high (bypasses Do Not Disturb),
   // 2 emergency (requires acknowledgement). Task reminders default to 0.
   priority?: -2 | -1 | 0 | 1 | 2;
+  // Pushover sound override. See https://pushover.net/api#sounds for the
+  // full list. Used to make certain categories (missed-routine pings)
+  // audibly distinct from the default tone. Omit to use the user's default.
+  sound?: string;
 }
 
 export function isPushoverConfigured(): boolean {
@@ -37,6 +41,7 @@ export async function sendPushover(msg: PushoverMessage): Promise<{
   });
   if (msg.url) body.set('url', msg.url);
   if (msg.url_title) body.set('url_title', msg.url_title);
+  if (msg.sound) body.set('sound', msg.sound);
 
   const res = await fetch('https://api.pushover.net/1/messages.json', {
     method: 'POST',

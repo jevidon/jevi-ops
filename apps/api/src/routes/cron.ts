@@ -4,7 +4,7 @@ import { env } from '../lib/env.js';
 import { supabaseAdmin, isSupabaseConfigured } from '../lib/supabase.js';
 import { runObservations } from '../lib/observations.js';
 import { runReminders } from '../lib/reminders.js';
-import { runRoutineReminders } from '../lib/routine-reminders.js';
+import { runRoutineReminders, runRoutineMissed } from '../lib/routine-reminders.js';
 import { runOverdue } from '../lib/overdue.js';
 import { runDailySummary } from '../lib/daily-summary.js';
 import { isPushoverConfigured } from '../lib/pushover.js';
@@ -84,13 +84,15 @@ export const cronRoutes: FastifyPluginAsync = async (app) => {
     }
 
     try {
-      // Run task + routine reminders in parallel. Routines piggyback on
-      // the existing per-minute cron rather than adding a second job —
-      // both queries are cheap and the two domains are independent.
+      // Run task + routine reminders in parallel with the routine "missed"
+      // sweep. Routines piggyback on the existing per-minute cron rather
+      // than adding a second job — all three queries are cheap and the
+      // domains are independent.
       const sb = supabaseAdmin();
-      const [tasks, routines] = await Promise.allSettled([
+      const [tasks, routines, missed] = await Promise.allSettled([
         runReminders(sb),
         runRoutineReminders(sb),
+        runRoutineMissed(sb),
       ]);
 
       const taskResult = tasks.status === 'fulfilled'
@@ -99,6 +101,9 @@ export const cronRoutes: FastifyPluginAsync = async (app) => {
       const routineResult = routines.status === 'fulfilled'
         ? routines.value
         : { considered: 0, dispatched: 0, failed: 1, skipped_done: 0 };
+      const missedResult = missed.status === 'fulfilled'
+        ? missed.value
+        : { considered: 0, dispatched: 0, failed: 1 };
 
       // Only log when something happened, to keep per-minute log volume low.
       if (taskResult.dispatched > 0 || taskResult.failed > 0) {
@@ -107,10 +112,14 @@ export const cronRoutes: FastifyPluginAsync = async (app) => {
       if (routineResult.dispatched > 0 || routineResult.failed > 0) {
         req.log.info({ event: 'routine_reminders_run', ...routineResult }, 'routine reminders dispatched');
       }
+      if (missedResult.dispatched > 0 || missedResult.failed > 0) {
+        req.log.info({ event: 'routine_missed_run', ...missedResult }, 'routine missed pings dispatched');
+      }
       if (tasks.status === 'rejected') req.log.error({ err: tasks.reason }, 'task reminders failed');
       if (routines.status === 'rejected') req.log.error({ err: routines.reason }, 'routine reminders failed');
+      if (missed.status === 'rejected') req.log.error({ err: missed.reason }, 'routine missed failed');
 
-      return reply.code(200).send({ tasks: taskResult, routines: routineResult });
+      return reply.code(200).send({ tasks: taskResult, routines: routineResult, missed: missedResult });
     } catch (err) {
       req.log.error({ err }, 'reminders cron failed');
       return reply.code(500).send({
