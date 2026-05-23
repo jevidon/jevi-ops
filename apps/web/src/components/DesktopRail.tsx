@@ -38,6 +38,7 @@ function CaptureRailButton() {
 const TABS = [
   { href: '/today', label: 'Today' },
   { href: '/tasks', label: 'Tasks' },
+  { href: '/routines', label: 'Routines' },
   { href: '/projects', label: 'Projects' },
   { href: '/content', label: 'Content' },
   { href: '/people', label: 'People' },

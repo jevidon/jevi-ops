@@ -2,6 +2,7 @@ export * from './task.js';
 export * from './project.js';
 export * from './milestone.js';
 export * from './person.js';
+export * from './routine.js';
 export * from './domain.js';
 export * from './note.js';
 export * from './quote.js';

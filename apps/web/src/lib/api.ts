@@ -524,6 +524,59 @@ export const libraryApi = {
   },
 };
 
+// ─── Routines / streak tracker ───────────────────────────────────────────
+
+export interface Routine {
+  id: string;
+  name: string;
+  description: string | null;
+  position: number;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RoutineStats {
+  current_streak: number;
+  longest_streak: number;
+  completions_7d: number;
+  completions_30d: number;
+  total: number;
+  done_today: boolean;
+}
+
+export interface RoutineListItem extends Routine {
+  // Last ~120 days of completion dates (YYYY-MM-DD), oldest-first.
+  recent_completions: string[];
+  stats: RoutineStats;
+}
+
+export interface RoutineDetail {
+  routine: Routine;
+  completions: string[]; // lifetime, newest-first
+  stats: RoutineStats;
+  today: string;
+}
+
+export const routinesApi = {
+  list: (opts?: { include_archived?: boolean }) => {
+    const qs = new URLSearchParams();
+    if (opts?.include_archived) qs.set('include_archived', 'true');
+    const q = qs.toString();
+    return api.get<{ routines: RoutineListItem[]; today: string }>(
+      `/api/routines${q ? `?${q}` : ''}`,
+    );
+  },
+  get: (id: string) => api.get<RoutineDetail>(`/api/routines/${id}`),
+  create: (body: { name: string; description?: string | null; position?: number }) =>
+    api.post<Routine>('/api/routines', body),
+  update: (id: string, body: Partial<{ name: string; description: string | null; position: number; active: boolean }>) =>
+    api.patch<Routine>(`/api/routines/${id}`, body),
+  remove: (id: string) => api.delete(`/api/routines/${id}`),
+  toggleCompletion: (id: string, body: { date?: string; done?: boolean }) =>
+    api.post<unknown>(`/api/routines/${id}/completions`, body),
+};
+
 // ─── People CRM ──────────────────────────────────────────────────────────
 
 export type RelationshipType =

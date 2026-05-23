@@ -22,6 +22,7 @@ import { libraryRoutes } from './routes/library.js';
 import { contentRoutes } from './routes/content.js';
 import { searchRoutes } from './routes/search.js';
 import { peopleRoutes } from './routes/people.js';
+import { routineRoutes } from './routes/routines.js';
 
 export async function buildServer() {
   const app = Fastify({
@@ -64,6 +65,7 @@ export async function buildServer() {
   await app.register(contentRoutes);
   await app.register(searchRoutes);
   await app.register(peopleRoutes);
+  await app.register(routineRoutes);
 
   app.get('/', async () => ({
     name: 'jerad-ops/api',

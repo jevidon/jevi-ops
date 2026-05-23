@@ -3,7 +3,8 @@ import { AccountChip } from '@/components/AccountChip';
 import { TaskItem } from '@/components/TaskItem';
 import { AddTaskForm } from './add-task-form';
 import Link from 'next/link';
-import { tasksApi, calendarApi, notificationsApi, observationsApi, libraryApi, ApiError, type CalendarEvent, type Notification, type Observation, type Note } from '@/lib/api';
+import { tasksApi, calendarApi, notificationsApi, observationsApi, libraryApi, routinesApi, ApiError, type CalendarEvent, type Notification, type Observation, type Note, type RoutineListItem } from '@/lib/api';
+import { RoutinesTodayList } from '@/app/(authed)/routines/routines-today-list';
 import { dismissObservationAction } from './actions';
 import {
   classifyAsOwnThoughtAction,
@@ -88,19 +89,21 @@ export default async function TodayPage() {
   let notifications: Notification[] = [];
   let observations: Observation[] = [];
   let needsReview: Note[] = [];
+  let routines: RoutineListItem[] = [];
   let unreadCount = 0;
   let errorMessage: string | null = null;
 
   // Fetch in parallel — task list is the priority, everything else is
   // non-fatal (Google might not be connected, observations cron might not
   // have run, etc.).
-  const [taskRes, eventRes, notifRes, countRes, obsRes, reviewRes] = await Promise.allSettled([
+  const [taskRes, eventRes, notifRes, countRes, obsRes, reviewRes, routinesRes] = await Promise.allSettled([
     tasksApi.list(),
     calendarApi.upcoming(4),
     notificationsApi.list('unread', 3),
     notificationsApi.count(),
     observationsApi.list(true, 5),
     libraryApi.notes.list({ needs_review: true }),
+    routinesApi.list(),
   ]);
   if (taskRes.status === 'fulfilled') {
     tasks = taskRes.value.tasks;
@@ -113,6 +116,9 @@ export default async function TodayPage() {
   if (countRes.status === 'fulfilled') unreadCount = countRes.value.unread;
   if (obsRes.status === 'fulfilled') observations = obsRes.value.observations;
   if (reviewRes.status === 'fulfilled') needsReview = reviewRes.value.notes;
+  if (routinesRes.status === 'fulfilled') routines = routinesRes.value.routines;
+
+  const routinesDoneCount = routines.filter((r) => r.stats.done_today).length;
 
   const { top3, inbox, doneToday } = splitTasks(tasks);
   const emptySlots = Math.max(0, 3 - top3.length);
@@ -197,6 +203,25 @@ export default async function TodayPage() {
                   <ObservationCard key={o.id} observation={o} />
                 ))}
               </ul>
+            )}
+          </Section>
+
+          <Section
+            label={
+              routines.length > 0
+                ? `Routines · ${routinesDoneCount}/${routines.length}`
+                : 'Routines'
+            }
+            actionHref="/routines"
+            actionLabel={routines.length > 0 ? 'View all' : '+ Add'}
+          >
+            {routines.length === 0 ? (
+              <Hint>
+                Track daily habits separately from tasks &mdash; check email, read,
+                meds. Each builds a streak.
+              </Hint>
+            ) : (
+              <RoutinesTodayList routines={routines} compact />
             )}
           </Section>
 
