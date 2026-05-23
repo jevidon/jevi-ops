@@ -75,6 +75,11 @@ export async function updateTaskAction(
 // Full create — used by /tasks/new and the content-detail inline add.
 // Distinct from the simple inline create on /today so the rich form can
 // set project + content_item + due date + priority in one shot.
+//
+// Note: redirect() must live OUTSIDE the try/catch. Next.js implements
+// redirect by throwing a synthetic NEXT_REDIRECT — putting it inside try
+// makes the catch block swallow it as a real error and the UI shows
+// "NEXT_REDIRECT" instead of navigating.
 export async function createTaskFullAction(
   _prev: SaveResult | null,
   formData: FormData,
@@ -84,14 +89,10 @@ export async function createTaskFullAction(
     const first = parsed.error.errors[0];
     return { ok: false, error: first?.message ?? 'Invalid form' };
   }
+  let createdId: string;
   try {
     const created = await tasksApi.create(toApiPayload(parsed.data));
-    revalidatePath('/today');
-    revalidatePath('/tasks');
-    revalidatePath('/projects');
-    revalidatePath('/content');
-    if (parsed.data.content_item_id) revalidatePath(`/content/${parsed.data.content_item_id}`);
-    redirect(`/tasks/${created.id}`);
+    createdId = created.id;
   } catch (err) {
     if (err instanceof ApiError) {
       const body = err.body as { error?: string } | null;
@@ -99,6 +100,12 @@ export async function createTaskFullAction(
     }
     return { ok: false, error: (err as Error).message };
   }
+  revalidatePath('/today');
+  revalidatePath('/tasks');
+  revalidatePath('/projects');
+  revalidatePath('/content');
+  if (parsed.data.content_item_id) revalidatePath(`/content/${parsed.data.content_item_id}`);
+  redirect(`/tasks/${createdId}`);
 }
 
 export async function deleteTaskAction(formData: FormData): Promise<void> {
