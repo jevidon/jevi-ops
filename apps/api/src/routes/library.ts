@@ -2,6 +2,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import {
   CreateNoteSchema, UpdateNoteSchema,
   CreateQuoteAnnotationSchema, UpdateQuoteAnnotationSchema,
+  CreateBookSchema, UpdateBookSchema,
 } from '@jerad-ops/shared/schemas';
 
 // Library CRUD — notes, quotes, quote_annotations, journal_entries, books.
@@ -187,6 +188,46 @@ export const libraryRoutes: FastifyPluginAsync = async (app) => {
       quotes: undefined,
     }));
     return { books };
+  });
+
+  app.post('/api/books', async (req, reply) => {
+    const parsed = CreateBookSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'invalid_payload', details: parsed.error.flatten().fieldErrors });
+    }
+    const { data, error } = await req.supabase!
+      .from('books')
+      .insert(parsed.data)
+      .select('*')
+      .single();
+    if (error) throw app.httpErrors.internalServerError(error.message);
+    return reply.code(201).send(data);
+  });
+
+  app.patch<{ Params: { id: string } }>('/api/books/:id', async (req, reply) => {
+    const parsed = UpdateBookSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'invalid_payload', details: parsed.error.flatten().fieldErrors });
+    }
+    if (Object.keys(parsed.data).length === 0) {
+      return reply.code(400).send({ error: 'empty_payload' });
+    }
+    const { data, error } = await req.supabase!
+      .from('books')
+      .update(parsed.data)
+      .eq('id', req.params.id)
+      .select('*')
+      .single();
+    if (error) throw app.httpErrors.internalServerError(error.message);
+    return data;
+  });
+
+  app.delete<{ Params: { id: string } }>('/api/books/:id', async (req, reply) => {
+    // quotes.book_id has ON DELETE SET NULL so highlights are preserved
+    // (just unlinked) when a book row is removed.
+    const { error } = await req.supabase!.from('books').delete().eq('id', req.params.id);
+    if (error) throw app.httpErrors.internalServerError(error.message);
+    return reply.code(204).send();
   });
 
   app.get<{ Params: { id: string } }>('/api/books/:id', async (req, reply) => {

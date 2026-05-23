@@ -27,6 +27,15 @@ export default async function BooksPage() {
       <div className="hairline" />
       <LibraryTabBar active="books" />
 
+      <div className="px-5 lg:px-0 pt-3 flex justify-end">
+        <Link
+          href="/library/books/new"
+          className="font-mono text-[11px] uppercase tracking-wider text-ink-3 hover:text-accent transition-colors"
+        >
+          + Add book
+        </Link>
+      </div>
+
       {errorMessage ? (
         <div className="px-5 lg:px-0 mt-6 font-sans text-[13px] text-ink-3">Error: {errorMessage}</div>
       ) : books.length === 0 ? (

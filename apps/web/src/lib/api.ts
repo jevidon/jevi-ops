@@ -348,6 +348,11 @@ export const libraryApi = {
   books: {
     list: () => api.get<{ books: Book[] }>('/api/books'),
     get: (id: string) => api.get<{ book: Book; quotes: Quote[] }>(`/api/books/${id}`),
+    create: (body: Partial<Book> & { title: string }) =>
+      api.post<Book>('/api/books', body),
+    update: (id: string, body: Partial<Book>) =>
+      api.patch<Book>(`/api/books/${id}`, body),
+    remove: (id: string) => api.delete(`/api/books/${id}`),
   },
 };
 

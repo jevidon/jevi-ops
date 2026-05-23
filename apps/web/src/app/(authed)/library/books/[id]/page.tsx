@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { libraryApi, ApiError, type Book, type Quote } from '@/lib/api';
+import { BookForm } from '../book-form';
 
 // /library/books/[id] — book cover + metadata + every imported highlight,
 // ordered by Kindle Location number (page_number column). Each highlight
@@ -55,30 +56,34 @@ export default async function BookDetailPage({
       <div className="hairline mb-6" />
 
       <div className="px-5 lg:px-0 max-w-3xl">
-        {/* Header: cover + status */}
-        <div className="flex gap-5 mb-8">
+        {/* Cover + edit form. Cover sits to the left on desktop, above on
+            mobile. The form holds every editable field (status, format,
+            dates, rating, summary). */}
+        <div className="flex flex-col md:flex-row gap-6 mb-10">
           {book.cover_image_url && (
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={book.cover_image_url}
               alt={book.title}
-              className="w-28 h-auto border border-line shrink-0"
+              className="w-32 h-auto border border-line shrink-0 self-start"
             />
           )}
-          <div className="flex flex-col gap-2">
-            <div className="font-mono text-[10px] uppercase tracking-wider text-ink-3">
-              Status · {book.status.replace('_', ' ')}
-            </div>
-            {book.format && (
-              <div className="font-mono text-[10px] uppercase tracking-wider text-ink-3">
-                Format · {book.format}
-              </div>
-            )}
-            {book.rating != null && (
-              <div className="font-mono text-[10px] uppercase tracking-wider text-ink-3">
-                Rating · {book.rating}/5
-              </div>
-            )}
+          <div className="flex-1 min-w-0">
+            <BookForm
+              initial={{
+                id: book.id,
+                title: book.title,
+                author: book.author ?? '',
+                isbn: book.isbn ?? '',
+                cover_image_url: book.cover_image_url ?? '',
+                status: book.status,
+                format: book.format ?? '',
+                started_at: book.started_at ?? '',
+                finished_at: book.finished_at ?? '',
+                rating: book.rating ?? '',
+                my_summary: book.my_summary ?? '',
+              }}
+            />
           </div>
         </div>
 
