@@ -526,12 +526,18 @@ export const libraryApi = {
 
 // ─── Routines / streak tracker ───────────────────────────────────────────
 
+export type TimeOfDayBucket = 'morning' | 'afternoon' | 'evening' | 'anytime';
+
 export interface Routine {
   id: string;
   name: string;
   description: string | null;
   position: number;
   active: boolean;
+  time_of_day: TimeOfDayBucket;
+  specific_time: string | null;       // HH:MM[:SS], app-tz interpreted
+  reminder_enabled: boolean;
+  last_reminder_sent_date: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -568,10 +574,26 @@ export const routinesApi = {
     );
   },
   get: (id: string) => api.get<RoutineDetail>(`/api/routines/${id}`),
-  create: (body: { name: string; description?: string | null; position?: number }) =>
-    api.post<Routine>('/api/routines', body),
-  update: (id: string, body: Partial<{ name: string; description: string | null; position: number; active: boolean }>) =>
-    api.patch<Routine>(`/api/routines/${id}`, body),
+  create: (body: {
+    name: string;
+    description?: string | null;
+    position?: number;
+    time_of_day?: TimeOfDayBucket;
+    specific_time?: string | null;
+    reminder_enabled?: boolean;
+  }) => api.post<Routine>('/api/routines', body),
+  update: (
+    id: string,
+    body: Partial<{
+      name: string;
+      description: string | null;
+      position: number;
+      active: boolean;
+      time_of_day: TimeOfDayBucket;
+      specific_time: string | null;
+      reminder_enabled: boolean;
+    }>,
+  ) => api.patch<Routine>(`/api/routines/${id}`, body),
   remove: (id: string) => api.delete(`/api/routines/${id}`),
   toggleCompletion: (id: string, body: { date?: string; done?: boolean }) =>
     api.post<unknown>(`/api/routines/${id}/completions`, body),

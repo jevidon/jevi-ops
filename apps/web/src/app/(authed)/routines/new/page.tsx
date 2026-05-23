@@ -13,7 +13,15 @@ export default function NewRoutinePage() {
       <ScreenHeader eyebrow="Routines" title="New routine" />
       <div className="hairline mb-6" />
       <div className="px-5 lg:px-0">
-        <RoutineForm initial={{ name: '', description: '' }} />
+        <RoutineForm
+          initial={{
+            name: '',
+            description: '',
+            time_of_day: 'anytime',
+            specific_time: '',
+            reminder_enabled: false,
+          }}
+        />
       </div>
     </div>
   );

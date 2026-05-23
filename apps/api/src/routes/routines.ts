@@ -120,13 +120,25 @@ export const routineRoutes: FastifyPluginAsync = async (app) => {
         .eq('active', true);
       position = count ?? 0;
     }
+    const insert: Record<string, unknown> = {
+      name: parsed.data.name,
+      description: parsed.data.description,
+      position,
+    };
+    if (parsed.data.time_of_day) insert.time_of_day = parsed.data.time_of_day;
+    if (parsed.data.specific_time !== undefined) insert.specific_time = parsed.data.specific_time;
+    // Defensive: reminders only make sense with a specific_time. If the
+    // caller asked for reminders without a time, silently disable rather
+    // than rejecting — the form should enforce it but a stale client
+    // shouldn't 400.
+    if (parsed.data.reminder_enabled && parsed.data.specific_time) {
+      insert.reminder_enabled = true;
+    } else if (parsed.data.reminder_enabled === false) {
+      insert.reminder_enabled = false;
+    }
     const { data, error } = await req.supabase!
       .from('routines')
-      .insert({
-        name: parsed.data.name,
-        description: parsed.data.description,
-        position,
-      })
+      .insert(insert)
       .select('*')
       .single();
     if (error) throw app.httpErrors.internalServerError(error.message);
@@ -141,9 +153,33 @@ export const routineRoutes: FastifyPluginAsync = async (app) => {
     if (Object.keys(parsed.data).length === 0) {
       return reply.code(400).send({ error: 'empty_payload' });
     }
+    const update: Record<string, unknown> = { ...parsed.data };
+    // Reminders require a specific_time. If the caller is clearing
+    // specific_time (sending null), also disable reminders — otherwise
+    // we'd have a row that says "remind me at null o'clock" which the
+    // cron just skips, but the UI checkbox would look stuck-on.
+    if ('specific_time' in update && update.specific_time === null) {
+      update.reminder_enabled = false;
+    }
+    // Conversely: if the caller turns reminders on but didn't include
+    // (or also set null) a specific_time, ignore the toggle.
+    if (
+      update.reminder_enabled === true &&
+      (('specific_time' in update && update.specific_time === null) ||
+        (!('specific_time' in update)))
+    ) {
+      // Look up the existing row to see if it has a specific_time we can
+      // pair the reminder with.
+      const { data: existing } = await req.supabase!
+        .from('routines')
+        .select('specific_time')
+        .eq('id', req.params.id)
+        .maybeSingle();
+      if (!existing?.specific_time) update.reminder_enabled = false;
+    }
     const { data, error } = await req.supabase!
       .from('routines')
-      .update(parsed.data)
+      .update(update)
       .eq('id', req.params.id)
       .select('*')
       .single();

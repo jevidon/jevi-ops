@@ -4,6 +4,7 @@ import { env } from '../lib/env.js';
 import { supabaseAdmin, isSupabaseConfigured } from '../lib/supabase.js';
 import { runObservations } from '../lib/observations.js';
 import { runReminders } from '../lib/reminders.js';
+import { runRoutineReminders } from '../lib/routine-reminders.js';
 import { runOverdue } from '../lib/overdue.js';
 import { runDailySummary } from '../lib/daily-summary.js';
 import { isPushoverConfigured } from '../lib/pushover.js';
@@ -83,12 +84,33 @@ export const cronRoutes: FastifyPluginAsync = async (app) => {
     }
 
     try {
-      const result = await runReminders(supabaseAdmin());
+      // Run task + routine reminders in parallel. Routines piggyback on
+      // the existing per-minute cron rather than adding a second job —
+      // both queries are cheap and the two domains are independent.
+      const sb = supabaseAdmin();
+      const [tasks, routines] = await Promise.allSettled([
+        runReminders(sb),
+        runRoutineReminders(sb),
+      ]);
+
+      const taskResult = tasks.status === 'fulfilled'
+        ? tasks.value
+        : { considered: 0, dispatched: 0, failed: 1 };
+      const routineResult = routines.status === 'fulfilled'
+        ? routines.value
+        : { considered: 0, dispatched: 0, failed: 1, skipped_done: 0 };
+
       // Only log when something happened, to keep per-minute log volume low.
-      if (result.dispatched > 0 || result.failed > 0) {
-        req.log.info({ event: 'reminders_run', ...result }, 'reminders cron dispatched');
+      if (taskResult.dispatched > 0 || taskResult.failed > 0) {
+        req.log.info({ event: 'reminders_run', ...taskResult }, 'task reminders dispatched');
       }
-      return reply.code(200).send(result);
+      if (routineResult.dispatched > 0 || routineResult.failed > 0) {
+        req.log.info({ event: 'routine_reminders_run', ...routineResult }, 'routine reminders dispatched');
+      }
+      if (tasks.status === 'rejected') req.log.error({ err: tasks.reason }, 'task reminders failed');
+      if (routines.status === 'rejected') req.log.error({ err: routines.reason }, 'routine reminders failed');
+
+      return reply.code(200).send({ tasks: taskResult, routines: routineResult });
     } catch (err) {
       req.log.error({ err }, 'reminders cron failed');
       return reply.code(500).send({

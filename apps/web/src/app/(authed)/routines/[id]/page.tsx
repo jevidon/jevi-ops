@@ -139,6 +139,11 @@ export default async function RoutineDetailPage({
                   id: routine.id,
                   name: routine.name,
                   description: routine.description ?? '',
+                  time_of_day: routine.time_of_day,
+                  // <input type="time"> wants HH:MM. specific_time from
+                  // Postgres may include seconds — strip them.
+                  specific_time: routine.specific_time?.slice(0, 5) ?? '',
+                  reminder_enabled: routine.reminder_enabled,
                 }}
               />
             </div>

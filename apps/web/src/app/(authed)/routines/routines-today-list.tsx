@@ -1,11 +1,40 @@
 import Link from 'next/link';
-import type { RoutineListItem } from '@/lib/api';
+import type { RoutineListItem, TimeOfDayBucket } from '@/lib/api';
 import { toggleCompletionAction } from './actions';
 
 // Daily check-off list — used on /today (compact) and at the top of
-// /routines (full). Each row: name + 🔥 streak + checkbox. Pure server
-// component; clicking the checkbox is a form POST that toggles the
-// completion for "today" (server determines what "today" means).
+// /routines (full). Rows are grouped by time_of_day so the morning row
+// of habits clusters together. Inside a bucket we sort by specific_time
+// (those with a time first, by hour ascending), then by position.
+
+const BUCKET_LABELS: Record<TimeOfDayBucket, string> = {
+  morning: 'Morning',
+  afternoon: 'Afternoon',
+  evening: 'Evening',
+  anytime: 'Anytime',
+};
+
+const BUCKET_ORDER: TimeOfDayBucket[] = ['morning', 'afternoon', 'evening', 'anytime'];
+
+function sortRoutines(a: RoutineListItem, b: RoutineListItem): number {
+  // Within a bucket: specific_time-ascending (so 6am beats 9am), then
+  // position (so the user can manually order within a time block).
+  if (a.specific_time && b.specific_time) return a.specific_time.localeCompare(b.specific_time);
+  if (a.specific_time) return -1;
+  if (b.specific_time) return 1;
+  return (a.position ?? 0) - (b.position ?? 0);
+}
+
+function formatTime(t: string | null | undefined): string | null {
+  if (!t) return null;
+  const m = t.match(/^(\d{2}):(\d{2})/);
+  if (!m || !m[1] || !m[2]) return null;
+  const h = parseInt(m[1], 10);
+  const mn = m[2];
+  const period = h < 12 ? 'AM' : 'PM';
+  const display = h === 0 ? 12 : h <= 12 ? h : h - 12;
+  return `${display}:${mn} ${period}`;
+}
 
 export function RoutinesTodayList({
   routines,
@@ -16,12 +45,36 @@ export function RoutinesTodayList({
 }) {
   if (routines.length === 0) return null;
 
+  // Bucket the rows. Only render buckets that actually have entries —
+  // if you have no morning routines, no Morning header.
+  const grouped = new Map<TimeOfDayBucket, RoutineListItem[]>();
+  for (const r of routines) {
+    const bucket = r.time_of_day ?? 'anytime';
+    const list = grouped.get(bucket) ?? [];
+    list.push(r);
+    grouped.set(bucket, list);
+  }
+  for (const [, list] of grouped) list.sort(sortRoutines);
+
   return (
-    <ul className={compact ? 'space-y-1' : 'space-y-2'}>
-      {routines.map((r) => (
-        <RoutineTodayRow key={r.id} routine={r} compact={compact} />
-      ))}
-    </ul>
+    <div className={compact ? 'space-y-3' : 'space-y-5'}>
+      {BUCKET_ORDER.map((bucket) => {
+        const list = grouped.get(bucket);
+        if (!list || list.length === 0) return null;
+        return (
+          <div key={bucket}>
+            <div className="font-mono text-[10px] uppercase tracking-wider text-ink-3 mb-1">
+              {BUCKET_LABELS[bucket]}
+            </div>
+            <ul className={compact ? 'space-y-1' : 'space-y-2'}>
+              {list.map((r) => (
+                <RoutineTodayRow key={r.id} routine={r} compact={compact} />
+              ))}
+            </ul>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -34,6 +87,7 @@ function RoutineTodayRow({
 }) {
   const { stats } = routine;
   const isDone = stats.done_today;
+  const timeLabel = formatTime(routine.specific_time);
 
   return (
     <li className={`flex items-center gap-3 ${compact ? 'py-1' : 'py-2'}`}>
@@ -58,9 +112,20 @@ function RoutineTodayRow({
         href={`/routines/${routine.id}`}
         className={`flex-1 min-w-0 font-sans ${
           compact ? 'text-[13px]' : 'text-[14px]'
-        } ${isDone ? 'text-ink-3 line-through decoration-ink-3/60' : 'text-ink'} hover:text-accent transition-colors`}
+        } ${isDone ? 'text-ink-3 line-through decoration-ink-3/60' : 'text-ink'} hover:text-accent transition-colors flex items-baseline gap-2`}
       >
-        {routine.name}
+        <span className="truncate">{routine.name}</span>
+        {timeLabel && (
+          <span
+            className={`font-mono text-[10px] uppercase tracking-wider shrink-0 ${
+              isDone ? 'text-ink-3' : 'text-ink-2'
+            }`}
+            title={routine.reminder_enabled ? 'Reminder Pushover fires at this time' : undefined}
+          >
+            {timeLabel}
+            {routine.reminder_enabled && <span aria-hidden> · 🔔</span>}
+          </span>
+        )}
       </Link>
       {stats.current_streak > 0 ? (
         <span

@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState } from 'react';
+import { useActionState, useState } from 'react';
 import Link from 'next/link';
 import {
   createRoutineAction,
@@ -9,12 +9,23 @@ import {
   deleteRoutineAction,
   type SaveResult,
 } from './actions';
+import type { TimeOfDayBucket } from '@/lib/api';
 
 export interface RoutineFormInitial {
   id?: string;
   name: string;
   description: string;
+  time_of_day: TimeOfDayBucket;
+  specific_time: string;       // HH:MM or '' (form input value)
+  reminder_enabled: boolean;
 }
+
+const BUCKET_OPTIONS: Array<{ value: TimeOfDayBucket; label: string }> = [
+  { value: 'morning', label: 'Morning' },
+  { value: 'afternoon', label: 'Afternoon' },
+  { value: 'evening', label: 'Evening' },
+  { value: 'anytime', label: 'Anytime' },
+];
 
 export function RoutineForm({ initial }: { initial: RoutineFormInitial }) {
   const isEdit = Boolean(initial.id);
@@ -22,6 +33,12 @@ export function RoutineForm({ initial }: { initial: RoutineFormInitial }) {
     isEdit ? updateRoutineAction : createRoutineAction,
     null,
   );
+
+  // Local mirror of the time field so the reminder checkbox can disable
+  // itself when no time is set. The form still submits the actual input
+  // values; this is just for the disabled-state UX.
+  const [specificTime, setSpecificTime] = useState(initial.specific_time);
+  const hasTime = Boolean(specificTime.trim());
 
   return (
     <>
@@ -50,6 +67,57 @@ export function RoutineForm({ initial }: { initial: RoutineFormInitial }) {
             placeholder="Optional — context, what counts, why you're tracking it…"
             className="bg-transparent border border-line focus:border-accent focus:outline-none p-3 font-sans text-[14px] text-ink resize-none placeholder:text-ink-3/60"
           />
+        </label>
+
+        {/* Schedule controls. Time-of-day is a soft bucket that drives the
+            grouped display; specific_time is the exact hour (and unlocks
+            the reminder checkbox). They're independent on purpose — you
+            can pin "morning prayer" to the Morning bucket without picking
+            a specific time. */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <label className="flex flex-col gap-1">
+            <span className="eyebrow">Time of day</span>
+            <select
+              name="time_of_day"
+              defaultValue={initial.time_of_day}
+              className="bg-transparent border border-line focus:border-accent focus:outline-none p-2 font-sans text-[14px] text-ink"
+            >
+              {BUCKET_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+          </label>
+
+          <label className="flex flex-col gap-1">
+            <span className="eyebrow">Specific time (optional)</span>
+            <input
+              type="time"
+              name="specific_time"
+              value={specificTime}
+              onChange={(e) => setSpecificTime(e.target.value)}
+              className="bg-transparent border border-line focus:border-accent focus:outline-none p-2 font-sans text-[14px] text-ink"
+            />
+          </label>
+        </div>
+
+        <label className={`flex items-start gap-2 ${hasTime ? '' : 'opacity-50'}`}>
+          <input
+            type="checkbox"
+            name="reminder_enabled"
+            defaultChecked={initial.reminder_enabled}
+            disabled={!hasTime}
+            className="mt-1 accent-accent"
+          />
+          <span>
+            <span className="block font-sans text-[14px] text-ink">
+              Send Pushover at this time
+            </span>
+            <span className="block font-mono text-[10px] uppercase tracking-wider text-ink-3 mt-0.5">
+              {hasTime
+                ? 'Fires once per day; skipped if already checked off.'
+                : 'Set a specific time above to enable.'}
+            </span>
+          </span>
         </label>
 
         <div className="flex items-center gap-3 pt-2">
