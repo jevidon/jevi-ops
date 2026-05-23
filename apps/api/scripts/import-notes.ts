@@ -443,20 +443,31 @@ async function insertRow(sb: SupabaseClient, file: ParsedFile, route: Route): Pr
     const { error } = await sb.from('journal_entries').insert({
       entry_date: route.entry_date,
       transcription_text: file.bodyOriginal,
-      source: 'import:obsidian',
+      // DB check constraint: 'handwritten_photo'|'voice'|'typed'. We're
+      // importing from an Obsidian file → user typed it. Use 'typed'.
+      source: 'typed',
       created_at: entryIso,
     });
     if (error) throw new Error(`journal_entries insert failed: ${error.message}`);
     return;
   }
   if (route.kind === 'quote') {
+    // Sanitize source_type against DB enum: ('book','article','podcast',
+    // 'conversation','other'). Claude may produce 'sermon' which is in the
+    // Zod schema but NOT the original DB constraint — map to 'other'.
+    const validSourceTypes = ['book', 'article', 'podcast', 'conversation', 'other'];
+    const source_type = validSourceTypes.includes(route.source_type) ? route.source_type : 'other';
+    // added_via DB enum: ('voice','readwise_import','manual','journal_extraction').
+    // Readwise highlights → readwise_import; everything else → manual.
+    const added_via = file.subPath.startsWith('Readwise/') ? 'readwise_import' : 'manual';
     const { error } = await sb.from('quotes').insert({
       text: file.bodyOriginal,
-      source_type: route.source_type,
+      source_type,
       source_author: route.source_author ?? null,
-      source_reference: route.source_reference ?? null,
+      // Column is `source_ref`, not `source_reference` (legacy 0001 schema).
+      source_ref: route.source_reference ?? null,
       tags: route.tags ?? [],
-      added_via: 'import:obsidian',
+      added_via,
       created_at: file.createdAt,
     });
     if (error) throw new Error(`quotes insert failed: ${error.message}`);
