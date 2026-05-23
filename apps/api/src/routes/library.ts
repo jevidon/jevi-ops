@@ -168,6 +168,43 @@ export const libraryRoutes: FastifyPluginAsync = async (app) => {
     return { entries: data ?? [] };
   });
 
+  // ─── Books (reading log + highlight container) ──────────────────────
+
+  app.get<{ Querystring: { limit?: string } }>('/api/books', async (req) => {
+    const limit = Math.min(parseInt(req.query.limit ?? '500', 10) || 500, 2000);
+    const { data, error } = await req.supabase!
+      .from('books')
+      .select('*, quotes:quotes(id)')
+      .order('title', { ascending: true })
+      .limit(limit);
+    if (error) throw app.httpErrors.internalServerError(error.message);
+    // Compress the quotes join down to a count for the list view.
+    type QuoteRef = { id: string };
+    type BookRow = { quotes?: QuoteRef[]; [k: string]: unknown };
+    const books = ((data ?? []) as BookRow[]).map((b) => ({
+      ...b,
+      quote_count: b.quotes?.length ?? 0,
+      quotes: undefined,
+    }));
+    return { books };
+  });
+
+  app.get<{ Params: { id: string } }>('/api/books/:id', async (req, reply) => {
+    const [bookRes, quotesRes] = await Promise.all([
+      req.supabase!.from('books').select('*').eq('id', req.params.id).maybeSingle(),
+      req.supabase!
+        .from('quotes')
+        .select('*')
+        .eq('book_id', req.params.id)
+        .order('page_number', { ascending: true, nullsFirst: false })
+        .order('created_at', { ascending: true }),
+    ]);
+    if (bookRes.error) throw app.httpErrors.internalServerError(bookRes.error.message);
+    if (!bookRes.data) return reply.code(404).send({ error: 'not_found' });
+    if (quotesRes.error) throw app.httpErrors.internalServerError(quotesRes.error.message);
+    return { book: bookRes.data, quotes: quotesRes.data ?? [] };
+  });
+
   // ─── Unified library feed (all sources, chronological) ────────────────
 
   app.get<{ Querystring: { limit?: string } }>('/api/library/feed', async (req) => {

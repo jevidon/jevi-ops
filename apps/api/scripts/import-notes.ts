@@ -221,7 +221,26 @@ type JournalRoute = {
   entry_date: string; // YYYY-MM-DD
 };
 type SkipRoute = { kind: 'skip'; reason: string };
-type Route = NoteRoute | QuoteRoute | JournalRoute | SkipRoute;
+
+// Readwise files contain a book/article + N individual highlights. Parse
+// once at routing time so insertRow knows what to do.
+interface ReadwiseHighlight {
+  text: string;
+  location: number | null; // Kindle Location number; null for articles/tweets
+  tags: string[];
+}
+type ReadwiseRoute = {
+  kind: 'readwise_book';
+  source_type: 'book' | 'article' | 'other';
+  title: string;
+  author: string | null;
+  cover_image_url: string | null;
+  source_url: string | null; // for articles
+  category: string | null;
+  document_tags: string[];
+  highlights: ReadwiseHighlight[];
+};
+type Route = NoteRoute | QuoteRoute | JournalRoute | SkipRoute | ReadwiseRoute;
 
 function heuristicRoute(file: ParsedFile): Route | null {
   const { folder, subPath, basename: base, tags } = file;
@@ -232,14 +251,15 @@ function heuristicRoute(file: ParsedFile): Route | null {
     if (d) return { kind: 'journal_entry', entry_date: d.slice(0, 10) };
   }
 
-  // 2. Readwise highlights → quotes
+  // 2. Readwise highlights → book + individual quote rows
   if (subPath.startsWith('Readwise/Books/')) {
-    return { kind: 'quote', source_type: 'book', source_author: extractReadwiseAuthor(base) };
+    return parseReadwiseFile(file, 'book');
   }
   if (subPath.startsWith('Readwise/Articles/')) {
-    return { kind: 'quote', source_type: 'article', source_reference: stripMdExt(base) };
+    return parseReadwiseFile(file, 'article');
   }
   if (subPath.startsWith('Readwise/Tweets/')) {
+    // Tweets are short and one highlight per file; treat as single quote.
     return { kind: 'quote', source_type: 'other', tags: ['twitter'] };
   }
 
@@ -307,6 +327,173 @@ function extractReadwiseAuthor(base: string): string | undefined {
 
 function stripMdExt(s: string): string {
   return s.replace(/\.md$/i, '');
+}
+
+// Parse a Readwise markdown export (Books/ or Articles/ folder).
+// Format expected:
+//   # <Title>
+//   ![rw-book-cover](<cover-url>)         (optional)
+//
+//   ## Metadata
+//   - Author: [[Author Name]]              (Books)
+//   - Full Title: ...
+//   - Category: #books | #articles | ...
+//   - URL: https://...                     (Articles)
+//   - Document Tags: [[tag]] [[tag]]       (optional)
+//
+//   ## Highlights
+//   - "highlight text" ([Location N](url))
+//     - Tags: [[favorite]]
+//   - next highlight…
+//
+// Returns a ReadwiseRoute with one row per highlight. Falls back to a
+// single-quote route if the body doesn't parse as Readwise (e.g., the
+// user accidentally hand-wrote a note in the Readwise folder).
+function parseReadwiseFile(file: ParsedFile, kind: 'book' | 'article'): Route {
+  const body = file.bodyOriginal;
+  const title = decodeHtmlEntities(extractH1(body) ?? stripMdExt(file.basename));
+
+  // Metadata extraction
+  const author = matchFirst(body, /^-\s*Author:\s*\[\[(.+?)\]\]/m);
+  const cover = matchFirst(body, /!\[rw-book-cover\]\(([^)]+)\)/);
+  const sourceUrl = kind === 'article'
+    ? matchFirst(body, /^-\s*URL:\s*(\S+)/m)
+    : null;
+  const category = matchFirst(body, /^-\s*Category:\s*#(\S+)/m);
+  const docTags = extractDoubleBracketTags(
+    matchFirst(body, /^-\s*Document Tags:\s*(.+)$/m) ?? '',
+  );
+
+  // Find the Highlights section. Everything after "## Highlights" until
+  // the next H2 (or end-of-file).
+  const hlStart = body.search(/^##\s+Highlights/m);
+  if (hlStart === -1) {
+    // No highlights section — treat the whole body as a single quote.
+    return {
+      kind: 'quote',
+      source_type: kind === 'book' ? 'book' : 'article',
+      source_author: author ?? extractReadwiseAuthor(file.basename),
+      source_reference: kind === 'article' ? stripMdExt(file.basename) : undefined,
+    };
+  }
+  const hlSection = body.slice(hlStart).replace(/^##\s+Highlights\s*/m, '');
+  const nextH2 = hlSection.search(/^##\s+/m);
+  const hlBody = nextH2 === -1 ? hlSection : hlSection.slice(0, nextH2);
+
+  // Each highlight is a top-level "- " line. Indented "- Tags:" or
+  // "- Note:" sub-lines belong to the preceding highlight.
+  const highlights = splitReadwiseHighlights(hlBody);
+  if (highlights.length === 0) {
+    // No parseable highlights — fall back to single-quote.
+    return {
+      kind: 'quote',
+      source_type: kind === 'book' ? 'book' : 'article',
+      source_author: author ?? extractReadwiseAuthor(file.basename),
+      source_reference: kind === 'article' ? stripMdExt(file.basename) : undefined,
+    };
+  }
+
+  return {
+    kind: 'readwise_book',
+    source_type: kind === 'book' ? 'book' : 'article',
+    title,
+    author: author ?? extractReadwiseAuthor(file.basename) ?? null,
+    cover_image_url: cover,
+    source_url: sourceUrl,
+    category,
+    document_tags: docTags,
+    highlights,
+  };
+}
+
+function extractH1(body: string): string | null {
+  const m = body.match(/^#\s+(.+)$/m);
+  return m ? m[1].trim() : null;
+}
+
+function matchFirst(s: string, re: RegExp): string | null {
+  const m = s.match(re);
+  return m ? m[1].trim() : null;
+}
+
+function extractDoubleBracketTags(s: string): string[] {
+  const out: string[] = [];
+  const re = /\[\[([^\]]+)\]\]/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(s)) !== null) out.push(m[1].toLowerCase());
+  return out;
+}
+
+// Splits a Readwise Highlights section body into individual highlight
+// blocks. Each top-level "- " line starts a new highlight; subsequent
+// indented lines (e.g., "  - Tags: [[favorite]]" or "  - Note: ...") are
+// attached to the current highlight.
+function splitReadwiseHighlights(hlBody: string): ReadwiseHighlight[] {
+  const lines = hlBody.split('\n');
+  const blocks: string[][] = [];
+  let current: string[] | null = null;
+  for (const line of lines) {
+    if (/^-\s+/.test(line)) {
+      if (current) blocks.push(current);
+      current = [line];
+    } else if (current && /^\s+-\s+/.test(line)) {
+      current.push(line);
+    } else if (current && line.trim() === '') {
+      // blank line — keep accumulating; ignore for now
+      continue;
+    }
+  }
+  if (current) blocks.push(current);
+
+  const out: ReadwiseHighlight[] = [];
+  for (const block of blocks) {
+    const first = block[0]!;
+    // Strip leading "- " and trailing newline, then extract the location.
+    let text = first.replace(/^-\s+/, '').trim();
+    let location: number | null = null;
+    const locM = text.match(/\(\[(?:Location\s+(\d+)|View Highlight)\]\([^)]+\)\)\s*$/);
+    if (locM) {
+      text = text.slice(0, locM.index).trim();
+      if (locM[1]) location = parseInt(locM[1], 10);
+    }
+    // Strip wrapping curly/straight quotes if the highlight is fully quoted.
+    text = decodeHtmlEntities(stripWrappingQuotes(text));
+    // Sub-lines: Tags + Notes (notes ignored for now).
+    const tagLine = block.find((l) => /^\s+-\s+Tags:/i.test(l));
+    const tags = tagLine ? extractDoubleBracketTags(tagLine) : [];
+    if (text.length > 0) out.push({ text, location, tags });
+  }
+  return out;
+}
+
+// Decode the handful of HTML entities that show up in Readwise filenames /
+// H1s (e.g. "Your Problem Isn&#39;t Pornography"). A real decoder lib is
+// overkill for the small set we actually see.
+function decodeHtmlEntities(s: string): string {
+  return s
+    .replace(/&#39;/g, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&nbsp;/g, ' ');
+}
+
+function stripWrappingQuotes(s: string): string {
+  // Handle ASCII " and smart " " quotes.
+  const trimmed = s.trim();
+  if (trimmed.length < 2) return trimmed;
+  const first = trimmed[0];
+  const last = trimmed[trimmed.length - 1];
+  if (
+    (first === '"' && last === '"') ||
+    (first === '“' && last === '”') ||
+    (first === '‘' && last === '’')
+  ) {
+    return trimmed.slice(1, -1).trim();
+  }
+  return trimmed;
 }
 
 // ─── Claude classifier (for files heuristics couldn't route) ────────────
@@ -432,8 +619,65 @@ async function fetchExistingNoteHashes(sb: SupabaseClient): Promise<Set<string>>
   return out;
 }
 
+// Looks up an existing book by case-insensitive title match; inserts if
+// missing. Returns the book id. Used by readwise_book inserts so re-runs
+// don't create duplicate book rows when the same Readwise file is imported.
+async function upsertBook(
+  sb: SupabaseClient,
+  meta: { title: string; author: string | null; cover_image_url: string | null },
+): Promise<string> {
+  const { data: existing, error: lookupErr } = await sb
+    .from('books')
+    .select('id')
+    .ilike('title', meta.title)
+    .limit(1)
+    .maybeSingle();
+  if (lookupErr) throw new Error(`books lookup failed: ${lookupErr.message}`);
+  if (existing) return existing.id as string;
+  const { data, error } = await sb
+    .from('books')
+    .insert({
+      title: meta.title,
+      author: meta.author,
+      cover_image_url: meta.cover_image_url,
+      status: 'finished', // Readwise highlights imply the user finished the book.
+    })
+    .select('id')
+    .single();
+  if (error) throw new Error(`books insert failed: ${error.message}`);
+  return data.id as string;
+}
+
 async function insertRow(sb: SupabaseClient, file: ParsedFile, route: Route): Promise<void> {
   if (route.kind === 'skip') return;
+
+  if (route.kind === 'readwise_book') {
+    const bookId = await upsertBook(sb, {
+      title: route.title,
+      author: route.author,
+      cover_image_url: route.cover_image_url,
+    });
+    for (const hl of route.highlights) {
+      // Per-highlight insert. Skip if hash already in DB (re-import safety).
+      const { error } = await sb.from('quotes').insert({
+        book_id: bookId,
+        text: hl.text,
+        page_number: hl.location, // Kindle Location number, fits in integer
+        source_type: route.source_type,
+        source_author: route.author,
+        source_ref: route.source_url ?? null,
+        tags: hl.tags,
+        added_via: 'readwise_import',
+        created_at: file.createdAt,
+      });
+      if (error) {
+        // Don't abort the whole file on a single highlight failure — log and
+        // continue so we at least get the rest of the book in.
+        console.error(`        ↳ highlight insert failed (${hl.text.slice(0, 40)}…): ${error.message}`);
+      }
+    }
+    return;
+  }
   if (route.kind === 'journal_entry') {
     // For journals, the entry_date IS the meaningful date (when the journaling
     // happened). Override created_at to match it so /library and chronological
@@ -517,7 +761,16 @@ async function main() {
   const existingHashes = args.dryRun ? new Set<string>() : await fetchExistingNoteHashes(sb);
   console.log(`  ${existingHashes.size} existing rows\n`);
 
-  const stats = { note: 0, quote: 0, journal_entry: 0, dup: 0, skip: 0, error: 0 };
+  const stats = {
+    note: 0,
+    quote: 0,
+    journal_entry: 0,
+    readwise_book: 0,
+    highlights: 0, // total highlights across all readwise_books
+    dup: 0,
+    skip: 0,
+    error: 0,
+  };
   let claudeCalls = 0;
 
   for (const filePath of allFiles) {
@@ -561,18 +814,23 @@ async function main() {
       }
     }
     if (route.kind === 'skip') stats.skip += 1;
-    else stats[route.kind] += 1;
+    else if (route.kind === 'readwise_book') {
+      stats.readwise_book += 1;
+      stats.highlights += route.highlights.length;
+    } else stats[route.kind] += 1;
   }
 
   console.log();
   console.log('─── Summary ────────────────────────────────────────');
-  console.log(`Notes:           ${stats.note}`);
-  console.log(`Quotes:          ${stats.quote}`);
-  console.log(`Journal entries: ${stats.journal_entry}`);
-  console.log(`Duplicates:      ${stats.dup}`);
-  console.log(`Skipped:         ${stats.skip}`);
-  console.log(`Errors:          ${stats.error}`);
-  console.log(`Claude calls:    ${claudeCalls}`);
+  console.log(`Notes:               ${stats.note}`);
+  console.log(`Quotes:              ${stats.quote}`);
+  console.log(`Journal entries:     ${stats.journal_entry}`);
+  console.log(`Readwise books:      ${stats.readwise_book}`);
+  console.log(`  └─ highlights:     ${stats.highlights}`);
+  console.log(`Duplicates:          ${stats.dup}`);
+  console.log(`Skipped:             ${stats.skip}`);
+  console.log(`Errors:              ${stats.error}`);
+  console.log(`Claude calls:        ${claudeCalls}`);
   console.log(args.dryRun ? '(dry-run — no DB writes happened)' : '(committed to DB)');
 }
 
@@ -580,6 +838,7 @@ function routeBadge(r: Route): string {
   if (r.kind === 'note') return 'NOTE ';
   if (r.kind === 'quote') return 'QUOTE';
   if (r.kind === 'journal_entry') return 'JRNL ';
+  if (r.kind === 'readwise_book') return 'BOOK ';
   return 'SKIP ';
 }
 
@@ -599,6 +858,14 @@ function formatRoute(r: Route): string {
     return bits.join(' · ');
   }
   if (r.kind === 'journal_entry') return r.entry_date;
+  if (r.kind === 'readwise_book') {
+    const bits: string[] = [
+      `"${r.title}"`,
+      r.author ? `by:${r.author}` : '',
+      `${r.highlights.length} highlights`,
+    ].filter(Boolean);
+    return bits.join(' · ');
+  }
   return r.reason ?? 'skip';
 }
 

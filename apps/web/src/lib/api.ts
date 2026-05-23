@@ -298,6 +298,22 @@ export interface FeedItem {
   payload: Record<string, unknown>;
 }
 
+export interface Book {
+  id: string;
+  title: string;
+  author: string | null;
+  isbn: string | null;
+  cover_image_url: string | null;
+  status: 'reading' | 'finished' | 'abandoned' | 'want_to_read';
+  format: 'physical' | 'kindle' | 'audiobook' | null;
+  started_at: string | null;
+  finished_at: string | null;
+  rating: number | null;
+  my_summary: string | null;
+  created_at: string;
+  quote_count?: number;
+}
+
 export const libraryApi = {
   feed: (limit = 500) =>
     api.get<{ items: FeedItem[] }>(`/api/library/feed?limit=${limit}`),
@@ -328,6 +344,10 @@ export const libraryApi = {
   },
   journal: {
     list: () => api.get<{ entries: JournalEntry[] }>('/api/journal-entries'),
+  },
+  books: {
+    list: () => api.get<{ books: Book[] }>('/api/books'),
+    get: (id: string) => api.get<{ book: Book; quotes: Quote[] }>(`/api/books/${id}`),
   },
 };
 
