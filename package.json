@@ -20,7 +20,8 @@
     "lint": "pnpm -r lint",
     "db:generate": "pnpm --filter @jerad-ops/api drizzle:generate",
     "db:push": "pnpm --filter @jerad-ops/api drizzle:push",
-    "db:studio": "pnpm --filter @jerad-ops/api drizzle:studio"
+    "db:studio": "pnpm --filter @jerad-ops/api drizzle:studio",
+    "import-notes": "pnpm --filter @jerad-ops/api exec tsx scripts/import-notes.ts"
   },
   "devDependencies": {
     "typescript": "^5.7.2"
