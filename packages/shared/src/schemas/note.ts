@@ -28,11 +28,14 @@ export const NoteSchema = z.object({
 export const CreateNoteSchema = z.object({
   body: z.string().min(1),
   source_type: NoteSourceTypeSchema.default('own_thought'),
-  source_reference: z.string().optional(),
+  // Nullable so clients can clear a previously-set value via PATCH. The
+  // alternative — omit the field — would update *only* the non-null fields,
+  // making it impossible to wipe a source_reference once it's been set.
+  source_reference: z.string().nullable().optional(),
   tags: z.array(z.string()).optional(),
-  related_project_id: z.string().uuid().optional(),
-  related_person_id: z.string().uuid().optional(),
-  related_quote_id: z.string().uuid().optional(),
+  related_project_id: z.string().uuid().nullable().optional(),
+  related_person_id: z.string().uuid().nullable().optional(),
+  related_quote_id: z.string().uuid().nullable().optional(),
   needs_review: z.boolean().optional(),
 });
 
