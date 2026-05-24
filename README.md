@@ -93,6 +93,39 @@ curl http://localhost:3001/healthz
 curl http://localhost:3001/readyz   # 503 until Supabase env is set
 ```
 
+## Deploy (XCloud)
+
+Both sites (`dashboard.jeradhill.com` and `api.dashboard.jeradhill.com`) deploy
+via XCloud's git webhook → custom deploy command. Each site's "Deploy Script"
+in XCloud is exactly:
+
+```bash
+# Web site
+set -euo pipefail
+bash scripts/deploy.sh web
+```
+
+```bash
+# API site
+set -euo pipefail
+bash scripts/deploy.sh api
+```
+
+`scripts/deploy.sh` runs install + the right per-site build, then
+`pm2 reload all --update-env`, then verifies the site responds via a
+localhost curl. Fails loud on any error — no `|| true` traps that
+silently green-light broken deploys. Triggering a deploy:
+
+```bash
+curl -X POST 'https://app.xcloud.host/api/git/<TOKEN>/deploy'
+```
+
+Verify the result with `pnpm smoke:prod` after ~60s.
+
+If `scripts/deploy.sh` errors with `pm2 binary not found`, SSH into the box
+and run `which pm2` — then add that directory to the `export PATH=…` line
+near the top of the script.
+
 ## Cron jobs
 
 Four secret-gated HTTP endpoints under `/api/cron/*` are designed to be hit by an
