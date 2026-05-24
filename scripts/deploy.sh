@@ -72,12 +72,16 @@ else
 fi
 
 # ─── 4. Reload pm2 ────────────────────────────────────────────────────────
-# --update-env: re-read process.env from the pm2 daemon's saved env at
-# start time, so any env vars changed in XCloud propagate on this deploy.
-# Without it, you'd need a `pm2 delete` + `pm2 start` cycle to pick up
-# new env vars — which is exactly the kind of thing you'd silently
-# forget.
-"$PM2" reload all --update-env
+# DO NOT add --update-env here. That flag replaces the running process's
+# env with whatever env this deploy shell has — and XCloud's deploy shell
+# does NOT carry all the env vars that pm2 was originally started with
+# (SUPABASE_SERVICE_ROLE_KEY, NEXT_PUBLIC_SUPABASE_URL, etc. are injected
+# at process-start time, not deploy time). Adding --update-env once
+# stripped env from the running processes and 502'd the web until pm2
+# was manually re-bootstrapped. Plain `pm2 reload` keeps the captured
+# env intact — env-var changes require an explicit pm2 start with the
+# new env, but normal code deploys leave env alone.
+"$PM2" reload all
 
 # ─── 5. Verify ────────────────────────────────────────────────────────────
 # Give pm2 a couple seconds to bring the new worker up before probing.
