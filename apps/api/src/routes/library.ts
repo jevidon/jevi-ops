@@ -404,7 +404,17 @@ export const libraryRoutes: FastifyPluginAsync = async (app) => {
     for (const n of notes.data ?? []) items.push({ kind: 'note', id: n.id, at: n.created_at, payload: n });
     for (const q of quotes.data ?? []) items.push({ kind: 'quote', id: q.id, at: q.created_at, payload: q });
     for (const a of annotations.data ?? []) items.push({ kind: 'annotation', id: a.id, at: a.annotated_at, payload: a });
-    for (const j of journal.data ?? []) items.push({ kind: 'journal', id: j.id, at: j.created_at, payload: j });
+    // Journal entries: the user can backdate them, so the feed sorts
+    // + displays by entry_date (the day the user attributes the entry
+    // to), not created_at (when the row was inserted). entry_date is a
+    // DATE column (YYYY-MM-DD); pin to noon UTC so it slots into the
+    // mixed timestamp/date sort correctly and Date parses it reliably.
+    for (const j of journal.data ?? []) items.push({
+      kind: 'journal',
+      id: j.id,
+      at: `${j.entry_date}T12:00:00Z`,
+      payload: j,
+    });
     items.sort((a, b) => b.at.localeCompare(a.at));
     return { items: items.slice(0, limit) };
   });
