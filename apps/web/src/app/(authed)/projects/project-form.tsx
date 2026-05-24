@@ -5,6 +5,7 @@ import { useFormStatus } from 'react-dom';
 import { createProjectAction, updateProjectAction, deleteProjectAction, type SaveResult } from './actions';
 import { PROJECT_COLOR_PALETTE } from '@jerad-ops/shared';
 import { useTransientSaveResult } from '@/lib/use-transient-save-result';
+import { DateInput } from '@/components/DateInput';
 
 interface DomainOption {
   id: string;
@@ -156,16 +157,14 @@ export function ProjectForm({
 
         <div className="grid grid-cols-2 gap-4">
           <Field label="Start date">
-            <input
-              type="date"
+            <DateInput
               name="start_date"
               defaultValue={initial.start_date}
               className="w-full bg-transparent border border-line focus:border-ink-2 focus:outline-none p-2 font-sans text-[14px] text-ink"
             />
           </Field>
           <Field label="Target date">
-            <input
-              type="date"
+            <DateInput
               name="target_date"
               defaultValue={initial.target_date}
               className="w-full bg-transparent border border-line focus:border-ink-2 focus:outline-none p-2 font-sans text-[14px] text-ink"

@@ -7,6 +7,7 @@ import {
   deleteActivityAction,
   type SaveResult,
 } from './activity-actions';
+import { DateTimeInput } from '@/components/DateTimeInput';
 
 // One row of the activity log on /projects/[id]. Read mode is the
 // compact display we had before. Click the timestamp (or the hover-only
@@ -72,8 +73,7 @@ export function ActivityRow({
             title="Hours — enter a number (1.5), or '1h30m', '45m', or blank to clear"
             className="w-24 bg-transparent border-b border-line focus:border-accent focus:outline-none py-1.5 font-mono text-[13px] text-ink text-center placeholder:text-ink-3/60"
           />
-          <input
-            type="datetime-local"
+          <DateTimeInput
             name="logged_at"
             defaultValue={toDatetimeLocalValue(entry.logged_at)}
             disabled={pending}

@@ -2,6 +2,7 @@
 
 import { useActionState, useEffect, useRef, useState } from 'react';
 import { addActivityAction, type SaveResult } from './activity-actions';
+import { DateTimeInput } from '@/components/DateTimeInput';
 
 // Inline "log time / log update" form above the activity list. Two modes:
 //   - Work (default) — what you did, hours-loggable
@@ -85,8 +86,7 @@ export function LogTimeForm({ projectId }: { projectId: string }) {
             className="w-24 bg-transparent border-b border-line focus:border-accent focus:outline-none py-1.5 font-mono text-[13px] text-ink text-center placeholder:text-ink-3/60"
           />
         )}
-        <input
-          type="datetime-local"
+        <DateTimeInput
           name="logged_at"
           disabled={pending}
           aria-label="When"

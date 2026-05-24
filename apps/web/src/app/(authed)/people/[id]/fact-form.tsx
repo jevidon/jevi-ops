@@ -2,6 +2,7 @@
 
 import { useActionState, useEffect, useRef } from 'react';
 import { addFactAction, type SaveResult } from './fact-actions';
+import { DateInput } from '@/components/DateInput';
 
 // Inline "+ add a fact" form on the person detail page. Fact type =
 // dropdown of birthday/anniversary/kid_name/etc.; value = freeform text;
@@ -57,8 +58,7 @@ export function FactForm({ personId }: { personId: string }) {
           autoComplete="off"
           className="flex-1 min-w-[160px] bg-transparent border-b border-line focus:border-accent focus:outline-none py-1.5 font-sans text-[13px] text-ink placeholder:text-ink-3/60"
         />
-        <input
-          type="date"
+        <DateInput
           name="date_relevant"
           disabled={pending}
           aria-label="Date"

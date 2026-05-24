@@ -2,6 +2,7 @@
 
 import { useActionState, useEffect, useRef } from 'react';
 import { addInteractionAction, type SaveResult } from './interaction-actions';
+import { DateTimeInput } from '@/components/DateTimeInput';
 
 // "Log interaction" form. Type dropdown + freeform notes + optional
 // backfill datetime. Submitting writes a person_interactions row and
@@ -55,8 +56,7 @@ export function InteractionForm({ personId }: { personId: string }) {
           autoComplete="off"
           className="flex-1 min-w-[200px] bg-transparent border-b border-line focus:border-accent focus:outline-none py-1.5 font-sans text-[13px] text-ink placeholder:text-ink-3/60"
         />
-        <input
-          type="datetime-local"
+        <DateTimeInput
           name="occurred_at"
           disabled={pending}
           aria-label="When"

@@ -5,6 +5,7 @@ import { useFormStatus } from 'react-dom';
 import { createContentAction, updateContentAction, deleteContentAction, type SaveResult } from './actions';
 import type { ContentItem, ContentItemStatus, ContentItemType } from '@/lib/api';
 import { useTransientSaveResult } from '@/lib/use-transient-save-result';
+import { DateInput } from '@/components/DateInput';
 
 interface DomainOption {
   id: string;
@@ -128,8 +129,7 @@ export function ContentForm({
         </Field>
 
         <Field label="Published date">
-          <input
-            type="date"
+          <DateInput
             name="published_at"
             defaultValue={initial.published_at}
             className="w-full bg-transparent border border-line focus:border-ink-2 focus:outline-none p-2 font-sans text-[14px] text-ink"

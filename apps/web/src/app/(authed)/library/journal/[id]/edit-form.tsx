@@ -9,6 +9,7 @@ import {
 } from './actions';
 import type { Attachment } from '@/lib/api';
 import { ImageUploader } from '@/components/ImageUploader';
+import { DateInput } from '@/components/DateInput';
 import { useTransientSaveResult } from '@/lib/use-transient-save-result';
 
 export interface JournalFormInitial {
@@ -36,11 +37,10 @@ export function JournalEditForm({ initial }: { initial: JournalFormInitial }) {
 
         <label className="flex flex-col gap-1">
           <span className="eyebrow">Date</span>
-          <input
-            type="date"
+          <DateInput
             name="entry_date"
             defaultValue={initial.entry_date}
-            className="bg-transparent border border-line focus:border-accent focus:outline-none p-2 font-sans text-[14px] text-ink w-fit"
+            className="bg-transparent border border-line focus:border-accent focus:outline-none p-2 font-sans text-[14px] text-ink w-48"
           />
         </label>
 

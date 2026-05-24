@@ -2,6 +2,8 @@
 
 import { useActionState, useState } from 'react';
 import { useTransientSaveResult } from '@/lib/use-transient-save-result';
+import { DateInput } from '@/components/DateInput';
+import { TimeInput } from '@/components/TimeInput';
 import { useFormStatus } from 'react-dom';
 import {
   createTaskFullAction,
@@ -77,16 +79,14 @@ export function TaskForm({
 
         <div className="grid grid-cols-2 gap-4">
           <Field label="Due date">
-            <input
-              type="date"
+            <DateInput
               name="due_date"
               defaultValue={initial.due_date}
               className="w-full bg-transparent border border-line focus:border-ink-2 focus:outline-none p-2 font-sans text-[14px] text-ink"
             />
           </Field>
           <Field label="Due time">
-            <input
-              type="time"
+            <TimeInput
               name="due_time"
               defaultValue={initial.due_time}
               className="w-full bg-transparent border border-line focus:border-ink-2 focus:outline-none p-2 font-sans text-[14px] text-ink"

@@ -5,6 +5,7 @@ import { useFormStatus } from 'react-dom';
 import { createBookAction, updateBookAction, deleteBookAction, type SaveResult } from './actions';
 import type { Book } from '@/lib/api';
 import { useTransientSaveResult } from '@/lib/use-transient-save-result';
+import { DateInput } from '@/components/DateInput';
 
 interface InitialValues {
   id?: string;                 // present → edit mode; absent → create mode
@@ -103,16 +104,14 @@ export function BookForm({ initial }: { initial: InitialValues }) {
 
         <div className="grid grid-cols-2 gap-4">
           <Field label="Started">
-            <input
-              type="date"
+            <DateInput
               name="started_at"
               defaultValue={initial.started_at}
               className="w-full bg-transparent border border-line focus:border-ink-2 focus:outline-none p-2 font-sans text-[14px] text-ink"
             />
           </Field>
           <Field label="Finished">
-            <input
-              type="date"
+            <DateInput
               name="finished_at"
               defaultValue={initial.finished_at}
               className="w-full bg-transparent border border-line focus:border-ink-2 focus:outline-none p-2 font-sans text-[14px] text-ink"

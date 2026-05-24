@@ -11,6 +11,7 @@ import {
 } from './actions';
 import type { TimeOfDayBucket } from '@/lib/api';
 import { useTransientSaveResult } from '@/lib/use-transient-save-result';
+import { TimeInput } from '@/components/TimeInput';
 
 export interface RoutineFormInitial {
   id?: string;
@@ -92,11 +93,14 @@ export function RoutineForm({ initial }: { initial: RoutineFormInitial }) {
 
           <label className="flex flex-col gap-1">
             <span className="eyebrow">Specific time (optional)</span>
-            <input
-              type="time"
+            <TimeInput
               name="specific_time"
-              value={specificTime}
-              onChange={(e) => setSpecificTime(e.target.value)}
+              defaultValue={initial.specific_time}
+              // Mirror typed text into local state so the reminder
+              // checkbox below can react to "user has typed something"
+              // before they blur. The form actually submits the
+              // parsed/validated value via TimeInput's hidden field.
+              onTextChange={setSpecificTime}
               className="bg-transparent border border-line focus:border-accent focus:outline-none p-2 font-sans text-[14px] text-ink"
             />
           </label>
