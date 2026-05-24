@@ -153,13 +153,25 @@ export default async function NotesPage({
         </div>
       ) : (
         <ul className="px-5 lg:px-0 mt-4">
-          {notes.map((n) => (
+          {notes.map((n) => {
+            const attachmentCount = (n.attachments ?? []).length;
+            return (
             <li key={n.id} className="py-3 border-b border-line/40">
               <div className="flex items-baseline justify-between gap-3">
                 <span className="font-mono text-[10px] uppercase tracking-wider text-ink-3">
                   {SOURCE_TYPE_LABELS[n.source_type]}
                   {n.source_reference ? ` · ${n.source_reference}` : ''}
                   {n.needs_review ? ' · needs review' : ''}
+                  {/* Photo-attached indicator. Glyph only — no <img>
+                      so the list view never triggers a CDN fetch. */}
+                  {attachmentCount > 0 && (
+                    <span
+                      title={`${attachmentCount} image${attachmentCount === 1 ? '' : 's'} attached`}
+                      aria-label={`${attachmentCount} image${attachmentCount === 1 ? '' : 's'} attached`}
+                    >
+                      {' · 📷'}{attachmentCount > 1 ? ` ${attachmentCount}` : ''}
+                    </span>
+                  )}
                 </span>
                 <span className="font-mono text-[10px] uppercase tracking-wider text-ink-3">
                   {new Date(n.created_at).toLocaleDateString('en-US', { timeZone: 'America/Denver', month: 'short', day: 'numeric' })}
@@ -203,7 +215,8 @@ export default async function NotesPage({
                 </div>
               )}
             </li>
-          ))}
+            );
+          })}
         </ul>
       )}
     </div>

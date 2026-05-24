@@ -42,8 +42,12 @@ export default async function JournalListPage() {
                       })}
                     </span>
                     {e.source !== 'typed' && <span>via {e.source.replace('_', ' ')}</span>}
+                    {/* Photo-attached indicator. Glyph only — no <img>
+                        means the list view never triggers a CDN fetch. */}
                     {attachmentCount > 0 && (
-                      <span>📎 {attachmentCount} image{attachmentCount === 1 ? '' : 's'}</span>
+                      <span title={`${attachmentCount} image${attachmentCount === 1 ? '' : 's'} attached`}>
+                        📷 {attachmentCount} image{attachmentCount === 1 ? '' : 's'}
+                      </span>
                     )}
                   </div>
                   <div className="mt-1 font-sans text-[14px] text-ink leading-snug whitespace-pre-wrap line-clamp-3">
