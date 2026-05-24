@@ -44,9 +44,21 @@ export function ImageUploader({
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
+  // Pre-flight: catch oversized files client-side before they hit the
+  // server action's body-size limit. Matches the 25MB cap configured
+  // in next.config.mjs + the API's multipart limit.
+  const MAX_FILE_BYTES = 25 * 1024 * 1024;
+
   function handleFiles(files: FileList | null) {
     if (!files || files.length === 0) return;
     setError(null);
+    const tooBig = Array.from(files).find((f) => f.size > MAX_FILE_BYTES);
+    if (tooBig) {
+      const mb = (tooBig.size / 1024 / 1024).toFixed(1);
+      setError(`"${tooBig.name}" is ${mb} MB — over the 25 MB limit.`);
+      if (inputRef.current) inputRef.current.value = '';
+      return;
+    }
     // Kick off all uploads in parallel; report the first error if any
     // fail but commit whatever succeeded.
     // Capture the title hint NOW so every parallel upload uses the same

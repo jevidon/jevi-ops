@@ -10,6 +10,17 @@ const nextConfig = {
   // typedRoutes is incompatible with dynamic `redirect(target)` calls from
   // server actions where the path comes from a request param.
 
+  // Server Actions cap request bodies at 1MB by default — fine for
+  // typical form posts but kills image uploads (phone photos are 5-12MB).
+  // Bump to 25MB to match the multipart limit on the API. Anything over
+  // 25MB gets rejected at the API layer with a clean 413 instead of a
+  // generic Next.js exception.
+  experimental: {
+    serverActions: {
+      bodySizeLimit: '25mb',
+    },
+  },
+
   // packages/shared uses TypeScript's "import './x.js'" convention required
   // by NodeNext resolution (the API). Webpack's default resolver doesn't
   // know to also try '.ts' for those imports — extensionAlias fixes it.
