@@ -1,11 +1,19 @@
 import { randomUUID } from 'node:crypto';
+import exifr from 'exifr';
 import { env } from './env.js';
 
 // Thin Bunny Storage client. We talk to Bunny's HTTP API directly —
 // PUT to upload, DELETE to remove. The CDN URL is constructed from the
 // configured Pull Zone host.
 //
+// On upload we also try to extract EXIF GPS coordinates and
+// reverse-geocode them to a human-readable address (via OpenStreetMap
+// Nominatim — no API key required). Both steps fail silently: missing
+// GPS, geocoding hiccup, or rate-limiting just means no location on
+// that attachment.
+//
 // Docs: https://docs.bunny.net/reference/storage-api
+//       https://nominatim.org/release-docs/develop/api/Reverse/
 
 export interface StoredAttachment {
   url: string;
@@ -14,6 +22,8 @@ export interface StoredAttachment {
   size_bytes: number;
   alt: string | null;
   uploaded_at: string;
+  gps?: { lat: number; lon: number } | null;
+  location?: string | null;
 }
 
 export function isBunnyConfigured(): boolean {
@@ -55,6 +65,11 @@ export function extensionForImage(mime: string): string | null {
 //
 // Files get a random UUID name (unguessable) plus the right extension.
 // We never honor a client-provided filename — that's an attack surface.
+//
+// EXIF GPS extraction + reverse geocoding happen in parallel with the
+// upload itself, so they don't slow it down. Both are best-effort —
+// missing GPS, network blip, or rate limit just means no location on
+// the returned record. The upload always succeeds.
 export async function uploadImage(params: {
   bytes: Buffer;
   contentType: string;
@@ -72,17 +87,24 @@ export async function uploadImage(params: {
   const storage_path = `${params.prefix}/${randomUUID()}.${ext}`;
   const url = `${storageEndpoint()}/${env.BUNNY_STORAGE_ZONE}/${storage_path}`;
 
-  const res = await fetch(url, {
-    method: 'PUT',
-    headers: {
-      AccessKey: env.BUNNY_STORAGE_ACCESS_KEY!,
-      'Content-Type': params.contentType,
-    },
-    body: params.bytes,
-  });
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`bunny_upload_failed:${res.status}:${body.slice(0, 200)}`);
+  // Kick off Bunny upload + EXIF/geocode in parallel. The geocoding
+  // step is allowed to fail silently — its result is decoration on
+  // the attachment, not blocking.
+  const [uploadRes, location] = await Promise.all([
+    fetch(url, {
+      method: 'PUT',
+      headers: {
+        AccessKey: env.BUNNY_STORAGE_ACCESS_KEY!,
+        'Content-Type': params.contentType,
+      },
+      body: params.bytes,
+    }),
+    extractAndGeocode(params.bytes).catch(() => null),
+  ]);
+
+  if (!uploadRes.ok) {
+    const body = await uploadRes.text().catch(() => '');
+    throw new Error(`bunny_upload_failed:${uploadRes.status}:${body.slice(0, 200)}`);
   }
 
   // Public CDN URL via the Pull Zone host. Strip any accidental
@@ -98,7 +120,65 @@ export async function uploadImage(params: {
     size_bytes: params.bytes.byteLength,
     alt: params.alt?.trim() || null,
     uploaded_at: new Date().toISOString(),
+    gps: location?.gps ?? null,
+    location: location?.address ?? null,
   };
+}
+
+// ─── EXIF + reverse geocoding ──────────────────────────────────────────
+//
+// Pull GPS from EXIF (exifr reads from a Buffer just fine), then
+// reverse-geocode via OpenStreetMap's Nominatim service. Nominatim is
+// free and requires no API key, but does ask for a User-Agent
+// identifying the consumer and limits us to ~1 req/sec — fine for
+// personal-use upload frequency.
+
+interface ExtractedLocation {
+  gps: { lat: number; lon: number };
+  address: string | null;
+}
+
+async function extractAndGeocode(bytes: Buffer): Promise<ExtractedLocation | null> {
+  // exifr.gps() returns { latitude, longitude } or null. It's
+  // resilient to non-image inputs (returns null) so we don't need
+  // a content-type pre-check.
+  let gps: { latitude?: number; longitude?: number } | null;
+  try {
+    gps = await exifr.gps(bytes);
+  } catch {
+    return null;
+  }
+  if (!gps || typeof gps.latitude !== 'number' || typeof gps.longitude !== 'number') {
+    return null;
+  }
+  const coords = { lat: gps.latitude, lon: gps.longitude };
+  const address = await reverseGeocode(coords.lat, coords.lon).catch(() => null);
+  return { gps: coords, address };
+}
+
+async function reverseGeocode(lat: number, lon: number): Promise<string | null> {
+  // Nominatim's reverse endpoint. zoom=18 gives building-level
+  // precision; "addressdetails=0" because we just want display_name.
+  const url = new URL('https://nominatim.openstreetmap.org/reverse');
+  url.searchParams.set('format', 'jsonv2');
+  url.searchParams.set('lat', lat.toFixed(6));
+  url.searchParams.set('lon', lon.toFixed(6));
+  url.searchParams.set('zoom', '18');
+  url.searchParams.set('addressdetails', '0');
+
+  const res = await fetch(url.toString(), {
+    headers: {
+      // Nominatim TOS asks for an identifying User-Agent.
+      'User-Agent': 'jerad-ops/1.0 (https://dashboard.jeradhill.com)',
+      Accept: 'application/json',
+    },
+    // Short timeout — if Nominatim is slow, drop the location rather
+    // than make the user wait. AbortController via signal-with-timeout.
+    signal: AbortSignal.timeout(5_000),
+  });
+  if (!res.ok) return null;
+  const body = (await res.json()) as { display_name?: string };
+  return body.display_name?.trim() || null;
 }
 
 // Delete a stored file by its storage_path. Best-effort: 404 means it

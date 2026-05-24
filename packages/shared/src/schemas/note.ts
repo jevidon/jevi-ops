@@ -17,6 +17,11 @@ export const NoteSourceTypeSchema = z.enum([
 // because the API trusts what it stored at upload time; the client
 // never crafts these from scratch — it just adds/removes whole
 // objects returned by /api/uploads/image.
+//
+// Location fields are populated server-side at upload time from EXIF
+// GPS tags (when present). Phone-camera photos usually carry them;
+// photos that came in via messaging apps typically don't. The address
+// is a human-readable reverse-geocode of the coords.
 export const AttachmentSchema = z.object({
   url: z.string().url(),
   storage_path: z.string().min(1),
@@ -24,6 +29,14 @@ export const AttachmentSchema = z.object({
   size_bytes: z.number().int().nonnegative().optional(),
   alt: z.string().nullable().optional(),
   uploaded_at: z.string().optional(),
+  // GPS coordinates pulled from the image's EXIF, if present.
+  gps: z.object({
+    lat: z.number(),
+    lon: z.number(),
+  }).nullable().optional(),
+  // Human-readable address from reverse geocoding. Free-form — we
+  // display it as-is, no parsing.
+  location: z.string().nullable().optional(),
 });
 export type Attachment = z.infer<typeof AttachmentSchema>;
 

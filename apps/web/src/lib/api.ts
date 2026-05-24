@@ -394,6 +394,11 @@ export interface Attachment {
   size_bytes?: number;
   alt?: string | null;
   uploaded_at?: string;
+  // GPS + reverse-geocoded address are populated at upload time from
+  // EXIF when present. Either may be null if EXIF is missing or
+  // Nominatim is unavailable.
+  gps?: { lat: number; lon: number } | null;
+  location?: string | null;
 }
 
 export interface Note {

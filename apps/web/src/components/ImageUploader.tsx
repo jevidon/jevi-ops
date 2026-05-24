@@ -47,7 +47,11 @@ export function ImageUploader({
         Array.from(files).map(async (file) => {
           const fd = new FormData();
           fd.append('file', file, file.name);
-          return uploadImageAction(fd, prefix);
+          // Carry the prefix as a form field so the server action can
+          // be a single-arg `(FormData) => ...` — avoids brittle
+          // multi-arg server-action encoding edge cases.
+          fd.append('prefix', prefix);
+          return uploadImageAction(fd);
         }),
       );
       const next = [...attachments];
