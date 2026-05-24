@@ -236,14 +236,23 @@ export default async function ContentPage({
   );
 }
 
+// For the "Recent" sort, use the most user-meaningful date: published_at
+// for items that have actually shipped, updated_at for everything in
+// flight. This matches mental model — a video published last year that
+// I just edited the description on should still appear in last year's
+// slot, not at the top of the timeline.
+function effectiveDate(c: ContentItem): string {
+  return c.published_at ?? c.updated_at;
+}
+
 function sortContent(a: ContentItem, b: ContentItem, key: SortKey): number {
   switch (key) {
     case 'updated':
-      return b.updated_at.localeCompare(a.updated_at);
+      return effectiveDate(b).localeCompare(effectiveDate(a));
     case 'status': {
       const ao = STATUS_ORDER[a.status] ?? 99;
       const bo = STATUS_ORDER[b.status] ?? 99;
-      if (ao === bo) return b.updated_at.localeCompare(a.updated_at);
+      if (ao === bo) return effectiveDate(b).localeCompare(effectiveDate(a));
       return ao - bo;
     }
     case 'published': {
