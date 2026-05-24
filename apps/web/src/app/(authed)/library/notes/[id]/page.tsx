@@ -125,6 +125,7 @@ export default async function NoteDetailPage({
             source_reference: note.source_reference ?? '',
             tags: note.tags ?? [],
             needs_review: note.needs_review,
+            attachments: note.attachments ?? [],
           }}
         />
       </div>

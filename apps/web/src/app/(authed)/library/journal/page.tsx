@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { libraryApi, ApiError, type JournalEntry } from '@/lib/api';
 import { LibraryTabBar } from '../library-tab-bar';
@@ -25,23 +26,33 @@ export default async function JournalListPage() {
         </div>
       ) : (
         <ul className="px-5 lg:px-0 mt-4">
-          {entries.map((e) => (
-            <li key={e.id} className="py-4 border-b border-line/40">
-              <div className="font-mono text-[10px] uppercase tracking-wider text-ink-3">
-                {new Date(e.entry_date + 'T12:00:00Z').toLocaleDateString('en-US', {
-                  timeZone: 'America/Denver',
-                  weekday: 'long',
-                  month: 'long',
-                  day: 'numeric',
-                  year: 'numeric',
-                })}
-                {e.source !== 'typed' && ` · via ${e.source.replace('_', ' ')}`}
-              </div>
-              <div className="mt-1 font-sans text-[14px] text-ink leading-snug whitespace-pre-wrap">
-                {e.transcription_text}
-              </div>
-            </li>
-          ))}
+          {entries.map((e) => {
+            const attachmentCount = (e.attachments ?? []).length;
+            return (
+              <li key={e.id} className="py-4 border-b border-line/40">
+                <Link href={`/library/journal/${e.id}`} className="block hover:opacity-80 transition-opacity">
+                  <div className="font-mono text-[10px] uppercase tracking-wider text-ink-3 flex flex-wrap gap-x-3">
+                    <span>
+                      {new Date(e.entry_date + 'T12:00:00Z').toLocaleDateString('en-US', {
+                        timeZone: 'America/Denver',
+                        weekday: 'long',
+                        month: 'long',
+                        day: 'numeric',
+                        year: 'numeric',
+                      })}
+                    </span>
+                    {e.source !== 'typed' && <span>via {e.source.replace('_', ' ')}</span>}
+                    {attachmentCount > 0 && (
+                      <span>📎 {attachmentCount} image{attachmentCount === 1 ? '' : 's'}</span>
+                    )}
+                  </div>
+                  <div className="mt-1 font-sans text-[14px] text-ink leading-snug whitespace-pre-wrap line-clamp-3">
+                    {e.transcription_text}
+                  </div>
+                </Link>
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>

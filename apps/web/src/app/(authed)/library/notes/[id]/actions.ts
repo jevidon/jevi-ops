@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
-import { libraryApi, ApiError, type NoteSourceType } from '@/lib/api';
+import { libraryApi, ApiError, type NoteSourceType, type Attachment } from '@/lib/api';
 
 export type SaveResult = { ok: true } | { ok: false; error: string };
 
@@ -38,6 +38,17 @@ export async function updateNoteAction(
     ? tagsRaw.split(',').map((t) => t.trim()).filter(Boolean)
     : [];
 
+  // Attachments come through as a JSON string from the ImageUploader's
+  // hidden field. The uploader controls the local state; we just round-
+  // trip it. Bad JSON → empty array; the form save isn't the place to
+  // surface upload errors (those happened earlier on the upload itself).
+  const attachmentsRaw = String(formData.get('attachments') ?? '[]');
+  let attachments: Attachment[] = [];
+  try {
+    const parsed = JSON.parse(attachmentsRaw);
+    if (Array.isArray(parsed)) attachments = parsed as Attachment[];
+  } catch { /* ignore */ }
+
   try {
     await libraryApi.notes.update(id, {
       title,
@@ -46,6 +57,7 @@ export async function updateNoteAction(
       source_reference: source_reference ?? null,
       tags,
       needs_review,
+      attachments,
     });
   } catch (err) {
     if (err instanceof ApiError) {

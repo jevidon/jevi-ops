@@ -77,6 +77,22 @@ const EnvSchema = z.object({
   // PUSHOVER_API_TOKEN = the application/API token from pushover.net.
   PUSHOVER_USER_KEY: z.string().optional(),
   PUSHOVER_API_TOKEN: z.string().optional(),
+
+  // Bunny.net Storage Zone + CDN Pull Zone for image attachments on
+  // notes + journal entries. All four required for /api/uploads/image
+  // to function; missing any → the route returns 503 and the UI hides
+  // the "add image" affordance.
+  //
+  // BUNNY_STORAGE_ZONE   = the storage zone name from Bunny dashboard
+  // BUNNY_STORAGE_REGION = optional region prefix (e.g., "ny", "la");
+  //                        blank uses the default (Frankfurt) endpoint
+  // BUNNY_STORAGE_ACCESS_KEY = the storage zone's password / API key
+  // BUNNY_CDN_HOST       = the Pull Zone hostname (e.g., jerad-ops.b-cdn.net)
+  //                        — what we put in the URL of stored files
+  BUNNY_STORAGE_ZONE: z.string().optional(),
+  BUNNY_STORAGE_REGION: z.string().optional(),
+  BUNNY_STORAGE_ACCESS_KEY: z.string().optional(),
+  BUNNY_CDN_HOST: z.string().optional(),
 });
 
 const parsed = EnvSchema.safeParse(process.env);

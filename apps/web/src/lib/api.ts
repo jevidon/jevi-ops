@@ -278,6 +278,25 @@ export const captureApi = {
     }),
 };
 
+// ─── Image uploads ──────────────────────────────────────────────────────
+//
+// Server-proxied uploads to Bunny Storage. Returns the StoredAttachment
+// the client then appends to a note/journal's attachments array via the
+// regular PATCH route.
+//
+// The route accepts ?prefix=notes|journal|other which controls the
+// storage folder. Alt text can be passed as ?alt= but most clients
+// just leave it null at upload time and let the user fill it in later.
+
+export const uploadsApi = {
+  image: (formData: FormData, prefix: 'notes' | 'journal' | 'other' = 'other') =>
+    call<Attachment>(`/api/uploads/image?prefix=${prefix}`, {
+      method: 'POST',
+      body: formData,
+      json: false,
+    }),
+};
+
 // ─── Chat ────────────────────────────────────────────────────────────────
 
 export interface ChatToolTrace {
@@ -363,6 +382,20 @@ export type NoteSourceType =
   | 'own_thought' | 'reading_response' | 'meeting_note'
   | 'brainstorm' | 'observation' | 'other';
 
+// Image attachment record. Created server-side by /api/uploads/image
+// (which talks to Bunny Storage), stored as an element of the
+// attachments jsonb array on the parent row (note / journal entry).
+// The client never crafts these by hand — it just passes through what
+// the upload endpoint returned.
+export interface Attachment {
+  url: string;
+  storage_path: string;
+  content_type?: string;
+  size_bytes?: number;
+  alt?: string | null;
+  uploaded_at?: string;
+}
+
 export interface Note {
   id: string;
   title: string | null;
@@ -374,6 +407,7 @@ export interface Note {
   related_person_id: string | null;
   related_quote_id: string | null;
   needs_review: boolean;
+  attachments: Attachment[];
   created_at: string;
   project?: { id: string; name: string; color: string | null } | null;
   person?: { id: string; name: string } | null;
@@ -412,6 +446,7 @@ export interface JournalEntry {
   entry_date: string;
   transcription_text: string | null;
   source: string;
+  attachments: Attachment[];
   created_at: string;
 }
 
@@ -533,6 +568,13 @@ export const libraryApi = {
   },
   journal: {
     list: () => api.get<{ entries: JournalEntry[] }>('/api/journal-entries'),
+    get: (id: string) => api.get<JournalEntry>(`/api/journal-entries/${id}`),
+    update: (id: string, body: Partial<{
+      transcription_text: string | null;
+      entry_date: string;
+      attachments: Attachment[];
+    }>) => api.patch<JournalEntry>(`/api/journal-entries/${id}`, body),
+    remove: (id: string) => api.delete(`/api/journal-entries/${id}`),
   },
   books: {
     list: () => api.get<{ books: Book[] }>('/api/books'),

@@ -12,6 +12,21 @@ export const NoteSourceTypeSchema = z.enum([
   'other',
 ]);
 
+// Image attachments — same shape used on notes + journal_entries. The
+// schema is intentionally loose (everything optional except url+path)
+// because the API trusts what it stored at upload time; the client
+// never crafts these from scratch — it just adds/removes whole
+// objects returned by /api/uploads/image.
+export const AttachmentSchema = z.object({
+  url: z.string().url(),
+  storage_path: z.string().min(1),
+  content_type: z.string().optional(),
+  size_bytes: z.number().int().nonnegative().optional(),
+  alt: z.string().nullable().optional(),
+  uploaded_at: z.string().optional(),
+});
+export type Attachment = z.infer<typeof AttachmentSchema>;
+
 export const NoteSchema = z.object({
   id: z.string().uuid(),
   title: z.string().nullable().optional(),
@@ -23,6 +38,7 @@ export const NoteSchema = z.object({
   related_person_id: z.string().uuid().nullable().optional(),
   related_quote_id: z.string().uuid().nullable().optional(),
   needs_review: z.boolean().default(false),
+  attachments: z.array(AttachmentSchema).default([]),
   created_at: z.string().datetime({ offset: true }),
 });
 
@@ -39,6 +55,7 @@ export const CreateNoteSchema = z.object({
   related_person_id: z.string().uuid().nullable().optional(),
   related_quote_id: z.string().uuid().nullable().optional(),
   needs_review: z.boolean().optional(),
+  attachments: z.array(AttachmentSchema).optional(),
 });
 
 export const UpdateNoteSchema = CreateNoteSchema.partial();

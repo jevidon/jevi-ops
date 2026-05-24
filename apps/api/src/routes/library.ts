@@ -194,7 +194,12 @@ export const libraryRoutes: FastifyPluginAsync = async (app) => {
     return reply.code(204).send();
   });
 
-  // ─── Journal entries (read-only for now; create happens via voice) ────
+  // ─── Journal entries ────────────────────────────────────────────────
+  //
+  // Create still happens via voice. Manual edit + delete + attachments
+  // shipped alongside image attachments (migration 0019) so journal
+  // entries can be revisited after the fact (e.g., to add photos taken
+  // during the moment that was journaled about).
 
   app.get<{ Querystring: { limit?: string } }>('/api/journal-entries', async (req) => {
     const limit = Math.min(parseInt(req.query.limit ?? '500', 10) || 500, 2000);
@@ -205,6 +210,63 @@ export const libraryRoutes: FastifyPluginAsync = async (app) => {
       .limit(limit);
     if (error) throw app.httpErrors.internalServerError(error.message);
     return { entries: data ?? [] };
+  });
+
+  app.get<{ Params: { id: string } }>('/api/journal-entries/:id', async (req, reply) => {
+    const { data, error } = await req.supabase!
+      .from('journal_entries')
+      .select('*')
+      .eq('id', req.params.id)
+      .maybeSingle();
+    if (error) throw app.httpErrors.internalServerError(error.message);
+    if (!data) return reply.code(404).send({ error: 'not_found' });
+    return data;
+  });
+
+  app.patch<{
+    Params: { id: string };
+    Body: {
+      transcription_text?: string | null;
+      entry_date?: string;
+      attachments?: unknown[];
+    };
+  }>('/api/journal-entries/:id', async (req, reply) => {
+    const update: Record<string, unknown> = {};
+    if (typeof req.body?.transcription_text === 'string') {
+      update.transcription_text = req.body.transcription_text;
+    } else if (req.body?.transcription_text === null) {
+      update.transcription_text = null;
+    }
+    if (typeof req.body?.entry_date === 'string') {
+      update.entry_date = req.body.entry_date;
+    }
+    if (Array.isArray(req.body?.attachments)) {
+      update.attachments = req.body.attachments;
+    }
+    if (Object.keys(update).length === 0) {
+      return reply.code(400).send({ error: 'empty_payload' });
+    }
+    const { data, error } = await req.supabase!
+      .from('journal_entries')
+      .update(update)
+      .eq('id', req.params.id)
+      .select('*')
+      .single();
+    if (error) throw app.httpErrors.internalServerError(error.message);
+    return data;
+  });
+
+  app.delete<{ Params: { id: string } }>('/api/journal-entries/:id', async (req, reply) => {
+    // We delete attachments from Bunny lazily — the row's gone, the
+    // CDN files become orphaned. A future cleanup job can sweep them.
+    // Inline deletion would add a Bunny round-trip per attachment and
+    // failure modes (DB gone, file still there) we'd have to handle.
+    const { error } = await req.supabase!
+      .from('journal_entries')
+      .delete()
+      .eq('id', req.params.id);
+    if (error) throw app.httpErrors.internalServerError(error.message);
+    return reply.code(204).send();
   });
 
   // ─── Books (reading log + highlight container) ──────────────────────

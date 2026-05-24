@@ -3,8 +3,9 @@
 import { useActionState, useState } from 'react';
 import { useFormStatus } from 'react-dom';
 import { updateNoteAction, deleteNoteAction, type SaveResult } from './actions';
-import type { NoteSourceType } from '@/lib/api';
+import type { NoteSourceType, Attachment } from '@/lib/api';
 import { useTransientSaveResult } from '@/lib/use-transient-save-result';
+import { ImageUploader } from '@/components/ImageUploader';
 
 interface InitialValues {
   id: string;
@@ -14,6 +15,7 @@ interface InitialValues {
   source_reference: string;
   tags: string[];
   needs_review: boolean;
+  attachments: Attachment[];
 }
 
 const SOURCE_TYPE_OPTIONS: Array<{ value: NoteSourceType; label: string }> = [
@@ -31,6 +33,9 @@ export function EditNoteForm({ initial }: { initial: InitialValues }) {
     null,
   );
   const display = useTransientSaveResult(state);
+  // Local attachments state; serialized into a hidden field on submit
+  // so the server action can persist via the existing PATCH route.
+  const [attachments, setAttachments] = useState<Attachment[]>(initial.attachments);
 
   return (
     <>
@@ -100,6 +105,18 @@ export function EditNoteForm({ initial }: { initial: InitialValues }) {
           />
           Needs review
         </label>
+
+        {/* Image attachments. Uploads happen eagerly via the uploader;
+            this hidden field carries the current list into the form
+            submit so the server action can write it to the DB. */}
+        <Field label="Images">
+          <ImageUploader
+            attachments={attachments}
+            onChange={setAttachments}
+            prefix="notes"
+          />
+        </Field>
+        <input type="hidden" name="attachments" value={JSON.stringify(attachments)} />
 
         {display && (
           <div
