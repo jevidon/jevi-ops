@@ -9,13 +9,23 @@ import { createTaskAction } from './actions';
 export function AddTaskForm() {
   const [state, formAction, pending] = useActionState(createTaskAction, {});
   const inputRef = useRef<HTMLInputElement>(null);
+  // Track the previous pending value so we only fire the reset/refocus when
+  // pending transitions from true → false (i.e. a submit JUST completed).
+  // Without this, the effect fires on initial mount — and because the input
+  // sits at the bottom of the Today page, focusing it would scroll the
+  // whole page down on every load.
+  const wasPending = useRef(false);
 
   useEffect(() => {
-    if (!pending && !state?.error) {
-      // After a successful submit, reset & refocus.
+    if (wasPending.current && !pending && !state?.error) {
+      // A submit just completed successfully — clear and refocus for the
+      // next entry. preventScroll: true so we don't yank the page; the
+      // user is already looking at this input since they just submitted
+      // from it.
       inputRef.current?.form?.reset();
-      inputRef.current?.focus();
+      inputRef.current?.focus({ preventScroll: true });
     }
+    wasPending.current = pending;
   }, [state, pending]);
 
   return (
