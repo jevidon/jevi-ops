@@ -289,6 +289,10 @@ export const captureApi = {
 // just leave it null at upload time and let the user fill it in later.
 
 export const uploadsApi = {
+  // The FormData carries the file and (optionally) `prefix` / `title_hint`
+  // as additional fields. Passing prefix via query also works as a
+  // fallback for old clients; the server prefers the form-field value
+  // when both are present.
   image: (formData: FormData, prefix: 'notes' | 'journal' | 'other' = 'other') =>
     call<Attachment>(`/api/uploads/image?prefix=${prefix}`, {
       method: 'POST',

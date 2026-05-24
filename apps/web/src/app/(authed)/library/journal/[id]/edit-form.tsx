@@ -25,6 +25,9 @@ export function JournalEditForm({ initial }: { initial: JournalFormInitial }) {
   );
   const display = useTransientSaveResult(state);
   const [attachments, setAttachments] = useState<Attachment[]>(initial.attachments);
+  // Controlled transcription so the ImageUploader can pull the first
+  // few words as the stored-filename hint at upload time.
+  const [text, setText] = useState(initial.transcription_text);
 
   return (
     <>
@@ -45,7 +48,8 @@ export function JournalEditForm({ initial }: { initial: JournalFormInitial }) {
           <span className="eyebrow">Entry</span>
           <textarea
             name="transcription_text"
-            defaultValue={initial.transcription_text}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
             rows={8}
             placeholder="What's on your mind?"
             className="bg-transparent border border-line focus:border-accent focus:outline-none p-3 font-sans text-[15px] text-ink leading-relaxed resize-y placeholder:text-ink-3/60"
@@ -58,6 +62,10 @@ export function JournalEditForm({ initial }: { initial: JournalFormInitial }) {
             attachments={attachments}
             onChange={setAttachments}
             prefix="journal"
+            // Journal entries don't have a title — feed the first 120
+            // chars of the body to slugify into a filename. The
+            // server's slugifier caps it at 4 words.
+            titleHint={() => text.trim().slice(0, 120)}
           />
         </div>
         <input type="hidden" name="attachments" value={JSON.stringify(attachments)} />

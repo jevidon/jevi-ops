@@ -63,8 +63,14 @@ export function extensionForImage(mime: string): string | null {
 // Upload a buffer to Bunny Storage and return the CDN-facing URL +
 // storage path. `prefix` is the logical folder ("notes", "journal").
 //
-// Files get a random UUID name (unguessable) plus the right extension.
-// We never honor a client-provided filename — that's an attack surface.
+// Filename shape: `YYYYMMDD-<slug>-<rand4>.<ext>`. The date prefix uses
+// the photo's EXIF DateTimeOriginal when available (so the file name
+// reflects when the photo was taken, not when it was uploaded — much
+// nicer for browsing storage); falls back to today. The slug comes
+// from a hint the caller passes (note title or first words of the
+// body), slugified. The 4-character suffix prevents collisions on
+// same-day same-title uploads. We never honor a client-provided raw
+// filename — that's an attack surface; only the *hint* gets slugified.
 //
 // EXIF GPS extraction + reverse geocoding happen in parallel with the
 // upload itself, so they don't slow it down. Both are best-effort —
@@ -75,6 +81,10 @@ export async function uploadImage(params: {
   contentType: string;
   prefix: 'notes' | 'journal' | 'other';
   alt?: string | null;
+  // Free-form text the server slugifies into the filename. Notes pass
+  // the title; journal entries pass the first few words of the body.
+  // Empty/missing → "untitled".
+  titleHint?: string | null;
 }): Promise<StoredAttachment> {
   if (!isBunnyConfigured()) {
     throw new Error('bunny_not_configured');
@@ -84,12 +94,20 @@ export async function uploadImage(params: {
     throw new Error(`unsupported_content_type:${params.contentType}`);
   }
 
-  const storage_path = `${params.prefix}/${randomUUID()}.${ext}`;
+  // EXIF date + GPS + geocode in parallel with the upload. All decoration;
+  // if any step fails the upload itself still succeeds with sensible
+  // defaults (today's date, no location).
+  const exifDatePromise = extractDateTaken(params.bytes).catch(() => null);
+  const geocodePromise = extractAndGeocode(params.bytes).catch(() => null);
+
+  // The filename needs the date, so wait on it before composing the path.
+  const exifDate = await exifDatePromise;
+  const datePart = formatYYYYMMDD(exifDate ?? new Date());
+  const slug = slugifyForFilename(params.titleHint ?? '');
+  const suffix = randomUUID().slice(0, 4);
+  const storage_path = `${params.prefix}/${datePart}-${slug}-${suffix}.${ext}`;
   const url = `${storageEndpoint()}/${env.BUNNY_STORAGE_ZONE}/${storage_path}`;
 
-  // Kick off Bunny upload + EXIF/geocode in parallel. The geocoding
-  // step is allowed to fail silently — its result is decoration on
-  // the attachment, not blocking.
   const [uploadRes, location] = await Promise.all([
     fetch(url, {
       method: 'PUT',
@@ -99,7 +117,7 @@ export async function uploadImage(params: {
       },
       body: params.bytes,
     }),
-    extractAndGeocode(params.bytes).catch(() => null),
+    geocodePromise,
   ]);
 
   if (!uploadRes.ok) {
@@ -154,6 +172,55 @@ async function extractAndGeocode(bytes: Buffer): Promise<ExtractedLocation | nul
   const coords = { lat: gps.latitude, lon: gps.longitude };
   const address = await reverseGeocode(coords.lat, coords.lon).catch(() => null);
   return { gps: coords, address };
+}
+
+// EXIF DateTimeOriginal → JS Date. exifr.parse() returns a parsed
+// object with .DateTimeOriginal as a Date. Some photos only have
+// CreateDate or ModifyDate; we try in order of "most authoritative."
+async function extractDateTaken(bytes: Buffer): Promise<Date | null> {
+  try {
+    const parsed = await exifr.parse(bytes, {
+      pick: ['DateTimeOriginal', 'CreateDate', 'ModifyDate'],
+    });
+    if (!parsed) return null;
+    const candidate = parsed.DateTimeOriginal ?? parsed.CreateDate ?? parsed.ModifyDate;
+    if (candidate instanceof Date && !Number.isNaN(candidate.getTime())) {
+      return candidate;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+// YYYYMMDD in America/Denver so the filename matches the day a Mountain
+// Time user thinks the photo was taken. UTC would surprise overnight.
+function formatYYYYMMDD(d: Date): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Denver',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(d);
+  const g = (t: string) => parts.find((p) => p.type === t)?.value ?? '';
+  return `${g('year')}${g('month')}${g('day')}`;
+}
+
+// Slugify free text for use in filenames. Lowercase, ASCII-only,
+// hyphen-separated, capped at 4 words. Strips diacritics so "café"
+// becomes "cafe" rather than "caf-" (which would lose the e entirely).
+const MAX_WORDS = 4;
+const MAX_CHARS = 40;
+function slugifyForFilename(raw: string): string {
+  const normalized = raw
+    .normalize('NFKD')
+    .replace(/[̀-ͯ]/g, '')   // strip combining diacritics
+    .toLowerCase()
+    .replace(/['']/g, '')              // squash apostrophes (joe's → joes)
+    .replace(/[^a-z0-9]+/g, '-')       // anything else → hyphen
+    .replace(/^-+|-+$/g, '')           // trim leading/trailing
+    .replace(/-{2,}/g, '-');           // collapse runs
+  if (!normalized) return 'untitled';
+  const truncated = normalized.split('-').slice(0, MAX_WORDS).join('-');
+  return truncated.length > MAX_CHARS ? truncated.slice(0, MAX_CHARS).replace(/-+$/, '') : truncated;
 }
 
 async function reverseGeocode(lat: number, lon: number): Promise<string | null> {

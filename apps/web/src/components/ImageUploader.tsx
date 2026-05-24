@@ -27,11 +27,18 @@ export function ImageUploader({
   onChange,
   prefix,
   label = 'Add image',
+  titleHint,
 }: {
   attachments: Attachment[];
   onChange: (next: Attachment[]) => void;
   prefix: 'notes' | 'journal' | 'other';
   label?: string;
+  // Free text used to build the stored filename (YYYYMMDD-<slug>-xxxx.jpg).
+  // Pass the current note title, or for journal entries the first few
+  // words of the body. We read it via a callback so the most-recent
+  // form value gets captured at upload time, not whatever was there
+  // when the component first mounted.
+  titleHint?: () => string;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [pending, startTransition] = useTransition();
@@ -42,6 +49,9 @@ export function ImageUploader({
     setError(null);
     // Kick off all uploads in parallel; report the first error if any
     // fail but commit whatever succeeded.
+    // Capture the title hint NOW so every parallel upload uses the same
+    // value (reading per-file would race against further keystrokes).
+    const hint = (titleHint?.() ?? '').trim();
     startTransition(async () => {
       const results = await Promise.all(
         Array.from(files).map(async (file) => {
@@ -51,6 +61,7 @@ export function ImageUploader({
           // be a single-arg `(FormData) => ...` — avoids brittle
           // multi-arg server-action encoding edge cases.
           fd.append('prefix', prefix);
+          if (hint) fd.append('title_hint', hint);
           return uploadImageAction(fd);
         }),
       );

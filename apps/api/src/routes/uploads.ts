@@ -28,7 +28,7 @@ const ALLOWED_PREFIXES = new Set(['notes', 'journal', 'other']);
 export const uploadRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', app.requireAuth);
 
-  app.post<{ Querystring: { prefix?: string; alt?: string } }>(
+  app.post<{ Querystring: { prefix?: string; alt?: string; title_hint?: string } }>(
     '/api/uploads/image',
     async (req, reply) => {
       if (!isBunnyConfigured()) {
@@ -41,40 +41,54 @@ export const uploadRoutes: FastifyPluginAsync = async (app) => {
         return reply.code(400).send({ error: 'expected_multipart' });
       }
 
-      const fileData = await req.file();
-      if (!fileData) {
-        return reply.code(400).send({ error: 'no_file_uploaded' });
-      }
+      // We need to read multipart parts that are NOT the file (so we can
+      // capture title_hint / prefix as form fields), so use parts() and
+      // walk through manually instead of req.file(). The order doesn't
+      // matter; we collect into vars and validate at the end.
+      let buffer: Buffer | null = null;
+      let contentType = '';
+      let prefix: 'notes' | 'journal' | 'other' =
+        ALLOWED_PREFIXES.has((req.query.prefix ?? '').toString())
+          ? ((req.query.prefix ?? 'other').toString() as 'notes' | 'journal' | 'other')
+          : 'other';
+      let alt: string | null = typeof req.query.alt === 'string' ? req.query.alt : null;
+      let titleHint: string | null =
+        typeof req.query.title_hint === 'string' ? req.query.title_hint : null;
 
-      const contentType = (fileData.mimetype || '').toLowerCase();
-      if (!ALLOWED_MIME.has(contentType) || !extensionForImage(contentType)) {
-        return reply.code(400).send({
-          error: 'unsupported_content_type',
-          got: contentType,
-          allowed: Array.from(ALLOWED_MIME),
-        });
-      }
-
-      // toBuffer drains the multipart stream. @fastify/multipart's
-      // limits.fileSize cap throws if the file is too large; we let
-      // that surface naturally.
-      let buffer: Buffer;
       try {
-        buffer = await fileData.toBuffer();
+        for await (const part of req.parts()) {
+          if (part.type === 'file') {
+            const mt = (part.mimetype || '').toLowerCase();
+            if (!ALLOWED_MIME.has(mt) || !extensionForImage(mt)) {
+              return reply.code(400).send({
+                error: 'unsupported_content_type',
+                got: mt,
+                allowed: Array.from(ALLOWED_MIME),
+              });
+            }
+            buffer = await part.toBuffer();
+            contentType = mt;
+          } else {
+            // Plain text field. The form posts `prefix`, `title_hint`,
+            // `alt` here so the client can use a single FormData call
+            // and avoid query-string escaping for free-form text.
+            const value = String(part.value ?? '');
+            if (part.fieldname === 'prefix' && ALLOWED_PREFIXES.has(value)) {
+              prefix = value as 'notes' | 'journal' | 'other';
+            } else if (part.fieldname === 'title_hint') {
+              titleHint = value;
+            } else if (part.fieldname === 'alt') {
+              alt = value;
+            }
+          }
+        }
       } catch (err) {
         return reply.code(413).send({ error: 'file_too_large', message: (err as Error).message });
       }
-      if (buffer.length === 0) {
+
+      if (!buffer || buffer.length === 0) {
         return reply.code(400).send({ error: 'empty_file' });
       }
-
-      // Logical bucket (`notes`, `journal`, `other`) — drives the
-      // storage path prefix so files are organized by parent kind.
-      const rawPrefix = (req.query.prefix ?? 'other').toString();
-      const prefix = ALLOWED_PREFIXES.has(rawPrefix)
-        ? (rawPrefix as 'notes' | 'journal' | 'other')
-        : 'other';
-      const alt = typeof req.query.alt === 'string' ? req.query.alt : null;
 
       try {
         const stored = await uploadImage({
@@ -82,6 +96,7 @@ export const uploadRoutes: FastifyPluginAsync = async (app) => {
           contentType,
           prefix,
           alt,
+          titleHint,
         });
         req.log.info(
           { user_id: req.user!.id, storage_path: stored.storage_path, bytes: buffer.length },

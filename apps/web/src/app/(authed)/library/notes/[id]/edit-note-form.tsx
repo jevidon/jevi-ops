@@ -36,6 +36,11 @@ export function EditNoteForm({ initial }: { initial: InitialValues }) {
   // Local attachments state; serialized into a hidden field on submit
   // so the server action can persist via the existing PATCH route.
   const [attachments, setAttachments] = useState<Attachment[]>(initial.attachments);
+  // Controlled title + body so the ImageUploader can capture the
+  // *current* title (or first words of the body, as a fallback) for
+  // the stored filename when an image is added.
+  const [title, setTitle] = useState(initial.title);
+  const [body, setBody] = useState(initial.body);
 
   return (
     <>
@@ -46,7 +51,8 @@ export function EditNoteForm({ initial }: { initial: InitialValues }) {
           <input
             type="text"
             name="title"
-            defaultValue={initial.title}
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
             placeholder="Short headline. Leave blank for voice captures."
             autoComplete="off"
             className="w-full bg-transparent border-b border-line focus:border-ink-2 focus:outline-none py-1.5 font-sans text-[15px] text-ink"
@@ -58,7 +64,8 @@ export function EditNoteForm({ initial }: { initial: InitialValues }) {
             name="body"
             required
             rows={6}
-            defaultValue={initial.body}
+            value={body}
+            onChange={(e) => setBody(e.target.value)}
             className="w-full bg-transparent border border-line focus:border-ink-2 focus:outline-none p-2 font-sans text-[14px] text-ink leading-relaxed resize-y"
           />
         </Field>
@@ -114,6 +121,9 @@ export function EditNoteForm({ initial }: { initial: InitialValues }) {
             attachments={attachments}
             onChange={setAttachments}
             prefix="notes"
+            // Filename hint = title if present; otherwise first words of body.
+            // Captured at upload time so the most recent text wins.
+            titleHint={() => (title.trim() || body.trim()).slice(0, 120)}
           />
         </Field>
         <input type="hidden" name="attachments" value={JSON.stringify(attachments)} />
