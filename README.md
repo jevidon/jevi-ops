@@ -101,30 +101,63 @@ in XCloud is exactly:
 
 ```bash
 # Web site
-set -euo pipefail
-bash scripts/deploy.sh web
+set -e
+mkdir -p "$HOME/.local/bin"
+corepack enable --install-directory "$HOME/.local/bin"
+export PATH="$HOME/.local/bin:$PATH"
+pnpm install --frozen-lockfile
+ln -sf ../../.env apps/web/.env.local
+pnpm build:web
 ```
 
 ```bash
 # API site
-set -euo pipefail
-bash scripts/deploy.sh api
+set -e
+mkdir -p "$HOME/.local/bin"
+corepack enable --install-directory "$HOME/.local/bin"
+export PATH="$HOME/.local/bin:$PATH"
+pnpm install --frozen-lockfile
+pnpm build:api
 ```
 
-`scripts/deploy.sh` runs install + the right per-site build, then
-`pm2 reload all --update-env`, then verifies the site responds via a
-localhost curl. Fails loud on any error — no `|| true` traps that
-silently green-light broken deploys. Triggering a deploy:
+**Note:** PM2 restart is intentionally NOT part of the deploy command.
+XCloud auto-registers Node sites with `bash -c pnpm start:web` as the PM2
+start command, and pnpm isn't on PATH in the spawn context PM2 uses when
+restarting workers, so every automated reload errored out and silently
+left the old process running. After much debugging this turned out to be
+a foot-gun we can't disarm from inside the deploy hook (XCloud re-creates
+the broken registration each time we delete it). The workable answer is:
+
+**After every deploy, manually restart PM2 from XCloud's site UI** (the
+"Restart application" button, or `pm2 restart <name>` from the in-browser
+terminal). The web process is registered as `web` after manual re-setup
+(see below); api is `nodejs-api.dashboard.jeradhill.com`.
+
+Triggering a deploy:
 
 ```bash
 curl -X POST 'https://app.xcloud.host/api/git/<TOKEN>/deploy'
 ```
 
-Verify the result with `pnpm smoke:prod` after ~60s.
+Verify the result with `pnpm smoke:prod` after the deploy + manual PM2
+restart.
 
-If `scripts/deploy.sh` errors with `pm2 binary not found`, SSH into the box
-and run `which pm2` — then add that directory to the `export PATH=…` line
-near the top of the script.
+### One-time PM2 fix for the web site
+
+If you're setting this up fresh or repeating this fix after a host
+migration: XCloud's auto-registered web process uses `bash -c pnpm start:web`
+which is broken (see above). Re-register it once:
+
+```bash
+# Via the web site's in-browser terminal:
+cd /var/www/dashboard.jeradhill.com
+pm2 delete nodejs-dashboard.jeradhill.com   # the broken auto-registered one
+pm2 start scripts/start-web.sh --name web   # uses ./node_modules/.bin/next directly, no pnpm dependency
+pm2 save
+```
+
+The api side already auto-registers correctly (its start command doesn't
+involve pnpm), so no parallel fix is needed there.
 
 ## Cron jobs
 
