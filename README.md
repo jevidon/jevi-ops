@@ -93,6 +93,34 @@ curl http://localhost:3001/healthz
 curl http://localhost:3001/readyz   # 503 until Supabase env is set
 ```
 
+## Cron jobs
+
+Four secret-gated HTTP endpoints under `/api/cron/*` are designed to be hit by an
+external scheduler (XCloud's HTTP cron in prod). All four accept GET (so a plain
+URL pinger works) or POST, and authenticate via either an `X-Cron-Secret` header
+or `?secret=` query param. All require `CRON_SECRET` in the API env; reminder /
+summary / overdue also require Pushover env vars (they soft-skip otherwise).
+
+| Endpoint                      | Recommended cadence            | What it does                                                          |
+| ----------------------------- | ------------------------------ | --------------------------------------------------------------------- |
+| `/api/cron/reminders`         | Every minute                   | Task + routine reminders, plus routine "missed" sweep                 |
+| `/api/cron/observations`      | Hourly                         | Evaluates per-domain failure_patterns → writes to `observations` for "Slipping" |
+| `/api/cron/overdue`           | Hourly, waking hours only      | One-shot Pushover for tasks past their due-time (dedup'd via `reminders_sent`) |
+| `/api/cron/daily-summary`     | Once daily at 7am Mountain     | Single Pushover summarizing today's tasks/events/observations         |
+
+XCloud cron URL examples (`api.dashboard.jeradhill.com` + the secret as a query
+param, since XCloud's HTTP cron form doesn't currently let you set headers):
+
+```
+*/1 * * * *    https://api.dashboard.jeradhill.com/api/cron/reminders?secret=$CRON_SECRET
+0 * * * *      https://api.dashboard.jeradhill.com/api/cron/observations?secret=$CRON_SECRET
+0 13-3 * * *   https://api.dashboard.jeradhill.com/api/cron/overdue?secret=$CRON_SECRET
+0 13 * * *     https://api.dashboard.jeradhill.com/api/cron/daily-summary?secret=$CRON_SECRET
+```
+
+(13 UTC = 7am Mountain during MST; 6am during MDT — close enough for a morning
+ping. The overdue band `13-3` wraps midnight UTC to cover 7am–9pm Mountain.)
+
 ## Phase 1 build checklist
 
 Tracked against spec §12. ✅ shipped · 🟡 in progress · ⬜ pending.

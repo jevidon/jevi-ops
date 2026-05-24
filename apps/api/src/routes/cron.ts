@@ -34,7 +34,13 @@ function readSecret(req: FastifyRequest): string | undefined {
 }
 
 export const cronRoutes: FastifyPluginAsync = async (app) => {
-  app.post('/api/cron/observations', async (req, reply) => {
+  // /api/cron/observations — fires hourly (XCloud cron). Runs all failure-pattern
+  // rules across domains and writes any new matches to the observations table,
+  // which feeds the "Slipping" panel on Today + the chat tool.
+  //
+  // GET-friendly like the other cron endpoints so a plain URL-pinger
+  // (XCloud's HTTP cron, cron-job.org, etc.) can hit it without POST plumbing.
+  const observationsHandler = async (req: FastifyRequest, reply: import('fastify').FastifyReply) => {
     if (!env.CRON_SECRET) {
       return reply.code(503).send({
         error: 'cron_disabled',
@@ -59,7 +65,9 @@ export const cronRoutes: FastifyPluginAsync = async (app) => {
         message: err instanceof Error ? err.message : 'unknown',
       });
     }
-  });
+  };
+  app.get('/api/cron/observations', observationsHandler);
+  app.post('/api/cron/observations', observationsHandler);
 
   // /api/cron/reminders — runs every minute. Dispatches Pushover pushes for
   // any task whose due-time + a reminder_offset just elapsed. Idempotent
