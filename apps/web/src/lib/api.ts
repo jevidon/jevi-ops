@@ -265,11 +265,15 @@ export interface VoiceCaptureResponse {
 }
 
 export const captureApi = {
-  voice: (transcript: string) =>
-    api.post<VoiceCaptureResponse>('/api/capture/voice', { transcript }),
+  // `source` ('voice' default | 'text') tags rows created by the
+  // executor with the right origin: text captures via Cmd+J get
+  // 'manual' (tasks/activity) or 'typed' (journal) instead of 'voice'.
+  voice: (transcript: string, source: 'voice' | 'text' = 'voice') =>
+    api.post<VoiceCaptureResponse>('/api/capture/voice', { transcript, source }),
 
   // Audio path — accepts FormData with field "audio". Don't set
   // Content-Type; fetch picks the right multipart boundary automatically.
+  // (Always tagged 'voice' server-side since the input is literal audio.)
   voiceAudio: (formData: FormData) =>
     call<VoiceCaptureResponse>('/api/capture/voice-audio', {
       method: 'POST',

@@ -76,7 +76,10 @@ export function TextCapturePalette() {
       if (!transcript || phase.kind === 'submitting') return;
       setPhase({ kind: 'submitting' });
       startTransition(async () => {
-        const result = await submitVoiceTranscript(transcript);
+        // Tagged 'text' so the executor stamps tasks/activity rows
+        // with source='manual' and journal entries with source='typed'
+        // — matching how the user actually entered them, not via mic.
+        const result = await submitVoiceTranscript(transcript, 'text');
         setPhase({ kind: 'done', result });
         // Successful actions clear the input so chained captures are easy.
         // Disambiguation / parse errors keep the text so the user can edit.

@@ -54,13 +54,20 @@ function shapeError(err: unknown): VoiceResult {
   return { kind: 'http_error', message: (err as Error).message };
 }
 
-export async function submitVoiceTranscript(transcript: string): Promise<VoiceResult> {
+// `source` distinguishes Cmd+J text captures from voice fallbacks so
+// the API can tag created rows with the right value (tasks → 'manual'
+// vs 'voice'; journal_entries → 'typed' vs 'voice'). Defaults to
+// 'voice' for back-compat with any caller that doesn't care.
+export async function submitVoiceTranscript(
+  transcript: string,
+  source: 'voice' | 'text' = 'voice',
+): Promise<VoiceResult> {
   if (!transcript.trim()) {
     return { kind: 'parse_error', message: 'empty transcript', transcript };
   }
   let res: VoiceCaptureResponse;
   try {
-    res = await captureApi.voice(transcript);
+    res = await captureApi.voice(transcript, source);
   } catch (err) {
     return shapeError(err);
   }

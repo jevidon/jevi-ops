@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { ParsedAction } from './parser.js';
+import type { CaptureSource } from '@jerad-ops/shared/schemas';
 import {
   matchProject, matchDomain, matchPerson, matchTask,
   matchBook, matchContentItem, matchMilestone, matchQuote,
@@ -17,6 +18,29 @@ export interface ActionResult {
   entity_kind?: string;   // table name
 }
 
+// Per-invocation context threaded into each handler. We use this for
+// the `source` column on rows we create — different tables use
+// different vocabularies, so each handler picks the right value via
+// sourceFor() rather than the dispatcher choosing for it.
+export interface ExecuteOptions {
+  captureSource?: CaptureSource;       // 'voice' | 'text'; default 'voice'
+}
+
+// Map (captureSource, target table) → the value the table's CHECK
+// constraint actually accepts. tasks/activity_log use 'manual' for
+// typed input; journal_entries use 'typed'. Voice always maps to
+// 'voice' across all three.
+type SourceColumnTable = 'tasks' | 'activity_log' | 'journal_entries';
+function sourceFor(
+  table: SourceColumnTable,
+  captureSource: CaptureSource | undefined,
+): string {
+  if (captureSource === 'text') {
+    return table === 'journal_entries' ? 'typed' : 'manual';
+  }
+  return 'voice';
+}
+
 // ─── Helper: read a string property without TypeScript indexing complaints ─
 const str = (a: ParsedAction, k: string): string | undefined => {
   const v = a[k];
@@ -29,7 +53,11 @@ const num = (a: ParsedAction, k: string): number | undefined => {
 
 // ─── One handler per action type ─────────────────────────────────────────
 
-async function createTask(sb: SupabaseClient, a: ParsedAction): Promise<ActionResult> {
+async function createTask(
+  sb: SupabaseClient,
+  a: ParsedAction,
+  opts: ExecuteOptions = {},
+): Promise<ActionResult> {
   const title = str(a, 'title');
   if (!title) return { action: a.action, status: 'failed', message: 'missing_title' };
 
@@ -39,7 +67,7 @@ async function createTask(sb: SupabaseClient, a: ParsedAction): Promise<ActionRe
   const insert: Record<string, unknown> = {
     title,
     priority: num(a, 'priority') ?? 4,
-    source: 'voice',
+    source: sourceFor('tasks', opts.captureSource),
   };
   if (str(a, 'due_date')) insert.due_date = str(a, 'due_date');
   if (str(a, 'due_time')) insert.due_time = str(a, 'due_time');
@@ -99,13 +127,17 @@ async function updateProjectStatus(sb: SupabaseClient, a: ParsedAction): Promise
   return { action: a.action, status: 'success', message: `Project status → ${newStatus}`, entity_id: id, entity_kind: 'projects' };
 }
 
-async function logActivity(sb: SupabaseClient, a: ParsedAction): Promise<ActionResult> {
+async function logActivity(
+  sb: SupabaseClient,
+  a: ParsedAction,
+  opts: ExecuteOptions = {},
+): Promise<ActionResult> {
   const entry = str(a, 'entry');
   if (!entry) return { action: a.action, status: 'failed', message: 'missing_entry' };
   const project_id = await matchProject(sb, str(a, 'project_match'));
   const hours = num(a, 'hours_logged');
 
-  const insert: Record<string, unknown> = { entry, source: 'voice' };
+  const insert: Record<string, unknown> = { entry, source: sourceFor('activity_log', opts.captureSource) };
   if (project_id) insert.project_id = project_id;
   if (hours !== undefined) insert.hours_logged = hours;
 
@@ -329,12 +361,16 @@ async function createQuoteAnnotation(sb: SupabaseClient, a: ParsedAction): Promi
   };
 }
 
-async function createJournalEntry(sb: SupabaseClient, a: ParsedAction): Promise<ActionResult> {
+async function createJournalEntry(
+  sb: SupabaseClient,
+  a: ParsedAction,
+  opts: ExecuteOptions = {},
+): Promise<ActionResult> {
   const text = str(a, 'text');
   if (!text) return { action: a.action, status: 'failed', message: 'missing_text' };
   const insert: Record<string, unknown> = {
     transcription_text: text,
-    source: 'voice',
+    source: sourceFor('journal_entries', opts.captureSource),
     entry_date: str(a, 'date') ?? new Intl.DateTimeFormat('en-CA', {
       timeZone: 'America/Denver', year: 'numeric', month: '2-digit', day: '2-digit',
     }).format(new Date()),
@@ -391,7 +427,11 @@ async function addInventoryItem(sb: SupabaseClient, a: ParsedAction): Promise<Ac
 
 // ─── Dispatcher ──────────────────────────────────────────────────────────
 
-type HandlerMap = Record<string, (sb: SupabaseClient, a: ParsedAction) => Promise<ActionResult>>;
+// Handlers may optionally accept ExecuteOptions for per-invocation
+// metadata (currently just captureSource). Handlers that don't care
+// can ignore the third arg.
+type Handler = (sb: SupabaseClient, a: ParsedAction, opts?: ExecuteOptions) => Promise<ActionResult>;
+type HandlerMap = Record<string, Handler>;
 
 const handlers: HandlerMap = {
   create_task: createTask,
@@ -487,6 +527,7 @@ async function recordNotification(
 export async function executeActions(
   sb: SupabaseClient,
   actions: ParsedAction[],
+  opts: ExecuteOptions = {},
 ): Promise<ActionResult[]> {
   const results: ActionResult[] = [];
   for (const a of actions) {
@@ -496,7 +537,7 @@ export async function executeActions(
       result = { action: a.action, status: 'failed', message: 'unknown_action_type' };
     } else {
       try {
-        result = await handler(sb, a);
+        result = await handler(sb, a, opts);
       } catch (err) {
         result = {
           action: a.action,

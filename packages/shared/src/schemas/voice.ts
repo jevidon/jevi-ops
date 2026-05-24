@@ -143,9 +143,21 @@ export const ParsedActionSchema = z.union([
   }),
 ]);
 
+// How the transcript was produced. Drives the `source` column on every
+// entity the executor creates. 'voice' = spoken into the mic (audio
+// path or Web Speech). 'text' = typed in the Cmd+J palette. Default
+// 'voice' for back-compat with existing clients.
+//
+// Named with the "Transcript" qualifier to avoid colliding with the
+// older CaptureSourceSchema in captured.ts, which enumerates inbox-
+// webhook origins (zapier / n8n / smart_glasses / etc) for /api/ingest.
+export const CaptureTranscriptSourceSchema = z.enum(['voice', 'text']);
+export type CaptureSource = z.infer<typeof CaptureTranscriptSourceSchema>;
+
 export const VoiceCaptureRequestSchema = z.object({
   transcript: z.string().min(1),
   // Optional: what the client believes the current local time is. Server
   // falls back to its own clock if absent.
   client_time: z.string().datetime({ offset: true }).optional(),
+  source: CaptureTranscriptSourceSchema.optional(),
 });

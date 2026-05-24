@@ -1,5 +1,8 @@
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
-import { VoiceCaptureRequestSchema } from '@jerad-ops/shared/schemas';
+import {
+  VoiceCaptureRequestSchema,
+  type CaptureSource,
+} from '@jerad-ops/shared/schemas';
 import { parseTranscript } from '../lib/parser.js';
 import { executeActions } from '../lib/executor.js';
 import { isAnthropicConfigured } from '../lib/anthropic.js';
@@ -15,6 +18,7 @@ async function runPipeline(
   req: FastifyRequest,
   reply: FastifyReply,
   transcript: string,
+  captureSource: CaptureSource = 'voice',
 ) {
   let result;
   try {
@@ -43,7 +47,7 @@ async function runPipeline(
     });
   }
 
-  const executionResults = await executeActions(req.supabase!, result.actions);
+  const executionResults = await executeActions(req.supabase!, result.actions, { captureSource });
   req.log.info(
     {
       user_id: req.user!.id,
@@ -75,11 +79,15 @@ export const captureRoutes: FastifyPluginAsync = async (app) => {
     if (!isAnthropicConfigured()) {
       return reply.code(503).send({ error: 'anthropic_not_configured' });
     }
+    // Default to 'voice' for back-compat — the Web Speech / audio-fallback
+    // path doesn't send `source` and should keep behaving the way it has.
+    // The Cmd+J palette explicitly sends `source: 'text'`.
+    const captureSource: CaptureSource = parsed.data.source ?? 'voice';
     req.log.info(
-      { user_id: req.user!.id, transcript_chars: parsed.data.transcript.length },
+      { user_id: req.user!.id, transcript_chars: parsed.data.transcript.length, source: captureSource },
       'voice transcript received (text path)',
     );
-    return runPipeline(req, reply, parsed.data.transcript);
+    return runPipeline(req, reply, parsed.data.transcript, captureSource);
   });
 
   // ─── Audio path (MediaRecorder → multipart → Whisper → parser) ───────
