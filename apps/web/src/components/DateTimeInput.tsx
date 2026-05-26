@@ -4,13 +4,13 @@ import { useEffect, useState } from 'react';
 import { parseDate } from './DateInput';
 import { parseTime } from './TimeInput';
 
-// Drop-in replacement for <input type="datetime-local">. Browser
-// support for the native picker is uneven (Safari desktop is poor,
-// Safari PWA is worse); a text input with permissive parsing is more
-// reliable. The form submits a normalized "YYYY-MM-DDTHH:MM" string
-// in the same shape <input type="datetime-local"> would.
+// Hybrid datetime picker: native <input type="datetime-local"> on top
+// for mobile + most desktops, plus a permissive text fallback below
+// for Safari desktop (whose pickers are uneven) and anyone who prefers
+// typing. Both sync to the same hidden "YYYY-MM-DDTHH:MM" value that
+// gets submitted.
 //
-// Accepts a wide range, both single-token and date+time pairs:
+// The text fallback accepts a wide range:
 //
 //   2026-05-23 17:30          → 2026-05-23T17:30
 //   5/23/2026 5:30 PM         → 2026-05-23T17:30
@@ -71,7 +71,25 @@ export function DateTimeInput({
   }
 
   return (
-    <div className="flex flex-col gap-0.5">
+    <div className="flex flex-col gap-1">
+      {/* Native picker — primary UX. Value matches the
+          datetime-local format "YYYY-MM-DDTHH:MM". */}
+      <input
+        type="datetime-local"
+        value={normalized}
+        onChange={(e) => {
+          const v = e.target.value;
+          setNormalized(v);
+          setText(formatDisplay(v));
+          setError(null);
+        }}
+        disabled={disabled}
+        aria-label={ariaLabel}
+        title={title}
+        className={className}
+      />
+      {/* Text fallback — for Safari desktop and anyone who'd rather
+          type "5/23/2026 5:30 PM" than fiddle with two spinners. */}
       <input
         type="text"
         value={text}
@@ -83,9 +101,9 @@ export function DateTimeInput({
         disabled={disabled}
         placeholder={placeholder}
         autoComplete="off"
-        aria-label={ariaLabel}
+        aria-label={ariaLabel ? `${ariaLabel} (type)` : 'type date and time'}
         title={title}
-        className={className}
+        className={`${className ?? ''} text-[12px] opacity-70 focus:opacity-100`}
       />
       <input type="hidden" name={name} value={normalized} />
       {error && (

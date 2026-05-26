@@ -2,9 +2,13 @@
 
 import { useEffect, useState } from 'react';
 
-// Drop-in replacement for <input type="date">. Renders as a text input
-// (no native picker dependency — Safari desktop's is unreliable, and
-// in PWA mode it sometimes doesn't open at all). Parses generously:
+// Hybrid date picker: native <input type="date"> on top for mobile + most
+// desktops (where the OS picker is the best UX), plus a permissive text
+// fallback below for Safari desktop (whose picker is unreliable in PWA
+// mode) and for anyone who prefers typing. Both inputs sync to the same
+// hidden YYYY-MM-DD value that gets submitted.
+//
+// The text fallback parses generously:
 //
 //   2026-05-23          → 2026-05-23
 //   5/23/2026           → 2026-05-23
@@ -74,33 +78,44 @@ export function DateInput({
   }
 
   return (
-    <div className="flex flex-col gap-0.5">
+    <div className="flex flex-col gap-1">
+      {/* Native picker — primary UX on mobile + Chrome/Firefox/modern
+          Safari. Value is always the normalized YYYY-MM-DD. */}
+      <input
+        type="date"
+        value={normalized}
+        onChange={(e) => {
+          const v = e.target.value;
+          setNormalized(v);
+          setText(v);
+          setError(null);
+        }}
+        required={required}
+        disabled={disabled}
+        aria-label={ariaLabel}
+        title={title}
+        className={className}
+      />
+      {/* Text fallback — for Safari desktop (no reliable picker in
+          PWA mode) and anyone who prefers typing. Permissive parser
+          accepts a wide range of formats. */}
       <input
         type="text"
         value={text}
         onChange={(e) => setText(e.target.value)}
         onBlur={(e) => commit(e.target.value)}
-        // Pressing Enter should commit + let the form submit.
         onKeyDown={(e) => {
-          if (e.key === 'Enter') {
-            (e.target as HTMLInputElement).blur();
-          }
+          if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
         }}
-        required={required}
         disabled={disabled}
         placeholder={placeholder}
         autoComplete="off"
-        aria-label={ariaLabel}
+        aria-label={ariaLabel ? `${ariaLabel} (type)` : 'type date'}
         title={title}
-        // Mobile gets a numeric-leaning keyboard. text-only inputmode
-        // would suppress that; "numeric" matches the common
-        // YYYY-MM-DD or M/D/YYYY usage.
-        inputMode="numeric"
-        className={className}
+        className={`${className ?? ''} text-[12px] opacity-70 focus:opacity-100`}
       />
       {/* Hidden field actually submitted to the form action — always
-          the normalized YYYY-MM-DD (or blank). The visible field is
-          decoration. */}
+          the normalized YYYY-MM-DD (or blank). */}
       <input type="hidden" name={name} value={normalized} />
       {error && (
         <div className="font-mono text-[10px] uppercase tracking-wider text-accent">

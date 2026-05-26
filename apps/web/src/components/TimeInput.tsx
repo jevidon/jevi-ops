@@ -2,10 +2,13 @@
 
 import { useEffect, useState } from 'react';
 
-// Drop-in replacement for <input type="time">. Renders as a text input
-// because Safari desktop has no time picker UI and rejects anything
-// that isn't HH:MM as an "invalid entry" — including obvious forms
-// like "5:30 PM". Parses generously:
+// Hybrid time picker: native <input type="time"> on top for mobile +
+// most desktops, plus a permissive text fallback below for Safari
+// desktop (whose time picker is unreliable / rejects anything that
+// isn't HH:MM) and anyone who prefers typing. Both inputs sync to the
+// same hidden HH:MM value that gets submitted.
+//
+// The text fallback parses generously:
 //
 //   5:30 PM / 5:30pm / 5:30 p.m.  → 17:30
 //   5:30 AM / 5:30am              → 05:30
@@ -74,7 +77,27 @@ export function TimeInput({
   }
 
   return (
-    <div className="flex flex-col gap-0.5">
+    <div className="flex flex-col gap-1">
+      {/* Native picker — primary UX everywhere it works. Value is
+          always the normalized HH:MM. */}
+      <input
+        type="time"
+        value={normalized}
+        onChange={(e) => {
+          const v = e.target.value;
+          setNormalized(v);
+          setText(v);
+          setError(null);
+          onTextChange?.(v);
+        }}
+        required={required}
+        disabled={disabled}
+        aria-label={ariaLabel}
+        title={title}
+        className={className}
+      />
+      {/* Text fallback — for Safari desktop (broken time picker) and
+          anyone who prefers typing "5:30 PM" instead of HH:MM. */}
       <input
         type="text"
         value={text}
@@ -86,14 +109,12 @@ export function TimeInput({
         onKeyDown={(e) => {
           if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
         }}
-        required={required}
         disabled={disabled}
         placeholder={placeholder}
         autoComplete="off"
-        aria-label={ariaLabel}
+        aria-label={ariaLabel ? `${ariaLabel} (type)` : 'type time'}
         title={title}
-        inputMode="numeric"
-        className={className}
+        className={`${className ?? ''} text-[12px] opacity-70 focus:opacity-100`}
       />
       <input type="hidden" name={name} value={normalized} />
       {error && (
