@@ -7,6 +7,7 @@ import { runReminders } from '../lib/reminders.js';
 import { runRoutineReminders, runRoutineMissed } from '../lib/routine-reminders.js';
 import { runOverdue } from '../lib/overdue.js';
 import { runDailySummary } from '../lib/daily-summary.js';
+import { runCalendarSync } from '../lib/calendar-sync.js';
 import { isPushoverConfigured } from '../lib/pushover.js';
 
 // /api/cron/* — secret-gated endpoints external schedulers hit on a cadence.
@@ -205,4 +206,55 @@ export const cronRoutes: FastifyPluginAsync = async (app) => {
   };
   app.get('/api/cron/overdue', overdueHandler);
   app.post('/api/cron/overdue', overdueHandler);
+
+  // /api/cron/calendar-sync — pull Google Calendar events into the local DB
+  // and push any locally-created orphans back. Designed to run every
+  // ~15 minutes so /today's "Up next" + the /calendar page stay fresh
+  // without the user clicking "Sync" in /settings. Idempotent — upserts
+  // are keyed on google_event_id.
+  //
+  // Returns 200 with status:'not_connected' (rather than 4xx) if Google
+  // isn't connected yet, so a forgotten cron doesn't keep alerting.
+  const calendarSyncHandler = async (req: FastifyRequest, reply: import('fastify').FastifyReply) => {
+    if (!env.CRON_SECRET) {
+      return reply.code(503).send({ error: 'cron_disabled', reason: 'CRON_SECRET not set' });
+    }
+    if (!checkSecret(readSecret(req))) {
+      return reply.code(401).send({ error: 'unauthorized' });
+    }
+    if (!isSupabaseConfigured()) {
+      return reply.code(503).send({ error: 'supabase_not_configured' });
+    }
+
+    try {
+      const result = await runCalendarSync(req.log);
+      if (!result.ok) {
+        // Soft-skip when Google isn't connected — cron stays clean.
+        if (result.status === 'not_connected') {
+          return reply.code(200).send({ skipped: 'google_not_connected' });
+        }
+        req.log.warn({ event: 'calendar_sync_failed', ...result }, 'calendar sync cron failed');
+        return reply.code(200).send({ failed: result.status, message: result.message });
+      }
+      // Only log when something actually moved, to keep the per-15-min
+      // log volume low.
+      if (
+        (result.events_upserted ?? 0) > 0 ||
+        (result.events_deleted ?? 0) > 0 ||
+        (result.orphans_pushed ?? 0) > 0 ||
+        (result.orphans_failed ?? 0) > 0
+      ) {
+        req.log.info({ event: 'calendar_sync_run', ...result }, 'calendar sync cron complete');
+      }
+      return reply.code(200).send(result);
+    } catch (err) {
+      req.log.error({ err }, 'calendar sync cron crashed');
+      return reply.code(500).send({
+        error: 'calendar_sync_failed',
+        message: err instanceof Error ? err.message : 'unknown',
+      });
+    }
+  };
+  app.get('/api/cron/calendar-sync', calendarSyncHandler);
+  app.post('/api/cron/calendar-sync', calendarSyncHandler);
 };

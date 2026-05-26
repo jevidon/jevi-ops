@@ -170,6 +170,7 @@ summary / overdue also require Pushover env vars (they soft-skip otherwise).
 | Endpoint                      | Recommended cadence            | What it does                                                          |
 | ----------------------------- | ------------------------------ | --------------------------------------------------------------------- |
 | `/api/cron/reminders`         | Every minute                   | Task + routine reminders, plus routine "missed" sweep                 |
+| `/api/cron/calendar-sync`     | Every 15 minutes               | Pulls Google Calendar events into local DB + pushes orphan events back |
 | `/api/cron/observations`      | Hourly                         | Evaluates per-domain failure_patterns → writes to `observations` for "Slipping" |
 | `/api/cron/overdue`           | Hourly, waking hours only      | One-shot Pushover for tasks past their due-time (dedup'd via `reminders_sent`) |
 | `/api/cron/daily-summary`     | Once daily at 7am Mountain     | Single Pushover summarizing today's tasks/events/observations         |
@@ -179,6 +180,7 @@ param, since XCloud's HTTP cron form doesn't currently let you set headers):
 
 ```
 */1 * * * *    https://api.dashboard.jeradhill.com/api/cron/reminders?secret=$CRON_SECRET
+*/15 * * * *   https://api.dashboard.jeradhill.com/api/cron/calendar-sync?secret=$CRON_SECRET
 0 * * * *      https://api.dashboard.jeradhill.com/api/cron/observations?secret=$CRON_SECRET
 0 13-3 * * *   https://api.dashboard.jeradhill.com/api/cron/overdue?secret=$CRON_SECRET
 0 13 * * *     https://api.dashboard.jeradhill.com/api/cron/daily-summary?secret=$CRON_SECRET
