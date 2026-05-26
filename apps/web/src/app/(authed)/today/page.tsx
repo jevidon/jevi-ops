@@ -194,8 +194,8 @@ export default async function TodayPage() {
           <Section label={`Slipping${observations.length > 0 ? ` · ${observations.length}` : ''}`}>
             {observations.length === 0 ? (
               <Hint>
-                Nothing flagged. Domain failure patterns evaluate when the observations cron
-                runs (POST /api/cron/observations with X-Cron-Secret).
+                Nothing slipping right now. Projects that go quiet — or
+                miss patterns set on their domain — will surface here.
               </Hint>
             ) : (
               <ul className="flex flex-col gap-3">
