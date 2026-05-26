@@ -7,6 +7,7 @@ import {
   CreateProjectChecklistItemSchema,
   UpdateProjectChecklistItemSchema,
 } from '@jerad-ops/shared/schemas';
+import { getAppTz } from '../lib/app-settings.js';
 
 export const projectRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', app.requireAuth);
@@ -55,11 +56,12 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
       kind?: string | null;
     };
     const activity = (activityRes.data ?? []) as ActivityRow[];
-    const denverTodayParts = new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'America/Denver',
+    const tz = await getAppTz();
+    const todayParts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: tz,
       year: 'numeric', month: '2-digit', day: '2-digit',
     }).formatToParts(new Date());
-    const gP = (t: string) => denverTodayParts.find((p) => p.type === t)?.value ?? '';
+    const gP = (t: string) => todayParts.find((p) => p.type === t)?.value ?? '';
     const thisYear = Number(gP('year'));
     const thisMonth = Number(gP('month'));
     const thisMonthStart = new Date(Date.UTC(thisYear, thisMonth - 1, 1)).toISOString();

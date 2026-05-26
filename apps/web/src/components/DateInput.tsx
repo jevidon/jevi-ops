@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useAppTimezone } from './TimezoneProvider';
 
 // Hybrid date picker: native <input type="date"> on top for mobile + most
 // desktops (where the OS picker is the best UX), plus a permissive text
@@ -43,6 +44,7 @@ export function DateInput({
   'aria-label': ariaLabel,
   title,
 }: DateInputProps) {
+  const tz = useAppTimezone();
   // What the user sees in the field. Initialized to a friendly format
   // when we have a real value, else blank.
   const [text, setText] = useState(formatForDisplay(defaultValue));
@@ -64,7 +66,7 @@ export function DateInput({
       setError(null);
       return;
     }
-    const iso = parseDate(trimmed);
+    const iso = parseDate(trimmed, tz);
     if (iso) {
       setNormalized(iso);
       setText(formatForDisplay(iso));
@@ -143,9 +145,9 @@ const MONTHS: Record<string, number> = {
   dec: 12, december: 12,
 };
 
-function todayInAppTz(): string {
+function todayInAppTz(tz: string): string {
   const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'America/Denver',
+    timeZone: tz,
     year: 'numeric', month: '2-digit', day: '2-digit',
   }).formatToParts(new Date());
   const g = (t: string) => parts.find((p) => p.type === t)?.value ?? '';
@@ -178,20 +180,20 @@ function expandYear(yy: number): number {
   return candidate > thisYear + 30 ? candidate - 100 : candidate;
 }
 
-export function parseDate(raw: string): string | null {
+export function parseDate(raw: string, tz: string): string | null {
   const s = raw.trim().toLowerCase();
   if (!s) return null;
 
   // Shortcuts.
-  if (s === 'today') return todayInAppTz();
+  if (s === 'today') return todayInAppTz(tz);
   if (s === 'tomorrow' || s === 'tmrw') {
-    const t = todayInAppTz();
+    const t = todayInAppTz(tz);
     const d = new Date(`${t}T12:00:00Z`);
     d.setUTCDate(d.getUTCDate() + 1);
     return d.toISOString().slice(0, 10);
   }
   if (s === 'yesterday') {
-    const t = todayInAppTz();
+    const t = todayInAppTz(tz);
     const d = new Date(`${t}T12:00:00Z`);
     d.setUTCDate(d.getUTCDate() - 1);
     return d.toISOString().slice(0, 10);

@@ -1,7 +1,9 @@
 import Link from 'next/link';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { googleApi, ApiError, type GoogleStatus } from '@/lib/api';
+import { getAppTimezone } from '@/lib/app-settings';
 import { SettingsSection } from './settings-section';
+import { TimezoneForm } from './timezone-form';
 import { beginGoogleOAuthAction } from './actions';
 
 // /settings — integrations and account controls. Lives outside the six-tab
@@ -13,6 +15,7 @@ export default async function SettingsPage({
   searchParams: Promise<{ google?: string; reason?: string }>;
 }) {
   const { google: googleParam, reason } = await searchParams;
+  const tz = await getAppTimezone();
 
   let status: GoogleStatus = {
     configured: false,
@@ -51,6 +54,10 @@ export default async function SettingsPage({
         </div>
       )}
 
+      <SettingsSection title="Timezone">
+        <TimezoneForm current={tz} />
+      </SettingsSection>
+
       <SettingsSection title="Integration status">
         <p className="font-sans text-[13px] text-ink-2 leading-relaxed">
           Live inventory of which env-var-backed services are configured.
@@ -81,7 +88,7 @@ export default async function SettingsPage({
             </code>.
           </Hint>
         ) : status.connected ? (
-          <ConnectedView status={status} />
+          <ConnectedView status={status} tz={tz} />
         ) : (
           <DisconnectedView />
         )}
@@ -114,10 +121,10 @@ function DisconnectedView() {
   );
 }
 
-function ConnectedView({ status }: { status: GoogleStatus }) {
+function ConnectedView({ status, tz }: { status: GoogleStatus; tz: string }) {
   const lastSync = status.last_synced_at
     ? new Date(status.last_synced_at).toLocaleString('en-US', {
-        timeZone: 'America/Denver',
+        timeZone: tz,
         dateStyle: 'medium',
         timeStyle: 'short',
       })

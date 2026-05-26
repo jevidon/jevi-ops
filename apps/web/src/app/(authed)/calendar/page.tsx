@@ -1,27 +1,26 @@
 import Link from 'next/link';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { calendarApi, tasksApi, ApiError, type CalendarEvent } from '@/lib/api';
+import { getAppTimezone } from '@/lib/app-settings';
 import type { Task } from '@jerad-ops/shared';
 
 // /calendar — full event list, grouped by day. Tasks with a due_date are
 // interleaved into the same day groups so you see "what's happening today"
 // in one place (meetings + things to do).
 
-const ZONE = 'America/Denver';
-
-function isoDay(iso: string): string {
+function isoDay(iso: string, tz: string): string {
   return new Intl.DateTimeFormat('en-CA', {
-    timeZone: ZONE,
+    timeZone: tz,
     year: 'numeric', month: '2-digit', day: '2-digit',
   }).format(new Date(iso));
 }
 
-function todayIso(): string {
-  return isoDay(new Date().toISOString());
+function todayIso(tz: string): string {
+  return isoDay(new Date().toISOString(), tz);
 }
 
-function formatDayHeading(dayIso: string): string {
-  const today = todayIso();
+function formatDayHeading(dayIso: string, tz: string): string {
+  const today = todayIso(tz);
   if (dayIso === today) return 'Today';
 
   const dayDate = new Date(dayIso + 'T12:00:00Z');
@@ -32,10 +31,10 @@ function formatDayHeading(dayIso: string): string {
   if (diff === 1) return 'Tomorrow';
   if (diff === -1) return 'Yesterday';
   if (diff > 1 && diff < 7) {
-    return dayDate.toLocaleDateString('en-US', { timeZone: ZONE, weekday: 'long' });
+    return dayDate.toLocaleDateString('en-US', { timeZone: tz, weekday: 'long' });
   }
   return dayDate.toLocaleDateString('en-US', {
-    timeZone: ZONE,
+    timeZone: tz,
     weekday: 'short',
     month: 'short',
     day: 'numeric',
@@ -43,16 +42,17 @@ function formatDayHeading(dayIso: string): string {
   });
 }
 
-function formatEventTime(e: CalendarEvent): string {
+function formatEventTime(e: CalendarEvent, tz: string): string {
   if (e.all_day) return 'all day';
   return new Date(e.start_at).toLocaleTimeString('en-US', {
-    timeZone: ZONE,
+    timeZone: tz,
     hour: 'numeric',
     minute: '2-digit',
   });
 }
 
 export default async function CalendarPage() {
+  const tz = await getAppTimezone();
   let events: CalendarEvent[] = [];
   let tasks: Task[] = [];
   let errorMessage: string | null = null;
@@ -73,7 +73,7 @@ export default async function CalendarPage() {
   // Group events by day in MT.
   const eventGroups = new Map<string, CalendarEvent[]>();
   for (const e of events) {
-    const day = isoDay(e.start_at);
+    const day = isoDay(e.start_at, tz);
     if (!eventGroups.has(day)) eventGroups.set(day, []);
     eventGroups.get(day)!.push(e);
   }
@@ -88,7 +88,7 @@ export default async function CalendarPage() {
   // Union of all days that have either an event or a task.
   const allDays = Array.from(new Set([...eventGroups.keys(), ...taskGroups.keys()])).sort();
 
-  const today = todayIso();
+  const today = todayIso(tz);
   const upcomingDays = allDays.filter((d) => d >= today);
   const pastDays = allDays.filter((d) => d < today).reverse();
 
@@ -123,6 +123,7 @@ export default async function CalendarPage() {
                   day={day}
                   events={eventGroups.get(day) ?? []}
                   tasks={taskGroups.get(day) ?? []}
+                  tz={tz}
                 />
               ))}
             </div>
@@ -143,6 +144,7 @@ export default async function CalendarPage() {
                     day={day}
                     events={eventGroups.get(day) ?? []}
                     tasks={taskGroups.get(day) ?? []}
+                    tz={tz}
                   />
                 ))}
               </div>
@@ -158,21 +160,23 @@ function DayGroup({
   day,
   events,
   tasks,
+  tz,
 }: {
   day: string;
   events: CalendarEvent[];
   tasks: Task[];
+  tz: string;
 }) {
   return (
     <section className="pt-4">
       <div className="font-mono text-[10px] uppercase tracking-wider text-ink-3 pb-2 border-b border-line mb-3">
-        {formatDayHeading(day)}
+        {formatDayHeading(day, tz)}
       </div>
       <ul>
         {events.map((e) => (
           <li key={`e-${e.id}`} className="flex items-start gap-4 py-2.5 border-b border-line/40 last:border-b-0">
             <span className="font-mono text-[12px] text-ink-3 w-16 pt-0.5 tabular-nums shrink-0">
-              {formatEventTime(e)}
+              {formatEventTime(e, tz)}
             </span>
             <div className="flex-1 min-w-0">
               <div className="font-sans text-[14px] text-ink leading-snug">{e.title}</div>

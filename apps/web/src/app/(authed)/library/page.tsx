@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { libraryApi, ApiError, type FeedItem } from '@/lib/api';
+import { getAppTimezone } from '@/lib/app-settings';
 import { LibraryTabBar } from './library-tab-bar';
 
 // /library — "All" sub-tab default. Unified chronological feed across notes,
@@ -59,6 +60,7 @@ function renderMeta(item: FeedItem): string | null {
 }
 
 export default async function LibraryPage() {
+  const tz = await getAppTimezone();
   let items: FeedItem[] = [];
   let errorMessage: string | null = null;
   try {
@@ -97,7 +99,7 @@ export default async function LibraryPage() {
                 </span>
                 <span className="font-mono text-[10px] uppercase tracking-wider text-ink-3">
                   {new Date(item.at).toLocaleDateString('en-US', {
-                    timeZone: 'America/Denver',
+                    timeZone: tz,
                     month: 'short',
                     day: 'numeric',
                     year: new Date(item.at).getFullYear() !== new Date().getFullYear() ? 'numeric' : undefined,

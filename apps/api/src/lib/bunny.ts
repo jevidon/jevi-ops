@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import exifr from 'exifr';
 import { env } from './env.js';
+import { getAppTz } from './app-settings.js';
 
 // Thin Bunny Storage client. We talk to Bunny's HTTP API directly —
 // PUT to upload, DELETE to remove. The CDN URL is constructed from the
@@ -102,7 +103,7 @@ export async function uploadImage(params: {
 
   // The filename needs the date, so wait on it before composing the path.
   const exifDate = await exifDatePromise;
-  const datePart = formatYYYYMMDD(exifDate ?? new Date());
+  const datePart = formatYYYYMMDD(exifDate ?? new Date(), await getAppTz());
   const slug = slugifyForFilename(params.titleHint ?? '');
   const suffix = randomUUID().slice(0, 4);
   const storage_path = `${params.prefix}/${datePart}-${slug}-${suffix}.${ext}`;
@@ -193,11 +194,11 @@ async function extractDateTaken(bytes: Buffer): Promise<Date | null> {
   }
 }
 
-// YYYYMMDD in America/Denver so the filename matches the day a Mountain
-// Time user thinks the photo was taken. UTC would surprise overnight.
-function formatYYYYMMDD(d: Date): string {
+// YYYYMMDD in the app's configured TZ so the filename matches the day
+// the user thinks the photo was taken. UTC would surprise overnight.
+function formatYYYYMMDD(d: Date, tz: string): string {
   const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'America/Denver',
+    timeZone: tz,
     year: 'numeric', month: '2-digit', day: '2-digit',
   }).formatToParts(d);
   const g = (t: string) => parts.find((p) => p.type === t)?.value ?? '';

@@ -9,6 +9,7 @@ import {
   type ProjectDetail,
 } from '@/lib/api';
 import { isToday } from '@/lib/today';
+import { getAppTimezone } from '@/lib/app-settings';
 import { ProjectColorPicker } from './color-picker';
 import { ProjectForm } from '../project-form';
 import { MilestonesSection } from './milestones-section';
@@ -33,6 +34,7 @@ export default async function ProjectDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
+  const tz = await getAppTimezone();
 
   let detail: ProjectDetail | null = null;
   let domains: { id: string; name: string }[] = [];
@@ -71,7 +73,7 @@ export default async function ProjectDetailPage({
   const doneTasks = tasks
     .filter((t) => t.status === 'done')
     .sort((a, b) => (b.completed_at ?? '').localeCompare(a.completed_at ?? ''));
-  const doneToday = doneTasks.filter((t) => isToday(t.completed_at ?? null));
+  const doneToday = doneTasks.filter((t) => isToday(tz, t.completed_at ?? null));
 
   const hoursLogged = Number(project.hours_logged ?? 0);
   const quoted = project.quoted_hours != null ? Number(project.quoted_hours) : null;
@@ -107,7 +109,7 @@ export default async function ProjectDetailPage({
         }
         meta={
           project.target_date
-            ? `Target ${formatTargetDate(project.target_date)}`
+            ? `Target ${formatTargetDate(project.target_date, tz)}`
             : undefined
         }
       />
@@ -281,9 +283,9 @@ function Section({ label, children }: { label: string; children: React.ReactNode
   );
 }
 
-function formatTargetDate(iso: string): string {
+function formatTargetDate(iso: string, tz: string): string {
   return new Date(iso + 'T12:00:00Z').toLocaleDateString('en-US', {
-    timeZone: 'America/Denver',
+    timeZone: tz,
     weekday: 'short',
     month: 'short',
     day: 'numeric',

@@ -93,17 +93,6 @@ export function RoutinesTodayList({
   );
 }
 
-// Today's local date in YYYY-MM-DD, in America/Denver. Used to decide
-// whether a `last_missed_sent_date` value is "today" for the badge.
-function todayIsoInAppTz(): string {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'America/Denver',
-    year: 'numeric', month: '2-digit', day: '2-digit',
-  }).formatToParts(new Date());
-  const g = (t: string) => parts.find((p) => p.type === t)?.value ?? '';
-  return `${g('year')}-${g('month')}-${g('day')}`;
-}
-
 function RoutineTodayRow({
   routine,
   compact,
@@ -121,7 +110,9 @@ function RoutineTodayRow({
   // A routine is "currently missed" only if today's cron flagged it AND
   // it still isn't done. Once you check it off the streak still resets
   // (the missed ping already fired) but we stop yelling about it.
-  const isMissed = !isDone && routine.last_missed_sent_date === todayIsoInAppTz();
+  // If `today` wasn't passed, fall back to never-missed — the badge is
+  // a nice-to-have, not load-bearing.
+  const isMissed = !isDone && today != null && routine.last_missed_sent_date === today;
   // 14-day strip on desktop only — keeps the row dense without crowding
   // mobile. Compact mode (used on /today) never shows it.
   const stripGrid = showInlineHeatmap && today && !compact

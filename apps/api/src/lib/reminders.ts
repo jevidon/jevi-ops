@@ -15,7 +15,7 @@ import { env } from './env.js';
 // - We only consider tasks due in the next 24h (cheap pre-filter on
 //   due_date) to keep the per-minute query small.
 
-const USER_TZ = 'America/Denver';
+import { getAppTz } from './app-settings.js';
 
 interface DueTask {
   id: string;
@@ -39,6 +39,7 @@ export async function runReminders(sb: SupabaseClient): Promise<ReminderRunResul
   if (!isPushoverConfigured()) {
     return { considered: 0, dispatched: 0, failed: 0 };
   }
+  const tz = await getAppTz();
 
   // Window: tasks due any time today, tomorrow, or yesterday. Yesterday
   // covers late-night reminders for tasks due at, say, 23:30 when "now"
@@ -77,7 +78,7 @@ export async function runReminders(sb: SupabaseClient): Promise<ReminderRunResul
     const offsets = (t.reminder_offsets ?? []).filter((n) => Number.isFinite(n) && n >= 0);
     if (offsets.length === 0) continue;
 
-    const dueMoment = composeDueMoment(t.due_date, t.due_time);
+    const dueMoment = composeDueMoment(t.due_date, t.due_time, tz);
     if (!dueMoment) continue;
 
     const sent = t.reminders_sent ?? {};
@@ -98,7 +99,7 @@ export async function runReminders(sb: SupabaseClient): Promise<ReminderRunResul
         title: offset === 0
           ? `Due now · ${t.title}`
           : `Task in ${humanOffset(offset)} · ${t.title}`,
-        message: composeMessage(t, offset, dueMoment),
+        message: composeMessage(t, offset, dueMoment, tz),
         url: `${env.WEB_APP_URL.replace(/\/$/, '')}/tasks/${t.id}`,
         url_title: 'Open task',
         // P1 tasks bypass Do Not Disturb. Everything else uses default
@@ -128,19 +129,19 @@ export async function runReminders(sb: SupabaseClient): Promise<ReminderRunResul
   return { considered: tasks.length, dispatched, failed };
 }
 
-function composeDueMoment(dueDate: string, dueTime: string): Date | null {
+function composeDueMoment(dueDate: string, dueTime: string, tz: string): Date | null {
   // dueTime may be HH:MM or HH:MM:SS. Normalize.
   const time = dueTime.length === 5 ? `${dueTime}:00` : dueTime;
-  // Use the user's home TZ to interpret the local moment. Easiest reliable
-  // path: build an ISO with the right offset by asking Intl what the offset
-  // is on that day.
+  // Use the user's configured TZ to interpret the local moment. Easiest
+  // reliable path: build an ISO with the right offset by asking Intl
+  // what the offset is on that day.
   try {
     const local = new Date(`${dueDate}T${time}`);
     if (isNaN(local.getTime())) return null;
     // We need to shift `local` (interpreted as UTC by Date) so it represents
-    // the same wall-clock in USER_TZ. Compute the offset between UTC and
-    // USER_TZ at that date and subtract.
-    const tzOffsetMin = getTzOffsetMinutes(local, USER_TZ);
+    // the same wall-clock in `tz`. Compute the offset between UTC and
+    // `tz` at that date and subtract.
+    const tzOffsetMin = getTzOffsetMinutes(local, tz);
     return new Date(local.getTime() - tzOffsetMin * 60_000);
   } catch {
     return null;
@@ -165,9 +166,9 @@ function getTzOffsetMinutes(at: Date, tz: string): number {
   return (asUtcMs - at.getTime()) / 60_000;
 }
 
-function composeMessage(t: DueTask, offset: number, dueMoment: Date): string {
+function composeMessage(t: DueTask, offset: number, dueMoment: Date, tz: string): string {
   const due = dueMoment.toLocaleTimeString('en-US', {
-    timeZone: USER_TZ,
+    timeZone: tz,
     hour: 'numeric',
     minute: '2-digit',
   });

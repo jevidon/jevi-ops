@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { notificationsApi, ApiError, type Notification, type NotificationStatus } from '@/lib/api';
+import { getAppTimezone } from '@/lib/app-settings';
 import { markNotificationStatusAction, markAllReadAction } from './actions';
 
 // /notifications — audit log of voice actions and (later) autonomous moves.
@@ -18,6 +19,7 @@ export default async function NotificationsPage({
   searchParams: Promise<{ status?: string }>;
 }) {
   const params = await searchParams;
+  const tz = await getAppTimezone();
   const filter: NotificationStatus =
     params.status === 'all' || params.status === 'dismissed' || params.status === 'read'
       ? params.status
@@ -84,7 +86,7 @@ export default async function NotificationsPage({
       ) : (
         <ul className="px-5 lg:px-0 mt-4">
           {notifications.map((n) => (
-            <NotificationRow key={n.id} notification={n} />
+            <NotificationRow key={n.id} notification={n} tz={tz} />
           ))}
         </ul>
       )}
@@ -92,14 +94,14 @@ export default async function NotificationsPage({
   );
 }
 
-function NotificationRow({ notification }: { notification: Notification }) {
+function NotificationRow({ notification, tz }: { notification: Notification; tz: string }) {
   const isUnread = notification.status === 'unread';
   const isDismissed = notification.status === 'dismissed';
   const isFailed = notification.type.endsWith('_failed');
   const isSkipped = notification.type.endsWith('_skipped');
 
   const when = new Date(notification.created_at).toLocaleString('en-US', {
-    timeZone: 'America/Denver',
+    timeZone: tz,
     month: 'short',
     day: 'numeric',
     hour: 'numeric',

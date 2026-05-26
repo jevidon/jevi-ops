@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { tasksApi, projectsApi, contentApi, ApiError } from '@/lib/api';
+import { getAppTimezone } from '@/lib/app-settings';
 import type { Task } from '@jerad-ops/shared';
 import { TaskForm } from '../task-form';
 
@@ -14,6 +15,7 @@ export default async function TaskDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
+  const tz = await getAppTimezone();
 
   let task: Task | null = null;
   let errorMessage: string | null = null;
@@ -81,7 +83,7 @@ export default async function TaskDetailPage({
       <ScreenHeader
         eyebrow={meta}
         title={task.title}
-        meta={`Created ${new Date(task.created_at).toLocaleDateString('en-US', { timeZone: 'America/Denver', month: 'short', day: 'numeric' })}`}
+        meta={`Created ${new Date(task.created_at).toLocaleDateString('en-US', { timeZone: tz, month: 'short', day: 'numeric' })}`}
       />
       <div className="hairline mb-4" />
 

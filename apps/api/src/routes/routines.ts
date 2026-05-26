@@ -3,6 +3,7 @@ import {
   CreateRoutineSchema, UpdateRoutineSchema, ToggleCompletionSchema,
 } from '@jerad-ops/shared/schemas';
 import { computeRoutineStats } from '@jerad-ops/shared';
+import { getAppTz } from '../lib/app-settings.js';
 
 // Routines + completions. Daily habits (read Bible, take meds…) live
 // here instead of in tasks because they have different semantics — no
@@ -14,10 +15,9 @@ import { computeRoutineStats } from '@jerad-ops/shared';
 // rest of the app. Doing this server-side keeps every consumer (today
 // widget, routines list, daily summary cron) agreeing on what "today"
 // means.
-const APP_TZ = 'America/Denver';
-function todayIso(): string {
+function todayIso(tz: string): string {
   const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: APP_TZ,
+    timeZone: tz,
     year: 'numeric', month: '2-digit', day: '2-digit',
   }).formatToParts(new Date());
   const g = (t: string) => parts.find((p) => p.type === t)?.value ?? '';
@@ -28,8 +28,8 @@ function todayIso(): string {
 // for streak detection past the visible window. Keeps the payload small
 // for the today widget while staying correct for long streaks.
 const COMPLETIONS_WINDOW_DAYS = 120;
-function lookbackIso(days: number): string {
-  const today = todayIso();
+function lookbackIso(days: number, tz: string): string {
+  const today = todayIso(tz);
   const d = new Date(`${today}T12:00:00Z`);
   d.setUTCDate(d.getUTCDate() - days);
   return d.toISOString().slice(0, 10);
@@ -57,8 +57,9 @@ export const routineRoutes: FastifyPluginAsync = async (app) => {
       const { data, error } = await q;
       if (error) throw app.httpErrors.internalServerError(error.message);
 
-      const today = todayIso();
-      const cutoff = lookbackIso(COMPLETIONS_WINDOW_DAYS);
+      const tz = await getAppTz();
+      const today = todayIso(tz);
+      const cutoff = lookbackIso(COMPLETIONS_WINDOW_DAYS, tz);
       type Row = {
         id: string;
         completions?: { completed_date: string }[];
@@ -96,7 +97,8 @@ export const routineRoutes: FastifyPluginAsync = async (app) => {
     if (!routineRes.data) return reply.code(404).send({ error: 'not_found' });
     if (completionsRes.error) throw app.httpErrors.internalServerError(completionsRes.error.message);
 
-    const today = todayIso();
+    const tz = await getAppTz();
+    const today = todayIso(tz);
     const dates = (completionsRes.data ?? []).map((c) => c.completed_date);
     return {
       routine: routineRes.data,
@@ -214,7 +216,8 @@ export const routineRoutes: FastifyPluginAsync = async (app) => {
       if (!parsed.success) {
         return reply.code(400).send({ error: 'invalid_payload', details: parsed.error.flatten().fieldErrors });
       }
-      const date = parsed.data.date ?? todayIso();
+      const tz = await getAppTz();
+      const date = parsed.data.date ?? todayIso(tz);
       const done = parsed.data.done !== false;
 
       if (done) {
@@ -246,7 +249,7 @@ export const routineRoutes: FastifyPluginAsync = async (app) => {
             .order('completed_date', { ascending: false })
             .limit(r.goal_days + 30);
           const dates = (completions ?? []).map((c) => c.completed_date);
-          const stats = computeRoutineStats(dates, todayIso());
+          const stats = computeRoutineStats(dates, todayIso(tz));
           if (stats.current_streak >= r.goal_days) {
             const { error: archiveErr } = await req.supabase!
               .from('routines')

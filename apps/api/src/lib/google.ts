@@ -3,6 +3,7 @@ import type { OAuth2Client, Credentials } from 'google-auth-library';
 import type { calendar_v3 } from 'googleapis';
 import { env } from './env.js';
 import { supabaseAdmin } from './supabase.js';
+import { getAppTz } from './app-settings.js';
 
 // Google OAuth + Calendar wrapper. Tokens are stored in google_oauth_tokens
 // (single row, single-user system). All access goes through the
@@ -145,13 +146,13 @@ export interface CalendarEventPayload {
   attendees?: string[]; // email addresses
 }
 
-function toGoogleEvent(p: CalendarEventPayload): calendar_v3.Schema$Event {
+function toGoogleEvent(p: CalendarEventPayload, tz: string): calendar_v3.Schema$Event {
   return {
     summary: p.summary,
     description: p.description,
     location: p.location,
-    start: { dateTime: p.start, timeZone: 'America/Denver' },
-    end: { dateTime: p.end, timeZone: 'America/Denver' },
+    start: { dateTime: p.start, timeZone: tz },
+    end: { dateTime: p.end, timeZone: tz },
     ...(p.attendees?.length ? { attendees: p.attendees.map((email) => ({ email })) } : {}),
   };
 }
@@ -181,9 +182,10 @@ export async function insertEvent(payload: CalendarEventPayload) {
   const client = await getAuthedClient();
   if (!client) return null;
   const cal = google.calendar({ version: 'v3', auth: client });
+  const tz = await getAppTz();
   const res = await cal.events.insert({
     calendarId: 'primary',
-    requestBody: toGoogleEvent(payload),
+    requestBody: toGoogleEvent(payload, tz),
   });
   return res.data;
 }

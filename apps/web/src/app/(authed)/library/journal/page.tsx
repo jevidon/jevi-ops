@@ -1,9 +1,11 @@
 import Link from 'next/link';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { libraryApi, ApiError, type JournalEntry } from '@/lib/api';
+import { getAppTimezone } from '@/lib/app-settings';
 import { LibraryTabBar } from '../library-tab-bar';
 
 export default async function JournalListPage() {
+  const tz = await getAppTimezone();
   let entries: JournalEntry[] = [];
   let errorMessage: string | null = null;
   try {
@@ -34,7 +36,7 @@ export default async function JournalListPage() {
                   <div className="font-mono text-[10px] uppercase tracking-wider text-ink-3 flex flex-wrap gap-x-3">
                     <span>
                       {new Date(e.entry_date + 'T12:00:00Z').toLocaleDateString('en-US', {
-                        timeZone: 'America/Denver',
+                        timeZone: tz,
                         weekday: 'long',
                         month: 'long',
                         day: 'numeric',

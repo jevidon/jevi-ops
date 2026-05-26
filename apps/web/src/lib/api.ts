@@ -945,7 +945,15 @@ export interface IntegrationItem {
   purpose: string;
 }
 
+export interface AppSettings {
+  timezone: string;
+  updated_at?: string;
+}
+
 export const settingsApi = {
   integrationsStatus: () =>
     api.get<{ items: IntegrationItem[] }>('/api/settings/integrations-status'),
+  getApp: () => api.get<AppSettings>('/api/settings/app'),
+  updateApp: (body: { timezone?: string }) =>
+    api.patch<AppSettings>('/api/settings/app', body),
 };

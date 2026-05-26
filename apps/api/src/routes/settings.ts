@@ -1,5 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { env } from '../lib/env.js';
+import { getAppSettings, invalidateAppSettings } from '../lib/app-settings.js';
+import { UpdateAppSettingsSchema } from '@jerad-ops/shared/schemas';
 
 // /api/settings/integrations-status — read-only inventory of which env-var
 // backed integrations are configured. Never returns the actual values —
@@ -24,6 +26,35 @@ function statusForAll(present: boolean[]): 'configured' | 'partial' | 'missing' 
 
 export const settingsRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', app.requireAuth);
+
+  // App-wide settings (timezone, etc.) — single-row table. GET reads
+  // the cached value; PATCH writes through and invalidates the cache.
+  app.get('/api/settings/app', async () => {
+    const settings = await getAppSettings();
+    return settings;
+  });
+
+  app.patch('/api/settings/app', async (req, reply) => {
+    const parsed = UpdateAppSettingsSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: 'invalid_payload',
+        details: parsed.error.flatten().fieldErrors,
+      });
+    }
+    if (Object.keys(parsed.data).length === 0) {
+      return reply.code(400).send({ error: 'empty_payload' });
+    }
+    const { data, error } = await req.supabase!
+      .from('app_settings')
+      .update(parsed.data)
+      .eq('id', true)
+      .select('timezone, updated_at')
+      .single();
+    if (error) throw app.httpErrors.internalServerError(error.message);
+    invalidateAppSettings();
+    return data;
+  });
 
   app.get('/api/settings/integrations-status', async () => {
     const items: IntegrationStatus[] = [

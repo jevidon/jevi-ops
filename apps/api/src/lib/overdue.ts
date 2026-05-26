@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { sendPushover, isPushoverConfigured } from './pushover.js';
 import { env } from './env.js';
+import { getAppTz } from './app-settings.js';
 
 // Overdue alerts — finds open tasks whose due_date+due_time elapsed between
 // 5 minutes and 24 hours ago and the user never marked them done. Sends one
@@ -10,7 +11,6 @@ import { env } from './env.js';
 // 5-minute floor avoids racing the per-minute reminders cron; the 24-hour
 // ceiling stops us from alerting on tasks that have been stale for days.
 
-const USER_TZ = 'America/Denver';
 const MIN_OVERDUE_MS = 5 * 60_000;
 const MAX_OVERDUE_MS = 24 * 60 * 60_000;
 
@@ -35,6 +35,7 @@ export async function runOverdue(sb: SupabaseClient): Promise<OverdueRunResult> 
   if (!isPushoverConfigured()) {
     return { considered: 0, dispatched: 0, failed: 0 };
   }
+  const tz = await getAppTz();
 
   const now = new Date();
   const dates = [
@@ -65,7 +66,7 @@ export async function runOverdue(sb: SupabaseClient): Promise<OverdueRunResult> 
     const sent = t.reminders_sent ?? {};
     if (sent.overdue) continue; // already alerted
 
-    const dueMoment = composeDueMoment(t.due_date, t.due_time);
+    const dueMoment = composeDueMoment(t.due_date, t.due_time, tz);
     if (!dueMoment) continue;
     const elapsed = now.getTime() - dueMoment.getTime();
     if (elapsed < MIN_OVERDUE_MS) continue; // not overdue yet
@@ -74,7 +75,7 @@ export async function runOverdue(sb: SupabaseClient): Promise<OverdueRunResult> 
     const lateMinutes = Math.floor(elapsed / 60_000);
     const result = await sendPushover({
       title: `Overdue · ${t.title}`,
-      message: composeMessage(t, lateMinutes, dueMoment),
+      message: composeMessage(t, lateMinutes, dueMoment, tz),
       url: `${env.WEB_APP_URL.replace(/\/$/, '')}/tasks/${t.id}`,
       url_title: 'Open task',
       priority: t.priority === 1 ? 1 : 0,
@@ -99,12 +100,12 @@ export async function runOverdue(sb: SupabaseClient): Promise<OverdueRunResult> 
   return { considered: tasks.length, dispatched, failed };
 }
 
-function composeDueMoment(dueDate: string, dueTime: string): Date | null {
+function composeDueMoment(dueDate: string, dueTime: string, tz: string): Date | null {
   const time = dueTime.length === 5 ? `${dueTime}:00` : dueTime;
   try {
     const local = new Date(`${dueDate}T${time}`);
     if (isNaN(local.getTime())) return null;
-    const tzOffsetMin = getTzOffsetMinutes(local, USER_TZ);
+    const tzOffsetMin = getTzOffsetMinutes(local, tz);
     return new Date(local.getTime() - tzOffsetMin * 60_000);
   } catch {
     return null;
@@ -127,9 +128,9 @@ function getTzOffsetMinutes(at: Date, tz: string): number {
   return (asUtcMs - at.getTime()) / 60_000;
 }
 
-function composeMessage(t: OverdueTask, lateMinutes: number, dueMoment: Date): string {
+function composeMessage(t: OverdueTask, lateMinutes: number, dueMoment: Date, tz: string): string {
   const due = dueMoment.toLocaleTimeString('en-US', {
-    timeZone: USER_TZ,
+    timeZone: tz,
     hour: 'numeric',
     minute: '2-digit',
   });

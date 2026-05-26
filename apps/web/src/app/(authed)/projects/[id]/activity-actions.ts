@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { projectsApi, ApiError } from '@/lib/api';
+import { getAppTimezone } from '@/lib/app-settings';
 
 // Server actions for the per-project activity-log form. Adds a row +
 // bumps projects.hours_logged on the API side. Delete rolls back the
@@ -32,24 +33,22 @@ function parseHours(raw: string): number | null {
 
 // HTML <input type="datetime-local"> hands us a value like
 // "2025-05-23T14:30" with no timezone — the user means "that wall-clock
-// time in MY zone." On a server action we have no client TZ, so we
-// hard-code America/Denver (single-user app). Returns a UTC ISO string
-// the API stores as timestamptz, or null if the input is blank/garbage.
-const APP_TZ = 'America/Denver';
-function localInputToUtcIso(raw: string): string | null {
+// time in MY zone." Returns a UTC ISO string the API stores as
+// timestamptz, or null if the input is blank/garbage.
+function localInputToUtcIso(raw: string, tz: string): string | null {
   const s = raw.trim();
   if (!s) return null;
   // Accept "YYYY-MM-DDTHH:mm" or with seconds; reject anything else.
   const m = s.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/);
   if (!m) return null;
   // We figure out the UTC instant by computing the offset between
-  // (the input components interpreted as UTC) and (what APP_TZ sees of
+  // (the input components interpreted as UTC) and (what `tz` sees of
   // that instant). The difference is the offset to apply.
   const asUtc = new Date(`${s}${s.length === 16 ? ':00' : ''}Z`);
   if (Number.isNaN(asUtc.getTime())) return null;
 
   const dtf = new Intl.DateTimeFormat('en-US', {
-    timeZone: APP_TZ,
+    timeZone: tz,
     year: 'numeric', month: '2-digit', day: '2-digit',
     hour: '2-digit', minute: '2-digit', second: '2-digit',
     hour12: false,
@@ -88,7 +87,7 @@ export async function addActivityAction(
     return { ok: false, error: 'Hours: use a number, "1h30m", or "45m".' };
   }
   // Optional backfill timestamp. Blank means "use now" (server default).
-  const loggedAt = rawWhen ? localInputToUtcIso(rawWhen) : null;
+  const loggedAt = rawWhen ? localInputToUtcIso(rawWhen, await getAppTimezone()) : null;
   if (rawWhen && !loggedAt) {
     return { ok: false, error: 'When: invalid date/time.' };
   }
@@ -131,7 +130,7 @@ export async function updateActivityAction(
   if (rawHours && hours === null) {
     return { ok: false, error: 'Hours: use a number, "1h30m", or "45m".' };
   }
-  const loggedAt = rawWhen ? localInputToUtcIso(rawWhen) : null;
+  const loggedAt = rawWhen ? localInputToUtcIso(rawWhen, await getAppTimezone()) : null;
   if (rawWhen && !loggedAt) {
     return { ok: false, error: 'When: invalid date/time.' };
   }

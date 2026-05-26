@@ -6,6 +6,7 @@ import { RoutinesTodayList } from './routines-today-list';
 import { reactivateRoutineAction } from './actions';
 import { RoutineHeatmap } from '@/components/RoutineHeatmap';
 import { RoutinesAnalytics } from './routines-analytics';
+import { getAppTimezone } from '@/lib/app-settings';
 
 // /routines — full routines surface. Three regions:
 //   1. Today's check-off list (same widget /today shows, no compaction)
@@ -22,6 +23,7 @@ export default async function RoutinesPage({
 }) {
   const { archived } = await searchParams;
   const showArchived = archived === '1';
+  const tz = await getAppTimezone();
 
   const active: RoutineListItem[] = [];
   const completed: RoutineListItem[] = [];
@@ -48,7 +50,7 @@ export default async function RoutinesPage({
   const totalDone = active.filter((r) => r.stats.done_today).length;
   const todayDisplay = today
     ? new Date(`${today}T12:00:00Z`).toLocaleDateString('en-US', {
-        timeZone: 'America/Denver',
+        timeZone: tz,
         weekday: 'long',
         month: 'short',
         day: 'numeric',
@@ -105,7 +107,7 @@ export default async function RoutinesPage({
             </summary>
             <ul className="mt-3 space-y-2">
               {completed.map((r) => (
-                <CompletedRow key={r.id} r={r} today={today} />
+                <CompletedRow key={r.id} r={r} today={today} tz={tz} />
               ))}
             </ul>
           </details>
@@ -154,10 +156,10 @@ export default async function RoutinesPage({
   );
 }
 
-function CompletedRow({ r, today }: { r: RoutineListItem; today: string }) {
+function CompletedRow({ r, today, tz }: { r: RoutineListItem; today: string; tz: string }) {
   const archivedDate = r.archived_at
     ? new Date(r.archived_at).toLocaleDateString('en-US', {
-        timeZone: 'America/Denver',
+        timeZone: tz,
         month: 'short',
         day: 'numeric',
         year: 'numeric',

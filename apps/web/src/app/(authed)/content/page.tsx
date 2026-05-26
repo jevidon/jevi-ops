@@ -3,6 +3,7 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { contentApi, ApiError, type ContentItem, type ContentItemStatus } from '@/lib/api';
+import { getAppTimezone } from '@/lib/app-settings';
 import { PrefsPersist } from '@/components/PrefsPersist';
 import { youtubeThumbnailUrl } from '@/lib/youtube';
 
@@ -61,6 +62,7 @@ export default async function ContentPage({
   searchParams: Promise<{ status?: string; sort?: string }>;
 }) {
   const params = await searchParams;
+  const tz = await getAppTimezone();
 
   // Cookie restore — same pattern as /library/books.
   if (params.status === undefined && params.sort === undefined) {
@@ -219,7 +221,7 @@ export default async function ContentPage({
                         {item.domain?.name ? ` · ${item.domain.name}` : ''}
                       </span>
                       <span className="font-mono text-[10px] uppercase tracking-wider text-ink-3 shrink-0">
-                        {formatDate(item.published_at || item.updated_at)}
+                        {formatDate(item.published_at || item.updated_at, tz)}
                       </span>
                     </div>
                     <div className="mt-1 font-serif text-[15px] text-ink leading-tight line-clamp-2">
@@ -268,10 +270,10 @@ function sortContent(a: ContentItem, b: ContentItem, key: SortKey): number {
   }
 }
 
-function formatDate(iso: string | null): string {
+function formatDate(iso: string | null, tz: string): string {
   if (!iso) return '';
   return new Date(iso).toLocaleDateString('en-US', {
-    timeZone: 'America/Denver',
+    timeZone: tz,
     month: 'short',
     day: 'numeric',
   });

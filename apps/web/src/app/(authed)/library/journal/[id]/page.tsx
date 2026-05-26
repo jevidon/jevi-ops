@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { libraryApi, ApiError, type JournalEntry } from '@/lib/api';
+import { getAppTimezone } from '@/lib/app-settings';
 import { JournalEditForm } from './edit-form';
 
 // /library/journal/[id] — detail + edit + delete. Voice still creates
@@ -14,6 +15,7 @@ export default async function JournalEntryPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
+  const tz = await getAppTimezone();
 
   let entry: JournalEntry | null = null;
   let errorMessage: string | null = null;
@@ -37,7 +39,7 @@ export default async function JournalEntryPage({
   }
 
   const formattedDate = new Date(entry.entry_date + 'T12:00:00Z').toLocaleDateString('en-US', {
-    timeZone: 'America/Denver',
+    timeZone: tz,
     weekday: 'long',
     month: 'long',
     day: 'numeric',

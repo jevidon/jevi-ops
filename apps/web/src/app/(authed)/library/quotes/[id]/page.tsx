@@ -11,6 +11,7 @@ import {
 import { AddAnnotationForm } from './add-annotation-form';
 import { deleteAnnotationAction, deleteQuoteAction } from './actions';
 import { QuoteForm } from '../quote-form';
+import { getAppTimezone } from '@/lib/app-settings';
 
 // /library/quotes/[id] — quote at top in serif italic, then annotations
 // chronologically with context labels. Bottom: add-annotation form. Header
@@ -29,6 +30,7 @@ export default async function QuoteDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
+  const tz = await getAppTimezone();
 
   let quote: Quote | null = null;
   let annotations: QuoteAnnotation[] = [];
@@ -87,7 +89,7 @@ export default async function QuoteDetailPage({
         meta={
           metaBits.length
             ? metaBits.join(' · ')
-            : `Saved ${new Date(quote.created_at).toLocaleDateString('en-US', { timeZone: 'America/Denver', month: 'short', day: 'numeric', year: 'numeric' })}`
+            : `Saved ${new Date(quote.created_at).toLocaleDateString('en-US', { timeZone: tz, month: 'short', day: 'numeric', year: 'numeric' })}`
         }
       />
       <div className="hairline mb-6" />
@@ -136,7 +138,7 @@ export default async function QuoteDetailPage({
                     <span className="font-mono text-[10px] uppercase tracking-wider text-ink-3">
                       {CONTEXT_LABELS[a.context]} ·{' '}
                       {new Date(a.annotated_at).toLocaleDateString('en-US', {
-                        timeZone: 'America/Denver',
+                        timeZone: tz,
                         month: 'short',
                         day: 'numeric',
                         year: 'numeric',

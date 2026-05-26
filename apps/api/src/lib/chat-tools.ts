@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type Anthropic from '@anthropic-ai/sdk';
+import { getAppTz } from './app-settings.js';
 
 // Tool surface for the chat query interface (spec §11). Each tool is a
 // thin DB query that returns concise JSON Claude can summarize. Keep them
@@ -387,7 +388,7 @@ const searchRoutines: ChatTool = {
     // Compute today + last-90-day stats inline. We mirror what
     // routine-stats.ts does in shared but keep this self-contained so
     // the chat tool doesn't depend on a workspace import.
-    const todayIso = todayInTz('America/Denver');
+    const todayIso = todayInTz(await getAppTz());
     type Row = {
       id: string;
       name: string;

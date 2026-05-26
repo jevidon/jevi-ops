@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { parseDate } from './DateInput';
 import { parseTime } from './TimeInput';
+import { useAppTimezone } from './TimezoneProvider';
 
 // Hybrid datetime picker: native <input type="datetime-local"> on top
 // for mobile + most desktops, plus a permissive text fallback below
@@ -41,6 +42,7 @@ export function DateTimeInput({
   'aria-label': ariaLabel,
   title,
 }: DateTimeInputProps) {
+  const tz = useAppTimezone();
   // The input field expects "YYYY-MM-DDTHH:MM"; we show a friendlier
   // text format but the hidden field always carries the native shape.
   const [text, setText] = useState(formatDisplay(defaultValue));
@@ -59,7 +61,7 @@ export function DateTimeInput({
       setError(null);
       return;
     }
-    const result = parseDateTime(trimmed);
+    const result = parseDateTime(trimmed, tz);
     if (result) {
       setNormalized(result);
       setText(formatDisplay(result));
@@ -121,9 +123,9 @@ function formatDisplay(value: string): string {
   return value ? value.replace('T', ' ') : '';
 }
 
-function todayInAppTz(): string {
+function todayInAppTz(tz: string): string {
   const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'America/Denver',
+    timeZone: tz,
     year: 'numeric', month: '2-digit', day: '2-digit',
   }).formatToParts(new Date());
   const g = (t: string) => parts.find((p) => p.type === t)?.value ?? '';
@@ -135,16 +137,16 @@ function todayInAppTz(): string {
 // works, default the date to today. Otherwise split on the FIRST
 // occurrence of " " between a digit and either a digit-or-letter
 // that starts the time portion, and try parsing the halves.
-function parseDateTime(raw: string): string | null {
+function parseDateTime(raw: string, tz: string): string | null {
   const s = raw.trim();
   if (!s) return null;
 
   // Pure time? Default to today.
   const asTime = parseTime(s);
-  if (asTime) return `${todayInAppTz()}T${asTime}`;
+  if (asTime) return `${todayInAppTz(tz)}T${asTime}`;
 
   // Pure date? Default to noon.
-  const asDate = parseDate(s);
+  const asDate = parseDate(s, tz);
   if (asDate) return `${asDate}T12:00`;
 
   // Otherwise look for a split point. We try multiple split positions
@@ -160,7 +162,7 @@ function parseDateTime(raw: string): string | null {
     const left = s.slice(0, i).trim().replace(/,$/, '');
     const right = s.slice(i + 1).trim();
     if (!left || !right) continue;
-    const date = parseDate(left);
+    const date = parseDate(left, tz);
     if (!date) continue;
     const time = parseTime(right);
     if (!time) continue;

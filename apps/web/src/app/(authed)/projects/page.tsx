@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { EmptyState } from '@/components/EmptyState';
 import { projectsApi, ApiError, type ProjectListItem } from '@/lib/api';
+import { getAppTimezone } from '@/lib/app-settings';
 
 // /projects — list view. Split into Active projects, Retainers, then
 // Paused / Done / Archived (collapsed). Retainers are kept separate
@@ -55,6 +56,7 @@ function group(list: ProjectListItem[]): GroupedProjects {
 }
 
 export default async function ProjectsPage() {
+  const tz = await getAppTimezone();
   let projects: ProjectListItem[] = [];
   let errorMessage: string | null = null;
 
@@ -102,22 +104,22 @@ export default async function ProjectsPage() {
       ) : (
         <div className="mt-2">
           {grouped.activeProjects.length > 0 && (
-            <ProjectGroup label={`Active · ${grouped.activeProjects.length}`} projects={grouped.activeProjects} />
+            <ProjectGroup label={`Active · ${grouped.activeProjects.length}`} projects={grouped.activeProjects} tz={tz} />
           )}
           {grouped.retainers.length > 0 && (
-            <ProjectGroup label={`Retainers · ${grouped.retainers.length}`} projects={grouped.retainers} />
+            <ProjectGroup label={`Retainers · ${grouped.retainers.length}`} projects={grouped.retainers} tz={tz} />
           )}
           {grouped.areas.length > 0 && (
-            <ProjectGroup label={`Areas · ${grouped.areas.length}`} projects={grouped.areas} />
+            <ProjectGroup label={`Areas · ${grouped.areas.length}`} projects={grouped.areas} tz={tz} />
           )}
           {grouped.paused.length > 0 && (
-            <CollapsedGroup label={`Paused · ${grouped.paused.length}`} projects={grouped.paused} />
+            <CollapsedGroup label={`Paused · ${grouped.paused.length}`} projects={grouped.paused} tz={tz} />
           )}
           {grouped.done.length > 0 && (
-            <CollapsedGroup label={`Done · ${grouped.done.length}`} projects={grouped.done} />
+            <CollapsedGroup label={`Done · ${grouped.done.length}`} projects={grouped.done} tz={tz} />
           )}
           {grouped.archived.length > 0 && (
-            <CollapsedGroup label={`Archived · ${grouped.archived.length}`} projects={grouped.archived} />
+            <CollapsedGroup label={`Archived · ${grouped.archived.length}`} projects={grouped.archived} tz={tz} />
           )}
         </div>
       )}
@@ -128,16 +130,18 @@ export default async function ProjectsPage() {
 function ProjectGroup({
   label,
   projects,
+  tz,
 }: {
   label: string;
   projects: ProjectListItem[];
+  tz: string;
 }) {
   return (
     <section className="mt-4">
       <div className="px-5 lg:px-0 eyebrow pb-2 border-b border-line">{label}</div>
       <ul>
         {projects.map((p) => (
-          <ProjectRow key={p.id} project={p} />
+          <ProjectRow key={p.id} project={p} tz={tz} />
         ))}
       </ul>
     </section>
@@ -147,9 +151,11 @@ function ProjectGroup({
 function CollapsedGroup({
   label,
   projects,
+  tz,
 }: {
   label: string;
   projects: ProjectListItem[];
+  tz: string;
 }) {
   return (
     <section className="mt-4">
@@ -159,7 +165,7 @@ function CollapsedGroup({
         </summary>
         <ul>
           {projects.map((p) => (
-            <ProjectRow key={p.id} project={p} />
+            <ProjectRow key={p.id} project={p} tz={tz} />
           ))}
         </ul>
       </details>
@@ -167,7 +173,7 @@ function CollapsedGroup({
   );
 }
 
-function ProjectRow({ project }: { project: ProjectListItem }) {
+function ProjectRow({ project, tz }: { project: ProjectListItem; tz: string }) {
   const isArea = project.kind === 'area';
   const isRetainer = !isArea && project.engagement_type === 'retainer';
   const milestones = project.milestones ?? [];
@@ -238,7 +244,7 @@ function ProjectRow({ project }: { project: ProjectListItem }) {
                   {doneCount}/{totalCount} milestones
                 </span>
               )}
-              {project.target_date && <span>Target {formatRelativeDate(project.target_date)}</span>}
+              {project.target_date && <span>Target {formatRelativeDate(project.target_date, tz)}</span>}
             </>
           )}
         </div>
@@ -247,9 +253,9 @@ function ProjectRow({ project }: { project: ProjectListItem }) {
   );
 }
 
-function formatRelativeDate(iso: string): string {
+function formatRelativeDate(iso: string, tz: string): string {
   const today = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'America/Denver',
+    timeZone: tz,
     year: 'numeric', month: '2-digit', day: '2-digit',
   }).format(new Date());
   if (iso === today) return 'today';
@@ -261,7 +267,7 @@ function formatRelativeDate(iso: string): string {
   if (days > 1 && days < 14) return `in ${days}d`;
   if (days < -1 && days > -14) return `${Math.abs(days)}d ago`;
   return new Date(iso + 'T12:00:00Z').toLocaleDateString('en-US', {
-    timeZone: 'America/Denver',
+    timeZone: tz,
     month: 'short',
     day: 'numeric',
   });

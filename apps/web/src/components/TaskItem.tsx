@@ -6,6 +6,7 @@ import {
   isRecurrencePattern,
 } from '@jerad-ops/shared';
 import { toggleTaskDoneAction, toggleTop3Action } from '@/app/(authed)/today/actions';
+import { getAppTimezone } from '@/lib/app-settings';
 import { todayIsoDate } from '@/lib/today';
 
 // One task row. Two forms (checkbox + star) so each interaction is a single
@@ -18,7 +19,7 @@ import { todayIsoDate } from '@/lib/today';
 //   - showProject: render the linked project label (default true; off when
 //                  the row is already on a project's detail page)
 
-export function TaskItem({
+export async function TaskItem({
   task,
   showStar = true,
   showProject = true,
@@ -27,9 +28,11 @@ export function TaskItem({
   showStar?: boolean;
   showProject?: boolean;
 }) {
+  const tz = await getAppTimezone();
+  const today = todayIsoDate(tz);
   const isDone = task.status === 'done';
   const isTop3 = Boolean(task.top3_for_date);
-  const dueLabel = task.due_date ? formatDueLabel(task.due_date) : null;
+  const dueLabel = task.due_date ? formatDueLabel(task.due_date, today) : null;
   const isOverdue = dueLabel?.kind === 'overdue';
   const isTodayDue = dueLabel?.kind === 'today';
   const project = showProject ? task.project : null;
@@ -134,8 +137,7 @@ export function TaskItem({
 
 // Render a friendly relative due-date label. yyyy-mm-dd → "Due tomorrow",
 // "Due Fri Jun 6", "Overdue 3d", etc.
-function formatDueLabel(dueIso: string): { kind: 'overdue' | 'today' | 'future'; text: string } {
-  const today = todayIsoDate();
+function formatDueLabel(dueIso: string, today: string): { kind: 'overdue' | 'today' | 'future'; text: string } {
   if (dueIso === today) return { kind: 'today', text: 'Due today' };
   if (dueIso < today) {
     const daysPast = daysBetween(dueIso, today);

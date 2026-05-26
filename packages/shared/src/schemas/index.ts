@@ -10,3 +10,4 @@ export * from './book.js';
 export * from './content.js';
 export * from './captured.js';
 export * from './voice.js';
+export * from './app-settings.js';

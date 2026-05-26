@@ -14,6 +14,7 @@ import {
   clearReviewFlagAction,
 } from './needs-review-actions';
 import { todayIsoDate, isToday } from '@/lib/today';
+import { getAppTimezone } from '@/lib/app-settings';
 import type { Task } from '@jerad-ops/shared';
 
 // Today screen — most important UI per spec §4.
@@ -24,18 +25,18 @@ import type { Task } from '@jerad-ops/shared';
 //   notifications, completed-today). Section order is the same source-of-
 //   truth in both viewports — just rearranged by CSS grid.
 
-function todayLabel() {
+function todayLabel(tz: string) {
   const d = new Date();
   return d.toLocaleDateString('en-US', {
-    timeZone: 'America/Denver',
+    timeZone: tz,
     weekday: 'long',
     month: 'long',
     day: 'numeric',
   });
 }
 
-function splitTasks(tasks: Task[]) {
-  const today = todayIsoDate();
+function splitTasks(tasks: Task[], tz: string) {
+  const today = todayIsoDate(tz);
   const open = tasks.filter((t) => t.status === 'open');
 
   const top3 = open
@@ -77,13 +78,15 @@ function splitTasks(tasks: Task[]) {
     });
 
   const doneToday = tasks
-    .filter((t) => t.status === 'done' && isToday(t.completed_at ?? null))
+    .filter((t) => t.status === 'done' && isToday(tz, t.completed_at ?? null))
     .sort((a, b) => (b.completed_at ?? '').localeCompare(a.completed_at ?? ''));
 
   return { top3, inbox, doneToday };
 }
 
 export default async function TodayPage() {
+  const tz = await getAppTimezone();
+  const today = todayIsoDate(tz);
   let tasks: Task[] = [];
   let events: CalendarEvent[] = [];
   let notifications: Notification[] = [];
@@ -120,12 +123,12 @@ export default async function TodayPage() {
 
   const routinesDoneCount = routines.filter((r) => r.stats.done_today).length;
 
-  const { top3, inbox, doneToday } = splitTasks(tasks);
+  const { top3, inbox, doneToday } = splitTasks(tasks, tz);
   const emptySlots = Math.max(0, 3 - top3.length);
 
   return (
     <div>
-      <ScreenHeader eyebrow="Today" title={todayLabel()} meta="Mountain Time" />
+      <ScreenHeader eyebrow="Today" title={todayLabel(tz)} meta={tz} />
       <div className="hairline lg:mb-2" />
 
       <div className="lg:grid lg:grid-cols-[1.6fr_1fr] lg:gap-x-14">
@@ -164,7 +167,7 @@ export default async function TodayPage() {
               events.map((e) => (
                 <EventRow
                   key={e.id}
-                  time={formatEventTime(e)}
+                  time={formatEventTime(e, tz)}
                   title={e.title}
                   location={e.location}
                   createdHere={e.source === 'created_here'}
@@ -221,7 +224,7 @@ export default async function TodayPage() {
                 meds. Each builds a streak.
               </Hint>
             ) : (
-              <RoutinesTodayList routines={routines} compact />
+              <RoutinesTodayList routines={routines} compact today={today} />
             )}
           </Section>
 
@@ -379,24 +382,24 @@ function EventRow({
   );
 }
 
-function formatEventTime(e: CalendarEvent): string {
+function formatEventTime(e: CalendarEvent, tz: string): string {
   if (e.all_day) return 'all day';
-  const today = todayIsoDate();
+  const today = todayIsoDate(tz);
   const startDate = new Date(e.start_at);
   const startDay = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'America/Denver',
+    timeZone: tz,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
   }).format(startDate);
   const time = startDate.toLocaleTimeString('en-US', {
-    timeZone: 'America/Denver',
+    timeZone: tz,
     hour: 'numeric',
     minute: '2-digit',
   });
   // Show a day prefix for events that aren't today (e.g. "Fri 2:00 PM").
   if (startDay !== today) {
-    const day = startDate.toLocaleDateString('en-US', { timeZone: 'America/Denver', weekday: 'short' });
+    const day = startDate.toLocaleDateString('en-US', { timeZone: tz, weekday: 'short' });
     return `${day} ${time}`;
   }
   return time;

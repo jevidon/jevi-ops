@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { sendPushover, isPushoverConfigured } from './pushover.js';
 import { env } from './env.js';
+import { getAppTz } from './app-settings.js';
 
 // Daily morning summary — one Pushover push that covers everything you'd
 // want to know before the day starts: tasks due, calendar events,
@@ -9,7 +10,6 @@ import { env } from './env.js';
 //
 // Pushover messages cap at 1024 chars. We trim line-by-line if we overflow.
 
-const USER_TZ = 'America/Denver';
 const PUSHOVER_MAX_BODY = 1024;
 
 interface TaskRow {
@@ -56,7 +56,8 @@ export async function runDailySummary(sb: SupabaseClient): Promise<DailySummaryR
   // Today's date in user's local timezone (not UTC). Avoids the edge case
   // where the cron fires at 7am Mountain but UTC has already rolled to
   // tomorrow.
-  const todayLocal = formatInTz(new Date(), USER_TZ);
+  const tz = await getAppTz();
+  const todayLocal = formatInTz(new Date(), tz);
 
   // Fetch everything in parallel.
   const [tasksRes, eventsRes, obsRes, reviewRes] = await Promise.all([
@@ -69,8 +70,8 @@ export async function runDailySummary(sb: SupabaseClient): Promise<DailySummaryR
       .limit(50),
     sb.from('calendar_events')
       .select('id, title, start_at, all_day')
-      .gte('start_at', startOfLocalDayIso(todayLocal))
-      .lt('start_at', startOfLocalDayIso(addDays(todayLocal, 1)))
+      .gte('start_at', startOfLocalDayIso(todayLocal, tz))
+      .lt('start_at', startOfLocalDayIso(addDays(todayLocal, 1, tz), tz))
       .order('start_at', { ascending: true })
       .limit(50),
     sb.from('observations')
@@ -103,7 +104,7 @@ export async function runDailySummary(sb: SupabaseClient): Promise<DailySummaryR
     };
   }
 
-  const { title, message } = composeMessage(todayLocal, tasks, events, observations, needsReviewCount);
+  const { title, message } = composeMessage(todayLocal, tasks, events, observations, needsReviewCount, tz);
 
   // If anything urgent (P1) is in the summary, bypass Do Not Disturb so
   // the morning push wakes the user. Otherwise normal priority.
@@ -133,9 +134,10 @@ function composeMessage(
   events: EventRow[],
   observations: ObservationRow[],
   needsReviewCount: number,
+  tz: string,
 ): { title: string; message: string } {
   const date = new Date(`${todayLocal}T12:00:00Z`).toLocaleDateString('en-US', {
-    timeZone: USER_TZ,
+    timeZone: tz,
     weekday: 'long',
     month: 'short',
     day: 'numeric',
@@ -158,7 +160,7 @@ function composeMessage(
   if (events.length > 0) {
     lines.push(`Events (${events.length}):`);
     for (const e of events) {
-      const when = e.all_day ? 'all day' : formatEventTime(e.start_at);
+      const when = e.all_day ? 'all day' : formatEventTime(e.start_at, tz);
       lines.push(`• ${e.title} — ${when}`);
     }
     lines.push('');
@@ -195,9 +197,9 @@ function formatTime(timeStr: string): string {
   return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
 }
 
-function formatEventTime(iso: string): string {
+function formatEventTime(iso: string, tz: string): string {
   return new Date(iso).toLocaleTimeString('en-US', {
-    timeZone: USER_TZ,
+    timeZone: tz,
     hour: 'numeric',
     minute: '2-digit',
   });
@@ -213,17 +215,17 @@ function formatInTz(d: Date, tz: string): string {
   }).format(d);
 }
 
-function startOfLocalDayIso(localDate: string): string {
+function startOfLocalDayIso(localDate: string, tz: string): string {
   // localDate is YYYY-MM-DD. Convert to ISO at 00:00 local time, then to UTC.
   const local = new Date(`${localDate}T00:00:00`);
-  const tzOffsetMin = getTzOffsetMinutes(local, USER_TZ);
+  const tzOffsetMin = getTzOffsetMinutes(local, tz);
   return new Date(local.getTime() - tzOffsetMin * 60_000).toISOString();
 }
 
-function addDays(localDate: string, n: number): string {
+function addDays(localDate: string, n: number, tz: string): string {
   const [y, m, d] = localDate.split('-').map((s) => parseInt(s, 10));
   const dt = new Date(Date.UTC(y!, m! - 1, d! + n));
-  return formatInTz(dt, USER_TZ);
+  return formatInTz(dt, tz);
 }
 
 function getTzOffsetMinutes(at: Date, tz: string): number {

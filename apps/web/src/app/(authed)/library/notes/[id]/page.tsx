@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { libraryApi, ApiError, type Note, type NoteSourceType } from '@/lib/api';
+import { getAppTimezone } from '@/lib/app-settings';
 import { EditNoteForm } from './edit-note-form';
 
 // /library/notes/[id] — single-note detail with edit form. Related project,
@@ -23,6 +24,7 @@ export default async function NoteDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
+  const tz = await getAppTimezone();
 
   let note: Note | null = null;
   let errorMessage: string | null = null;
@@ -73,7 +75,7 @@ export default async function NoteDetailPage({
       <ScreenHeader
         eyebrow={meta}
         title={headerTitle}
-        meta={`Saved ${new Date(note.created_at).toLocaleDateString('en-US', { timeZone: 'America/Denver', month: 'short', day: 'numeric', year: 'numeric' })}`}
+        meta={`Saved ${new Date(note.created_at).toLocaleDateString('en-US', { timeZone: tz, month: 'short', day: 'numeric', year: 'numeric' })}`}
       />
       <div className="hairline mb-6" />
 

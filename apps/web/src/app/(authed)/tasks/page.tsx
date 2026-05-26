@@ -3,6 +3,7 @@ import { ScreenHeader } from '@/components/ScreenHeader';
 import { TaskItem } from '@/components/TaskItem';
 import { tasksApi, projectsApi, ApiError } from '@/lib/api';
 import { todayIsoDate } from '@/lib/today';
+import { getAppTimezone } from '@/lib/app-settings';
 import type { Task } from '@jerad-ops/shared';
 
 // /tasks — full task list, grouped by due date. Filters for status and project
@@ -21,6 +22,7 @@ export default async function TasksPage({
   searchParams: Promise<SearchParamsShape>;
 }) {
   const params = await searchParams;
+  const tz = await getAppTimezone();
   const status: StatusFilter =
     params.status === 'done' || params.status === 'all' ? params.status : 'open';
   const projectFilter = params.project ?? 'all';
@@ -56,7 +58,7 @@ export default async function TasksPage({
     return true;
   });
 
-  const groups = groupByDue(filteredTasks);
+  const groups = groupByDue(filteredTasks, tz);
 
   return (
     <div>
@@ -221,10 +223,10 @@ const GROUP_LABEL: Record<GroupKey, string> = {
   done: 'Done',
 };
 
-function groupByDue(tasks: Task[]): Record<GroupKey, Task[]> {
-  const today = todayIsoDate();
-  const tomorrow = isoDaysFromToday(1);
-  const inSevenDays = isoDaysFromToday(7);
+function groupByDue(tasks: Task[], tz: string): Record<GroupKey, Task[]> {
+  const today = todayIsoDate(tz);
+  const tomorrow = isoDaysFromToday(1, tz);
+  const inSevenDays = isoDaysFromToday(7, tz);
 
   const out: Record<GroupKey, Task[]> = {
     overdue: [], today: [], tomorrow: [], thisWeek: [], later: [], noDate: [], done: [],
@@ -258,11 +260,11 @@ function groupByDue(tasks: Task[]): Record<GroupKey, Task[]> {
   return out;
 }
 
-function isoDaysFromToday(days: number): string {
+function isoDaysFromToday(days: number, tz: string): string {
   const d = new Date();
   d.setDate(d.getDate() + days);
   return new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'America/Denver',
+    timeZone: tz,
     year: 'numeric', month: '2-digit', day: '2-digit',
   }).format(d);
 }

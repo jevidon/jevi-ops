@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type Anthropic from '@anthropic-ai/sdk';
 import { anthropic, anthropicModel } from './anthropic.js';
+import { getAppTz } from './app-settings.js';
 
 // Voice parser — spec §14. Receives a transcript + a user-scoped Supabase
 // client (for context gathering), returns a structured ParseResult.
@@ -18,8 +19,9 @@ interface ParseContext {
 
 async function gatherContext(sb: SupabaseClient): Promise<ParseContext> {
   const now = new Date();
+  const tz = await getAppTz();
   const todayDate = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'America/Denver',
+    timeZone: tz,
     year: 'numeric', month: '2-digit', day: '2-digit',
   }).format(now);
 

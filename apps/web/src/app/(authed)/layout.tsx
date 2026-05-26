@@ -4,8 +4,10 @@ import { MicFAB } from '@/components/MicFAB';
 import { TextCaptureFAB } from '@/components/TextCaptureFAB';
 import { SearchHotkey } from '@/components/SearchHotkey';
 import { TextCapturePalette } from '@/components/TextCapturePalette';
+import { TimezoneProvider } from '@/components/TimezoneProvider';
 import { requireUser } from '@/lib/auth';
 import { notificationsApi, ApiError } from '@/lib/api';
+import { getAppTimezone } from '@/lib/app-settings';
 
 // Every page inside the (authed) group requires a signed-in user — checked
 // in middleware AND here as defense-in-depth.
@@ -33,22 +35,29 @@ export default async function AuthedLayout({ children }: { children: React.React
     }
   }
 
-  return (
-    <div className="flex-1 flex">
-      <DesktopRail email={user.email ?? undefined} unreadNotifications={unreadNotifications} />
+  // Pull the configured timezone once per request and pass it into a
+  // client-side context so date/time-aware UI (DateInput, the routine
+  // strip, etc.) doesn't need to hardcode 'America/Denver'.
+  const timezone = await getAppTimezone();
 
-      <div className="flex-1 flex flex-col min-w-0">
-        {/* Inner wrapper: clamp width on mobile so the layout matches what
-            we had before; on desktop, let it fill the rail-less space. */}
-        <main className="flex-1 pb-24 lg:pb-12 mx-auto w-full max-w-[480px] lg:max-w-[1280px] lg:px-12">
-          {children}
-        </main>
-        <MicFAB />
-        <TextCaptureFAB />
-        <BottomTabBar />
-        <SearchHotkey />
-        <TextCapturePalette />
+  return (
+    <TimezoneProvider timezone={timezone}>
+      <div className="flex-1 flex">
+        <DesktopRail email={user.email ?? undefined} unreadNotifications={unreadNotifications} />
+
+        <div className="flex-1 flex flex-col min-w-0">
+          {/* Inner wrapper: clamp width on mobile so the layout matches what
+              we had before; on desktop, let it fill the rail-less space. */}
+          <main className="flex-1 pb-24 lg:pb-12 mx-auto w-full max-w-[480px] lg:max-w-[1280px] lg:px-12">
+            {children}
+          </main>
+          <MicFAB />
+          <TextCaptureFAB />
+          <BottomTabBar />
+          <SearchHotkey />
+          <TextCapturePalette />
+        </div>
       </div>
-    </div>
+    </TimezoneProvider>
   );
 }

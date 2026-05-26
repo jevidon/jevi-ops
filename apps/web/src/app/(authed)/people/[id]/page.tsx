@@ -15,6 +15,7 @@ import { FactForm } from './fact-form';
 import { InteractionForm } from './interaction-form';
 import { deleteFactAction } from './fact-actions';
 import { deleteInteractionAction } from './interaction-actions';
+import { getAppTimezone } from '@/lib/app-settings';
 
 // /people/[id] — person detail. Layout mirrors content/project detail:
 //   Header (name + relationship + contact)
@@ -58,6 +59,7 @@ export default async function PersonDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
+  const tz = await getAppTimezone();
 
   let detail: PersonDetail | null = null;
   let errorMessage: string | null = null;
@@ -135,7 +137,7 @@ export default async function PersonDetailPage({
           ) : (
             <ul>
               {facts.map((f) => (
-                <FactRow key={f.id} personId={person.id} fact={f} />
+                <FactRow key={f.id} personId={person.id} fact={f} tz={tz} />
               ))}
             </ul>
           )}
@@ -152,7 +154,7 @@ export default async function PersonDetailPage({
           ) : (
             <ul>
               {interactions.map((i) => (
-                <InteractionRow key={i.id} personId={person.id} interaction={i} />
+                <InteractionRow key={i.id} personId={person.id} interaction={i} tz={tz} />
               ))}
             </ul>
           )}
@@ -238,10 +240,10 @@ function Section({ label, children }: { label: string; children: React.ReactNode
   );
 }
 
-function FactRow({ personId, fact }: { personId: string; fact: PersonFact }) {
+function FactRow({ personId, fact, tz }: { personId: string; fact: PersonFact; tz: string }) {
   const dateLabel = fact.date_relevant
     ? new Date(fact.date_relevant + 'T12:00:00Z').toLocaleDateString('en-US', {
-        timeZone: 'America/Denver',
+        timeZone: tz,
         month: 'short',
         day: 'numeric',
         ...(fact.recurring ? {} : { year: 'numeric' }),
@@ -280,12 +282,14 @@ function FactRow({ personId, fact }: { personId: string; fact: PersonFact }) {
 function InteractionRow({
   personId,
   interaction,
+  tz,
 }: {
   personId: string;
   interaction: PersonInteraction;
+  tz: string;
 }) {
   const when = new Date(interaction.occurred_at).toLocaleString('en-US', {
-    timeZone: 'America/Denver',
+    timeZone: tz,
     month: 'short',
     day: 'numeric',
     hour: 'numeric',

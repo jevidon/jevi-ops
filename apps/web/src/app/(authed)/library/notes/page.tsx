@@ -3,6 +3,7 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { libraryApi, ApiError, type Note, type NoteSourceType, type TagAggregate } from '@/lib/api';
+import { getAppTimezone } from '@/lib/app-settings';
 import { LibraryTabBar } from '../library-tab-bar';
 import { PrefsPersist } from '@/components/PrefsPersist';
 import { TagCloud } from '../tag-cloud';
@@ -31,6 +32,7 @@ export default async function NotesPage({
   searchParams: Promise<{ source_type?: string; needs_review?: string; tag?: string }>;
 }) {
   const params = await searchParams;
+  const tz = await getAppTimezone();
 
   // Restore last-used filter from cookies if the URL has no params. Same
   // pattern as /library/books — written by <PrefsPersist /> below.
@@ -174,7 +176,7 @@ export default async function NotesPage({
                   )}
                 </span>
                 <span className="font-mono text-[10px] uppercase tracking-wider text-ink-3">
-                  {new Date(n.created_at).toLocaleDateString('en-US', { timeZone: 'America/Denver', month: 'short', day: 'numeric' })}
+                  {new Date(n.created_at).toLocaleDateString('en-US', { timeZone: tz, month: 'short', day: 'numeric' })}
                 </span>
               </div>
               <Link

@@ -8,6 +8,7 @@ import {
   type SaveResult,
 } from './activity-actions';
 import { DateTimeInput } from '@/components/DateTimeInput';
+import { useAppTimezone } from '@/components/TimezoneProvider';
 
 // One row of the activity log on /projects/[id]. Read mode is the
 // compact display we had before. Click the timestamp (or the hover-only
@@ -25,6 +26,7 @@ export function ActivityRow({
   entry: ActivityLogEntry;
   projectId: string;
 }) {
+  const tz = useAppTimezone();
   const [editing, setEditing] = useState(false);
   const [state, formAction, pending] = useActionState<SaveResult | null, FormData>(
     updateActivityAction,
@@ -39,7 +41,7 @@ export function ActivityRow({
     queueMicrotask(() => setEditing(false));
   }
 
-  if (!editing) return <ReadRow entry={entry} projectId={projectId} onEdit={() => setEditing(true)} />;
+  if (!editing) return <ReadRow entry={entry} projectId={projectId} tz={tz} onEdit={() => setEditing(true)} />;
 
   return (
     <li className="py-3 border-b border-line/40 last:border-b-0 bg-surface-2/30 -mx-2 px-2">
@@ -75,7 +77,7 @@ export function ActivityRow({
           />
           <DateTimeInput
             name="logged_at"
-            defaultValue={toDatetimeLocalValue(entry.logged_at)}
+            defaultValue={toDatetimeLocalValue(entry.logged_at, tz)}
             disabled={pending}
             aria-label="When"
             className="bg-transparent border-b border-line focus:border-accent focus:outline-none py-1.5 font-mono text-[12px] text-ink-2"
@@ -111,14 +113,16 @@ export function ActivityRow({
 function ReadRow({
   entry,
   projectId,
+  tz,
   onEdit,
 }: {
   entry: ActivityLogEntry;
   projectId: string;
+  tz: string;
   onEdit: () => void;
 }) {
   const when = new Date(entry.logged_at).toLocaleString('en-US', {
-    timeZone: 'America/Denver',
+    timeZone: tz,
     month: 'short',
     day: 'numeric',
     hour: 'numeric',
@@ -192,13 +196,13 @@ function ReadRow({
 }
 
 // Convert a UTC ISO timestamp to the value format a <datetime-local>
-// input expects ("YYYY-MM-DDTHH:mm"), interpreted in America/Denver.
+// input expects ("YYYY-MM-DDTHH:mm"), interpreted in the app's TZ.
 // The server action mirrors this conversion in reverse.
-function toDatetimeLocalValue(iso: string): string {
+function toDatetimeLocalValue(iso: string, tz: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
   const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'America/Denver',
+    timeZone: tz,
     year: 'numeric', month: '2-digit', day: '2-digit',
     hour: '2-digit', minute: '2-digit',
     hour12: false,

@@ -6,6 +6,7 @@ import {
   matchBook, matchContentItem, matchMilestone, matchQuote,
 } from './match.js';
 import { insertEvent as insertGoogleEvent, loadTokens as loadGoogleTokens } from './google.js';
+import { getAppTz } from './app-settings.js';
 
 // Action executor — dispatch each parsed action to the right table.
 // Returns a per-action result so the client can confirm what happened.
@@ -372,7 +373,7 @@ async function createJournalEntry(
     transcription_text: text,
     source: sourceFor('journal_entries', opts.captureSource),
     entry_date: str(a, 'date') ?? new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'America/Denver', year: 'numeric', month: '2-digit', day: '2-digit',
+      timeZone: await getAppTz(), year: 'numeric', month: '2-digit', day: '2-digit',
     }).format(new Date()),
   };
   const { data, error } = await sb.from('journal_entries').insert(insert).select('id').single();

@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { tasksApi, observationsApi, ApiError } from '@/lib/api';
 import { todayIsoDate } from '@/lib/today';
+import { getAppTimezone } from '@/lib/app-settings';
 
 const CreateTaskFormSchema = z.object({
   title: z.string().trim().min(1),
@@ -48,7 +49,7 @@ export async function toggleTop3Action(formData: FormData) {
   try {
     await tasksApi.update(taskId, {
       // Set to today's date to mark; null to unmark.
-      top3_for_date: currentlyTop3 ? null : todayIsoDate(),
+      top3_for_date: currentlyTop3 ? null : todayIsoDate(await getAppTimezone()),
     } as Parameters<typeof tasksApi.update>[1]);
   } catch {
     // ignore — revalidate will resync

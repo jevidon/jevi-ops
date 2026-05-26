@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { sendPushover, isPushoverConfigured } from './pushover.js';
 import { env } from './env.js';
+import { getAppTz } from './app-settings.js';
 
 // Routine reminder runner — invoked by /api/cron/reminders every minute
 // alongside runReminders() for tasks. Finds active routines that:
@@ -12,8 +13,6 @@ import { env } from './env.js';
 // Fires a Pushover at the exact specific_time in the app's home TZ
 // (America/Denver). One reminder per routine per day, no "X min before"
 // offsets — habits don't have a lead time concept.
-
-const USER_TZ = 'America/Denver';
 
 // Cron fires per minute; allow a small window in case the cron runs a
 // few seconds late or the scheduler skews. Routines fire when |now -
@@ -78,8 +77,9 @@ export async function runRoutineReminders(sb: SupabaseClient): Promise<RoutineRe
     return { considered: 0, dispatched: 0, failed: 0, skipped_done: 0 };
   }
 
-  const todayIso = todayInTz(USER_TZ);
-  const nowMinutes = nowMinutesInTz(USER_TZ);
+  const tz = await getAppTz();
+  const todayIso = todayInTz(tz);
+  const nowMinutes = nowMinutesInTz(tz);
 
   // Pull candidate routines. The partial index defined in 0016 makes
   // this cheap. We filter by date in JS rather than in PostgREST because
@@ -178,8 +178,9 @@ export async function runRoutineMissed(sb: SupabaseClient): Promise<RoutineMisse
     return { considered: 0, dispatched: 0, failed: 0 };
   }
 
-  const todayIso = todayInTz(USER_TZ);
-  const nowMinutes = nowMinutesInTz(USER_TZ);
+  const tz = await getAppTz();
+  const todayIso = todayInTz(tz);
+  const nowMinutes = nowMinutesInTz(tz);
 
   // Candidates: active routines with either a specific_time set OR a
   // time_of_day bucket that has a deadline. We can't easily express
