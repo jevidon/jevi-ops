@@ -5,6 +5,7 @@ import { recentDaysGrid } from '@jerad-ops/shared';
 import { RoutinesTodayList } from './routines-today-list';
 import { reactivateRoutineAction } from './actions';
 import { RoutineHeatmap } from '@/components/RoutineHeatmap';
+import { RoutinesAnalytics } from './routines-analytics';
 
 // /routines — full routines surface. Three regions:
 //   1. Today's check-off list (same widget /today shows, no compaction)
@@ -67,6 +68,9 @@ export default async function RoutinesPage({
       />
       <div className="hairline" />
 
+      {/* Overall analytics — only when there are active routines to summarize. */}
+      {active.length > 0 && <RoutinesAnalytics routines={active} today={today} />}
+
       <div className="px-5 lg:px-0 pt-4 flex items-center justify-between">
         <div className="eyebrow">Today</div>
         <Link
@@ -88,7 +92,7 @@ export default async function RoutinesPage({
         </div>
       ) : (
         <div className="px-5 lg:px-0 mt-3">
-          <RoutinesTodayList routines={active} />
+          <RoutinesTodayList routines={active} showInlineHeatmap today={today} />
         </div>
       )}
 

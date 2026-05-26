@@ -1,5 +1,7 @@
 import Link from 'next/link';
 import type { RoutineListItem, TimeOfDayBucket } from '@/lib/api';
+import { recentDaysGrid } from '@jerad-ops/shared';
+import { RoutineHeatmap } from '@/components/RoutineHeatmap';
 import { toggleCompletionAction } from './actions';
 
 // Daily check-off list — used on /today (compact) and at the top of
@@ -39,9 +41,16 @@ function formatTime(t: string | null | undefined): string | null {
 export function RoutinesTodayList({
   routines,
   compact = false,
+  showInlineHeatmap = false,
+  today,
 }: {
   routines: RoutineListItem[];
   compact?: boolean;
+  // When true (only on /routines), each row gets a 14-day strip on
+  // desktop. The /today widget keeps the minimal layout for focus.
+  showInlineHeatmap?: boolean;
+  // Required when showInlineHeatmap is true — anchors the strip.
+  today?: string;
 }) {
   if (routines.length === 0) return null;
 
@@ -68,7 +77,13 @@ export function RoutinesTodayList({
             </div>
             <ul className={compact ? 'space-y-1' : 'space-y-2'}>
               {list.map((r) => (
-                <RoutineTodayRow key={r.id} routine={r} compact={compact} />
+                <RoutineTodayRow
+                  key={r.id}
+                  routine={r}
+                  compact={compact}
+                  showInlineHeatmap={showInlineHeatmap}
+                  today={today}
+                />
               ))}
             </ul>
           </div>
@@ -92,9 +107,13 @@ function todayIsoInAppTz(): string {
 function RoutineTodayRow({
   routine,
   compact,
+  showInlineHeatmap,
+  today,
 }: {
   routine: RoutineListItem;
   compact: boolean;
+  showInlineHeatmap?: boolean;
+  today?: string;
 }) {
   const { stats } = routine;
   const isDone = stats.done_today;
@@ -103,6 +122,11 @@ function RoutineTodayRow({
   // it still isn't done. Once you check it off the streak still resets
   // (the missed ping already fired) but we stop yelling about it.
   const isMissed = !isDone && routine.last_missed_sent_date === todayIsoInAppTz();
+  // 14-day strip on desktop only — keeps the row dense without crowding
+  // mobile. Compact mode (used on /today) never shows it.
+  const stripGrid = showInlineHeatmap && today && !compact
+    ? recentDaysGrid(routine.recent_completions, today, 14)
+    : null;
 
   return (
     <li className={`flex items-center gap-3 ${compact ? 'py-1' : 'py-2'}`}>
@@ -150,6 +174,14 @@ function RoutineTodayRow({
           </span>
         )}
       </Link>
+      {stripGrid && (
+        <div
+          className="hidden lg:flex shrink-0"
+          title={`Last 14 days · ${stripGrid.filter((c) => c.done).length}/14 done`}
+        >
+          <RoutineHeatmap cells={stripGrid} size="sm" layout="row" ariaLabel={`${routine.name} last 14 days`} />
+        </div>
+      )}
       {stats.current_streak > 0 ? (
         <span
           className={`font-mono text-[10px] uppercase tracking-wider shrink-0 ${
