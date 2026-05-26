@@ -5,6 +5,7 @@ import { routinesApi, ApiError, type RoutineDetail } from '@/lib/api';
 import { recentDaysGrid } from '@jerad-ops/shared';
 import { RoutineForm } from '../routine-form';
 import { toggleCompletionAction } from '../actions';
+import { RoutineHeatmap } from '@/components/RoutineHeatmap';
 
 // /routines/[id] — single routine view. Lifetime stats at the top, a
 // 30-day heatmap, then the edit/archive/delete form collapsed below.
@@ -38,9 +39,33 @@ export default async function RoutineDetailPage({
   }
 
   const { routine, completions, stats, today } = detail;
-  const grid = recentDaysGrid(completions, today, 30);
   const rate30 = stats.completions_30d / 30;
   const rate7 = stats.completions_7d / 7;
+
+  // Heatmap window selection:
+  //   - Active routine: 90 days back from today (so you see the recent
+  //     stretch, not just this month).
+  //   - Archived routine WITH a goal: window = goal_days, anchored at
+  //     the archive date. Shows the run that earned the trophy.
+  //   - Archived routine WITHOUT a goal: 90 days ending at archive date.
+  let heatmapAnchor = today;
+  let heatmapDays = 90;
+  if (routine.archived_at) {
+    heatmapAnchor = routine.archived_at.slice(0, 10);
+    if (routine.goal_days) heatmapDays = routine.goal_days;
+  }
+  const grid = recentDaysGrid(completions, heatmapAnchor, heatmapDays);
+  const heatmapLabel = routine.archived_at
+    ? routine.goal_days
+      ? `Goal period (${routine.goal_days} days through ${heatmapAnchor})`
+      : `Last 90 days through ${heatmapAnchor}`
+    : 'Last 90 days';
+
+  // Goal progress (only meaningful for active routines with a goal set).
+  const goalProgress =
+    routine.active && routine.goal_days
+      ? Math.min(stats.current_streak / routine.goal_days, 1)
+      : null;
 
   return (
     <div>
@@ -106,24 +131,41 @@ export default async function RoutineDetailPage({
           </div>
         </section>
 
-        {/* 30-day heatmap */}
-        <section className="pt-8">
-          <div className="eyebrow pb-2 border-b border-line mb-3">Last 30 days</div>
-          <div className="flex flex-wrap gap-1">
-            {grid.map((cell) => (
+        {/* Goal progress — only when active AND a goal is set. */}
+        {goalProgress != null && routine.goal_days && (
+          <section className="pt-8">
+            <div className="eyebrow pb-2 border-b border-line mb-3">Goal progress</div>
+            <div className="flex items-baseline justify-between mb-2">
+              <span className="font-serif text-[24px] text-ink leading-none">
+                {stats.current_streak}
+                <span className="text-ink-3 text-[16px]"> / {routine.goal_days} days</span>
+              </span>
+              <span className="font-mono text-[11px] uppercase tracking-wider text-ink-3">
+                {Math.round(goalProgress * 100)}%
+              </span>
+            </div>
+            <div className="h-2 bg-line/40 overflow-hidden">
               <div
-                key={cell.date}
-                title={`${cell.date}${cell.isToday ? ' (today)' : ''} — ${cell.done ? 'done' : 'missed'}`}
-                className={`h-5 w-5 border ${
-                  cell.done
-                    ? 'bg-ink border-ink'
-                    : 'border-line bg-transparent'
-                } ${cell.isToday ? 'ring-2 ring-accent ring-offset-1 ring-offset-bg' : ''}`}
+                className="h-full bg-ink transition-all"
+                style={{ width: `${Math.round(goalProgress * 100)}%` }}
               />
-            ))}
+            </div>
+            {stats.current_streak === 0 && (
+              <div className="mt-2 font-mono text-[10px] uppercase tracking-wider text-ink-3">
+                Streak reset. Mark today done to start counting toward the goal again.
+              </div>
+            )}
+          </section>
+        )}
+
+        {/* Heatmap — week columns × weekday rows, GitHub-contributions style. */}
+        <section className="pt-8">
+          <div className="eyebrow pb-2 border-b border-line mb-3">{heatmapLabel}</div>
+          <div className="overflow-x-auto">
+            <RoutineHeatmap cells={grid} size="lg" ariaLabel={`${routine.name} completion heatmap`} />
           </div>
           <div className="mt-2 font-mono text-[10px] uppercase tracking-wider text-ink-3">
-            Filled = done. Outlined = missed. Outlined-and-ringed = today.
+            Filled = done. Outlined = missed. Sun is top, Sat is bottom.
           </div>
         </section>
 

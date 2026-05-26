@@ -1,8 +1,10 @@
 import Link from 'next/link';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { routinesApi, ApiError, type RoutineListItem } from '@/lib/api';
+import { recentDaysGrid } from '@jerad-ops/shared';
 import { RoutinesTodayList } from './routines-today-list';
 import { reactivateRoutineAction } from './actions';
+import { RoutineHeatmap } from '@/components/RoutineHeatmap';
 
 // /routines — full routines surface. Three regions:
 //   1. Today's check-off list (same widget /today shows, no compaction)
@@ -99,7 +101,7 @@ export default async function RoutinesPage({
             </summary>
             <ul className="mt-3 space-y-2">
               {completed.map((r) => (
-                <CompletedRow key={r.id} r={r} />
+                <CompletedRow key={r.id} r={r} today={today} />
               ))}
             </ul>
           </details>
@@ -148,7 +150,7 @@ export default async function RoutinesPage({
   );
 }
 
-function CompletedRow({ r }: { r: RoutineListItem }) {
+function CompletedRow({ r, today }: { r: RoutineListItem; today: string }) {
   const archivedDate = r.archived_at
     ? new Date(r.archived_at).toLocaleDateString('en-US', {
         timeZone: 'America/Denver',
@@ -157,8 +159,14 @@ function CompletedRow({ r }: { r: RoutineListItem }) {
         year: 'numeric',
       })
     : null;
+  // Mini-heatmap anchored at the archive date when available — shows
+  // the run that earned the trophy. Falls back to today for older
+  // archives missing archived_at. 28 days = 4 weeks, fits the row.
+  const heatmapAnchor = r.archived_at?.slice(0, 10) ?? today;
+  const grid = recentDaysGrid(r.recent_completions, heatmapAnchor, 28);
+
   return (
-    <li className="flex items-baseline justify-between gap-3 py-2 border-b border-line/40">
+    <li className="flex items-start justify-between gap-3 py-2 border-b border-line/40">
       <div className="flex-1 min-w-0">
         <Link
           href={`/routines/${r.id}`}
@@ -179,7 +187,10 @@ function CompletedRow({ r }: { r: RoutineListItem }) {
             : null}
         </div>
       </div>
-      <form action={reactivateRoutineAction}>
+      <div className="shrink-0 hidden sm:block">
+        <RoutineHeatmap cells={grid} size="sm" ariaLabel={`${r.name} recent 28 days`} />
+      </div>
+      <form action={reactivateRoutineAction} className="shrink-0">
         <input type="hidden" name="id" value={r.id} />
         <button
           type="submit"
