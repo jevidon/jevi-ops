@@ -43,7 +43,9 @@ function readFormFields(formData: FormData) {
 
 function toApiPayload(parsed: z.infer<typeof TaskFormSchema>) {
   const remindParsed = parsed.remind_minutes ? parseInt(parsed.remind_minutes, 10) : NaN;
-  const reminder_offsets = Number.isFinite(remindParsed) && remindParsed > 0
+  // 0 = "at due time" — keep it; only an empty form value (NaN here)
+  // means "no reminder". The cron filters out negatives separately.
+  const reminder_offsets = Number.isFinite(remindParsed) && remindParsed >= 0
     ? [remindParsed]
     : [];
   // Only forward known patterns to the DB; everything else (including

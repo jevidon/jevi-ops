@@ -71,7 +71,10 @@ export async function runReminders(sb: SupabaseClient): Promise<ReminderRunResul
 
   for (const t of tasks) {
     if (!t.due_date || !t.due_time) continue;
-    const offsets = (t.reminder_offsets ?? []).filter((n) => Number.isFinite(n) && n > 0);
+    // Accept 0 (== "at due time") as a valid offset alongside positive
+    // values. Negative offsets would mean "after due" — that's overdue
+    // territory, handled by the separate overdue cron, so reject those.
+    const offsets = (t.reminder_offsets ?? []).filter((n) => Number.isFinite(n) && n >= 0);
     if (offsets.length === 0) continue;
 
     const dueMoment = composeDueMoment(t.due_date, t.due_time);
@@ -89,7 +92,12 @@ export async function runReminders(sb: SupabaseClient): Promise<ReminderRunResul
       if (now.getTime() > dueMoment.getTime() + 5 * 60_000) continue; // due > 5 min ago — skip stale
 
       const result = await sendPushover({
-        title: `Task in ${humanOffset(offset)} · ${t.title}`,
+        // "Task in 0 min" reads badly — for offset=0 the title says
+        // "due now" instead. Above-zero offsets keep the lead-time
+        // framing ("Task in 15 min").
+        title: offset === 0
+          ? `Due now · ${t.title}`
+          : `Task in ${humanOffset(offset)} · ${t.title}`,
         message: composeMessage(t, offset, dueMoment),
         url: `${env.WEB_APP_URL.replace(/\/$/, '')}/tasks/${t.id}`,
         url_title: 'Open task',
@@ -165,10 +173,12 @@ function composeMessage(t: DueTask, offset: number, dueMoment: Date): string {
   });
   const bits = [`Due ${due}`];
   if (t.project?.name) bits.push(t.project.name);
-  return `${bits.join(' · ')}\n${humanOffset(offset)} reminder`;
+  const trailer = offset === 0 ? 'At due time' : `${humanOffset(offset)} reminder`;
+  return `${bits.join(' · ')}\n${trailer}`;
 }
 
 function humanOffset(min: number): string {
+  if (min === 0) return 'now';
   if (min < 60) return `${min} min`;
   if (min === 60) return '1 hour';
   if (min % 60 === 0) return `${min / 60} hours`;

@@ -141,6 +141,7 @@ export function TaskForm({
             className="w-full bg-transparent border border-line focus:border-ink-2 focus:outline-none p-2 font-sans text-[14px] text-ink"
           >
             <option value="">No reminder</option>
+            <option value="0">At due time</option>
             <option value="5">5 minutes before</option>
             <option value="15">15 minutes before</option>
             <option value="30">30 minutes before</option>
