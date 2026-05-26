@@ -127,6 +127,7 @@ export const routineRoutes: FastifyPluginAsync = async (app) => {
     };
     if (parsed.data.time_of_day) insert.time_of_day = parsed.data.time_of_day;
     if (parsed.data.specific_time !== undefined) insert.specific_time = parsed.data.specific_time;
+    if (parsed.data.goal_days !== undefined) insert.goal_days = parsed.data.goal_days;
     // Defensive: reminders only make sense with a specific_time. If the
     // caller asked for reminders without a time, silently disable rather
     // than rejecting — the form should enforce it but a stale client
@@ -226,7 +227,35 @@ export const routineRoutes: FastifyPluginAsync = async (app) => {
           .select('*')
           .single();
         if (error) throw app.httpErrors.internalServerError(error.message);
-        return reply.code(201).send(data);
+
+        // If this routine has a goal AND isn't already archived AND
+        // the current streak just hit/crossed the goal, auto-archive it.
+        // The client gets `archived: true` in the response so it can show
+        // a celebratory state.
+        let archived = false;
+        const { data: r } = await req.supabase!
+          .from('routines')
+          .select('goal_days, archived_at')
+          .eq('id', req.params.id)
+          .maybeSingle();
+        if (r?.goal_days && !r.archived_at) {
+          const { data: completions } = await req.supabase!
+            .from('routine_completions')
+            .select('completed_date')
+            .eq('routine_id', req.params.id)
+            .order('completed_date', { ascending: false })
+            .limit(r.goal_days + 30);
+          const dates = (completions ?? []).map((c) => c.completed_date);
+          const stats = computeRoutineStats(dates, todayIso());
+          if (stats.current_streak >= r.goal_days) {
+            const { error: archiveErr } = await req.supabase!
+              .from('routines')
+              .update({ active: false, archived_at: new Date().toISOString() })
+              .eq('id', req.params.id);
+            if (!archiveErr) archived = true;
+          }
+        }
+        return reply.code(201).send({ ...data, archived });
       } else {
         const { error } = await req.supabase!
           .from('routine_completions')

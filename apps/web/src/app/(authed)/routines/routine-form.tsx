@@ -20,6 +20,7 @@ export interface RoutineFormInitial {
   time_of_day: TimeOfDayBucket;
   specific_time: string;       // HH:MM or '' (form input value)
   reminder_enabled: boolean;
+  goal_days: number | null;    // null = ongoing
 }
 
 const BUCKET_OPTIONS: Array<{ value: TimeOfDayBucket; label: string }> = [
@@ -27,6 +28,19 @@ const BUCKET_OPTIONS: Array<{ value: TimeOfDayBucket; label: string }> = [
   { value: 'afternoon', label: 'Afternoon' },
   { value: 'evening', label: 'Evening' },
   { value: 'anytime', label: 'Anytime' },
+];
+
+// Preset goal lengths plus an empty option for ongoing. A custom number
+// can be typed into the "Other" input below the select; the form picks
+// whichever is set.
+const GOAL_PRESETS: Array<{ value: string; label: string }> = [
+  { value: '', label: 'Ongoing (no end)' },
+  { value: '21', label: '21 days' },
+  { value: '30', label: '30 days' },
+  { value: '60', label: '60 days' },
+  { value: '90', label: '90 days' },
+  { value: '100', label: '100 days' },
+  { value: '365', label: '365 days' },
 ];
 
 export function RoutineForm({ initial }: { initial: RoutineFormInitial }) {
@@ -42,6 +56,17 @@ export function RoutineForm({ initial }: { initial: RoutineFormInitial }) {
   // values; this is just for the disabled-state UX.
   const [specificTime, setSpecificTime] = useState(initial.specific_time);
   const hasTime = Boolean(specificTime.trim());
+
+  // Goal: native select for the common presets, plus a "custom days"
+  // input for anything not in the dropdown. The hidden goal_days field
+  // takes precedence — the form picks whichever has a value, custom > preset.
+  const initialGoal = initial.goal_days != null ? String(initial.goal_days) : '';
+  const initialPreset = GOAL_PRESETS.some((p) => p.value === initialGoal) ? initialGoal : '';
+  const initialCustom = initialGoal && initialPreset === '' ? initialGoal : '';
+  const [presetGoal, setPresetGoal] = useState(initialPreset);
+  const [customGoal, setCustomGoal] = useState(initialCustom);
+  // What the form actually submits: custom takes priority if set.
+  const effectiveGoal = customGoal.trim() || presetGoal;
 
   return (
     <>
@@ -125,6 +150,47 @@ export function RoutineForm({ initial }: { initial: RoutineFormInitial }) {
             </span>
           </span>
         </label>
+
+        {/* Streak goal. Ongoing = no end (keep going forever). A number
+            = auto-archive once you hit that consecutive-day streak. The
+            actual submitted value lives in the hidden field below so a
+            custom day count overrides the preset cleanly. */}
+        <div className="flex flex-col gap-2">
+          <span className="eyebrow">Streak goal</span>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-start">
+            <select
+              value={presetGoal}
+              onChange={(e) => {
+                setPresetGoal(e.target.value);
+                if (e.target.value) setCustomGoal('');
+              }}
+              className="bg-transparent border border-line focus:border-accent focus:outline-none p-2 font-sans text-[14px] text-ink"
+            >
+              {GOAL_PRESETS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+            <input
+              type="number"
+              min="1"
+              step="1"
+              inputMode="numeric"
+              value={customGoal}
+              onChange={(e) => {
+                setCustomGoal(e.target.value);
+                if (e.target.value) setPresetGoal('');
+              }}
+              placeholder="Custom (days)"
+              className="bg-transparent border border-line focus:border-accent focus:outline-none p-2 font-sans text-[14px] text-ink"
+            />
+          </div>
+          <span className="font-mono text-[10px] uppercase tracking-wider text-ink-3">
+            {effectiveGoal
+              ? `Auto-archive when streak hits ${effectiveGoal} day${effectiveGoal === '1' ? '' : 's'}.`
+              : 'No goal — keeps running indefinitely.'}
+          </span>
+          <input type="hidden" name="goal_days" value={effectiveGoal} />
+        </div>
 
         <div className="flex items-center gap-3 pt-2">
           <button

@@ -4,6 +4,12 @@ export const ProjectStatusSchema = z.enum(['active', 'paused', 'done', 'archived
 export const ProjectTypeSchema = z.enum(['client', 'internal', 'content']);
 export const EngagementTypeSchema = z.enum(['project', 'retainer']);
 export type EngagementType = z.infer<typeof EngagementTypeSchema>;
+// kind: 'project' (finite, has an outcome) vs 'area' (ongoing context like
+// Home, Garage, Health). Orthogonal to engagement_type — a 'project' kind
+// can still be a retainer, and areas are always 'project' engagement_type
+// since they have no client.
+export const ProjectKindSchema = z.enum(['project', 'area']);
+export type ProjectKind = z.infer<typeof ProjectKindSchema>;
 
 // Curated palette. Picked to read well on the warm linen background
 // (#F6F2EA). Keep this list short — paradox of choice — and stable so
@@ -35,6 +41,7 @@ export const ProjectSchema = z.object({
   target_date: z.string().date().nullable().optional(),
   color: HexColorSchema.nullable().optional(),
   engagement_type: EngagementTypeSchema.default('project'),
+  kind: ProjectKindSchema.default('project'),
   completed_at: z.string().datetime({ offset: true }).nullable().optional(),
   created_at: z.string().datetime({ offset: true }),
   updated_at: z.string().datetime({ offset: true }),
@@ -55,6 +62,7 @@ export const CreateProjectSchema = z.object({
   target_date: z.string().date().nullable().optional(),
   color: HexColorSchema.nullable().optional(),
   engagement_type: EngagementTypeSchema.optional(),
+  kind: ProjectKindSchema.optional(),
 });
 
 export const UpdateProjectSchema = CreateProjectSchema.partial().extend({

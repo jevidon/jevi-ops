@@ -9,9 +9,10 @@ import { ProjectForm } from '../project-form';
 export default async function NewProjectPage({
   searchParams,
 }: {
-  searchParams: Promise<{ domain_id?: string }>;
+  searchParams: Promise<{ domain_id?: string; kind?: string }>;
 }) {
-  const { domain_id: preDomainId } = await searchParams;
+  const { domain_id: preDomainId, kind: preKind } = await searchParams;
+  const initialKind = preKind === 'area' ? 'area' : 'project';
 
   let domains: { id: string; name: string }[] = [];
   try {
@@ -29,7 +30,11 @@ export default async function NewProjectPage({
         </Link>
       </div>
 
-      <ScreenHeader eyebrow="Capture" title="New project" meta="Initiative within a domain" />
+      <ScreenHeader
+        eyebrow="Capture"
+        title={initialKind === 'area' ? 'New area' : 'New project'}
+        meta={initialKind === 'area' ? 'Ongoing context for tasks' : 'Initiative within a domain'}
+      />
       <div className="hairline mb-6" />
 
       <div className="px-5 lg:px-0 max-w-2xl">
@@ -42,6 +47,7 @@ export default async function NewProjectPage({
             type: '',
             status: 'active',
             engagement_type: 'project',
+            kind: initialKind,
             quoted_hours: '',
             start_date: '',
             target_date: '',

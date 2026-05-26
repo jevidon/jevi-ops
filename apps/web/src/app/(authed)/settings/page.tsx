@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { googleApi, ApiError, type GoogleStatus } from '@/lib/api';
 import { SettingsSection } from './settings-section';
@@ -49,6 +50,21 @@ export default async function SettingsPage({
           {banner.text}
         </div>
       )}
+
+      <SettingsSection title="Integration status">
+        <p className="font-sans text-[13px] text-ink-2 leading-relaxed">
+          Live inventory of which env-var-backed services are configured.
+          No secret values shown — just &ldquo;configured / partial / missing&rdquo;
+          per integration with helpful detail. Use it after deploys or env
+          var rotations to verify everything is wired correctly.
+        </p>
+        <Link
+          href="/settings/integrations"
+          className="self-start mt-3 inline-block px-3 py-1.5 border border-line text-ink-2 hover:border-ink-2 hover:text-ink font-mono text-[10px] uppercase tracking-wider transition-colors"
+        >
+          Open integrations status →
+        </Link>
+      </SettingsSection>
 
       <SettingsSection title="Google Calendar">
         {statusError ? (

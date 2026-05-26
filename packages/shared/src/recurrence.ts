@@ -11,6 +11,7 @@ export const RECURRENCE_PATTERNS = [
   'weekly',
   'biweekly',
   'monthly',
+  'semiannually',
   'yearly',
 ] as const;
 export type RecurrencePattern = (typeof RECURRENCE_PATTERNS)[number];
@@ -21,6 +22,7 @@ export const RECURRENCE_LABELS: Record<RecurrencePattern, string> = {
   weekly: 'Weekly',
   biweekly: 'Every 2 weeks',
   monthly: 'Monthly',
+  semiannually: 'Every 6 months',
   yearly: 'Yearly',
 };
 
@@ -107,6 +109,8 @@ export function nextDueDate(params: {
         return addDays(from, 14);
       case 'monthly':
         return addMonthsClamped(from, 1);
+      case 'semiannually':
+        return addMonthsClamped(from, 6);
       case 'yearly':
         return addMonthsClamped(from, 12);
     }
@@ -171,6 +175,10 @@ export function periodStart(
     }
     case 'monthly':
       return Date.UTC(y, m, 1);
+    case 'semiannually':
+      // Calendar half-year anchor: Jan 1 if we're in H1, Jul 1 if H2.
+      // Keeps "done this half" feeling stable until the half flips.
+      return Date.UTC(y, m < 6 ? 0 : 6, 1);
     case 'yearly':
       return Date.UTC(y, 0, 1);
   }

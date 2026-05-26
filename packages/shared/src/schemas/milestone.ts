@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { RECURRENCE_PATTERNS } from '../recurrence.js';
 
 // Milestones — coarse, weighted, ordered checklist items inside a project.
 // They drive the project's "% complete" rollup on /projects and the
@@ -43,9 +44,9 @@ export const UpdateMilestoneSchema = z.object({
 // Same patterns as recurring tasks. When set, "currently done" is
 // derived from done_at + the period start — the UI shows the item as
 // unchecked once the period rolls over without any cron involvement.
-const ProjectChecklistRecurrenceSchema = z.enum([
-  'daily', 'weekdays', 'weekly', 'biweekly', 'monthly', 'yearly',
-]);
+// Sourced from RECURRENCE_PATTERNS so the schema stays in sync as we
+// add new options (e.g. semiannually).
+const ProjectChecklistRecurrenceSchema = z.enum(RECURRENCE_PATTERNS);
 
 export const ProjectChecklistItemSchema = z.object({
   id: z.string().uuid(),

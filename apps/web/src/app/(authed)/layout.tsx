@@ -1,6 +1,7 @@
 import { BottomTabBar } from '@/components/BottomTabBar';
 import { DesktopRail } from '@/components/DesktopRail';
 import { MicFAB } from '@/components/MicFAB';
+import { TextCaptureFAB } from '@/components/TextCaptureFAB';
 import { SearchHotkey } from '@/components/SearchHotkey';
 import { TextCapturePalette } from '@/components/TextCapturePalette';
 import { requireUser } from '@/lib/auth';
@@ -43,6 +44,7 @@ export default async function AuthedLayout({ children }: { children: React.React
           {children}
         </main>
         <MicFAB />
+        <TextCaptureFAB />
         <BottomTabBar />
         <SearchHotkey />
         <TextCapturePalette />

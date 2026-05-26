@@ -65,7 +65,8 @@ export default async function ProjectDetailPage({
   }
 
   const { project, milestones, tasks, activity, checklist } = detail;
-  const isRetainer = project.engagement_type === 'retainer';
+  const isArea = project.kind === 'area';
+  const isRetainer = !isArea && project.engagement_type === 'retainer';
   const openTasks = tasks.filter((t) => t.status === 'open');
   const doneTasks = tasks
     .filter((t) => t.status === 'done')
@@ -77,7 +78,7 @@ export default async function ProjectDetailPage({
   const hoursThisMonth = Number(detail.hours_this_month ?? 0);
   const hoursLastMonth = Number(detail.hours_last_month ?? 0);
   const meta = [
-    isRetainer ? 'Retainer' : null,
+    isArea ? 'Area' : isRetainer ? 'Retainer' : null,
     project.domain?.name,
     project.status !== 'active' ? STATUS_LABELS[project.status] : null,
   ]
@@ -93,7 +94,7 @@ export default async function ProjectDetailPage({
       </div>
 
       <ScreenHeader
-        eyebrow={meta || 'Project'}
+        eyebrow={meta || (isArea ? 'Area' : 'Project')}
         title={
           project.color
             ? (
@@ -161,8 +162,9 @@ export default async function ProjectDetailPage({
         </Section>
       )}
 
-      {/* Milestones — hidden for retainers (no defined finish line). */}
-      {!isRetainer && (
+      {/* Milestones — hidden for retainers (no defined finish line) and
+          for areas (areas don't complete, they hold tasks indefinitely). */}
+      {!isRetainer && !isArea && (
         <MilestonesSection projectId={project.id} milestones={milestones} />
       )}
 
@@ -243,7 +245,7 @@ export default async function ProjectDetailPage({
       <section className="px-5 lg:px-0 mt-12 max-w-2xl">
         <details className="border border-line">
           <summary className="cursor-pointer px-3 py-2 font-mono text-[10px] uppercase tracking-wider text-ink-3 hover:text-ink-2 transition-colors list-none">
-            Edit project ▾
+            Edit {isArea ? 'area' : 'project'} ▾
           </summary>
           <div className="px-4 pb-4 pt-3 border-t border-line">
             <ProjectForm
@@ -256,6 +258,7 @@ export default async function ProjectDetailPage({
                 type: (project.type as '' | 'client' | 'internal' | 'content') ?? '',
                 status: project.status as 'active' | 'paused' | 'done' | 'archived',
                 engagement_type: project.engagement_type ?? 'project',
+                kind: project.kind ?? 'project',
                 quoted_hours: project.quoted_hours != null ? String(project.quoted_hours) : '',
                 start_date: project.start_date ?? '',
                 target_date: project.target_date ?? '',

@@ -20,6 +20,7 @@ export default function NewRoutinePage() {
             time_of_day: 'anytime',
             specific_time: '',
             reminder_enabled: false,
+            goal_days: null,
           }}
         />
       </div>

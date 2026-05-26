@@ -62,7 +62,11 @@ async function ruleNoActivityDays(
     .from('projects')
     .select('id, name')
     .eq('domain_id', domain.id)
-    .eq('status', 'active');
+    .eq('status', 'active')
+    // Areas are ongoing contexts (Home, Garage, Health) — they don't
+    // "stall" by going quiet. Exclude so the Today "Slipping" panel
+    // doesn't fill with false positives.
+    .neq('kind', 'area');
   if (!projects || projects.length === 0) return [];
 
   const out: ObservationCandidate[] = [];

@@ -1,9 +1,43 @@
 'use client';
 
 import { useRef, useState, useTransition } from 'react';
+import imageCompression from 'browser-image-compression';
 import type { Attachment } from '@/lib/api';
 import { uploadImageAction } from '@/lib/upload-actions';
 import { AttachmentGrid } from './AttachmentGrid';
+
+// Target file size for compressed uploads. Modern phones + cameras
+// produce 8-20MB photos that take forever to upload on cellular and
+// are wildly oversized for a dashboard view. Compressing client-side
+// to ~5MB keeps quality essentially indistinguishable while making
+// uploads quick and storage cheap.
+const COMPRESSION_TARGET_MB = 5;
+// Cap the longest edge at 2560px — retina-friendly (covers 2x for
+// 1280-wide grids) and well within any practical display size.
+// Anything larger is just pixels nobody will see at the cost of bytes.
+const COMPRESSION_MAX_DIMENSION = 2560;
+
+// Compress a single file to fit under COMPRESSION_TARGET_MB while
+// preserving EXIF (so server-side GPS extraction + reverse geocoding
+// keeps working). Skips files already under the target and animated
+// GIFs (which the library would flatten to a still frame).
+async function maybeCompress(file: File): Promise<File> {
+  if (file.size <= COMPRESSION_TARGET_MB * 1024 * 1024) return file;
+  if (file.type === 'image/gif') return file;
+  try {
+    return await imageCompression(file, {
+      maxSizeMB: COMPRESSION_TARGET_MB,
+      maxWidthOrHeight: COMPRESSION_MAX_DIMENSION,
+      useWebWorker: true,
+      preserveExif: true,
+    });
+  } catch {
+    // Compression failed (corrupt file, unsupported codec) — fall back
+    // to the original. If it's still >25MB the server limit will catch
+    // it; if it's under, it uploads as-is.
+    return file;
+  }
+}
 
 // Eager upload, deferred attach.
 //
@@ -44,9 +78,10 @@ export function ImageUploader({
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
-  // Pre-flight: catch oversized files client-side before they hit the
-  // server action's body-size limit. Matches the 25MB cap configured
-  // in next.config.mjs + the API's multipart limit.
+  // Pre-flight: catch oversized files client-side. With compression we
+  // could relax this, but ~50MB raw images consume noticeable memory
+  // during the compression step on weaker phones — keeping the 25MB
+  // cap so we don't OOM in a web worker.
   const MAX_FILE_BYTES = 25 * 1024 * 1024;
 
   function handleFiles(files: FileList | null) {
@@ -59,16 +94,19 @@ export function ImageUploader({
       if (inputRef.current) inputRef.current.value = '';
       return;
     }
-    // Kick off all uploads in parallel; report the first error if any
-    // fail but commit whatever succeeded.
+    // Kick off all compress+upload pipelines in parallel; report the
+    // first error if any fail but commit whatever succeeded.
     // Capture the title hint NOW so every parallel upload uses the same
     // value (reading per-file would race against further keystrokes).
     const hint = (titleHint?.() ?? '').trim();
     startTransition(async () => {
       const results = await Promise.all(
         Array.from(files).map(async (file) => {
+          // Compress to ~5MB (preserving EXIF for GPS) before upload.
+          // Skipped automatically for files already under target.
+          const compressed = await maybeCompress(file);
           const fd = new FormData();
-          fd.append('file', file, file.name);
+          fd.append('file', compressed, compressed.name);
           // Carry the prefix as a form field so the server action can
           // be a single-arg `(FormData) => ...` — avoids brittle
           // multi-arg server-action encoding edge cases.
@@ -108,7 +146,7 @@ export function ImageUploader({
           disabled={pending}
           className="px-3 py-1.5 border border-line text-ink-2 hover:border-ink-2 hover:text-ink font-mono text-[10px] uppercase tracking-wider transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         >
-          {pending ? 'Uploading…' : `+ ${label}`}
+          {pending ? 'Processing…' : `+ ${label}`}
         </button>
         <input
           ref={inputRef}

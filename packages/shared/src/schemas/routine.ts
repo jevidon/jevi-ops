@@ -35,6 +35,12 @@ export const RoutineSchema = z.object({
   specific_time: z.string().nullable().optional(),
   reminder_enabled: z.boolean().default(false),
   last_reminder_sent_date: z.string().date().nullable().optional(),
+  // Optional streak goal. null/undefined → ongoing routine; positive int →
+  // auto-archive when current_streak >= goal_days.
+  goal_days: z.number().int().positive().nullable().optional(),
+  // Set when the routine completes its goal OR the user archives it
+  // manually. null → still active (or paused via active=false).
+  archived_at: z.string().datetime({ offset: true }).nullable().optional(),
   created_at: z.string().datetime({ offset: true }),
   updated_at: z.string().datetime({ offset: true }),
 });
@@ -46,6 +52,7 @@ export const CreateRoutineSchema = z.object({
   time_of_day: TimeOfDayBucketSchema.optional(),
   specific_time: timeOfDayString.nullable().optional(),
   reminder_enabled: z.boolean().optional(),
+  goal_days: z.number().int().positive().nullable().optional(),
 });
 
 export const UpdateRoutineSchema = z.object({
@@ -56,6 +63,10 @@ export const UpdateRoutineSchema = z.object({
   time_of_day: TimeOfDayBucketSchema.optional(),
   specific_time: timeOfDayString.nullable().optional(),
   reminder_enabled: z.boolean().optional(),
+  goal_days: z.number().int().positive().nullable().optional(),
+  // Allow the server to set/clear archived_at directly so a manual
+  // archive/unarchive action goes through the same PATCH endpoint.
+  archived_at: z.string().datetime({ offset: true }).nullable().optional(),
 });
 
 export const RoutineCompletionSchema = z.object({

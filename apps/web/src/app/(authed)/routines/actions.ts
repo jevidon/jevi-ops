@@ -12,6 +12,7 @@ function readScheduleFields(formData: FormData): {
   time_of_day: TimeOfDayBucket;
   specific_time: string | null;
   reminder_enabled: boolean;
+  goal_days: number | null;
 } {
   const rawBucket = String(formData.get('time_of_day') ?? '').trim();
   const time_of_day = (VALID_BUCKETS as readonly string[]).includes(rawBucket)
@@ -21,7 +22,11 @@ function readScheduleFields(formData: FormData): {
   const specific_time = rawTime || null;
   // HTML checkboxes send "on" when checked, nothing when unchecked.
   const reminder_enabled = formData.get('reminder_enabled') === 'on';
-  return { time_of_day, specific_time, reminder_enabled };
+  // Goal: blank → null (ongoing). Positive int → that's the target.
+  const rawGoal = String(formData.get('goal_days') ?? '').trim();
+  const goalNum = rawGoal ? Number(rawGoal) : NaN;
+  const goal_days = Number.isFinite(goalNum) && goalNum > 0 ? Math.floor(goalNum) : null;
+  return { time_of_day, specific_time, reminder_enabled, goal_days };
 }
 
 export type SaveResult = { ok: true } | { ok: false; error: string };
@@ -107,7 +112,13 @@ export async function archiveRoutineAction(formData: FormData): Promise<void> {
   const id = String(formData.get('id') ?? '');
   if (!id) return;
   try {
-    await routinesApi.update(id, { active: false });
+    // Set archived_at alongside active=false so the "Completed" section
+    // can sort by archive date. Manual archives go through the same path
+    // as goal-completion archives.
+    await routinesApi.update(id, {
+      active: false,
+      archived_at: new Date().toISOString(),
+    });
   } catch {
     /* best-effort */
   }
@@ -118,7 +129,10 @@ export async function reactivateRoutineAction(formData: FormData): Promise<void>
   const id = String(formData.get('id') ?? '');
   if (!id) return;
   try {
-    await routinesApi.update(id, { active: true });
+    // Reactivating clears archived_at — the routine is "live" again,
+    // not "completed previously." If you want to keep historical
+    // archive timestamps, that's a different feature.
+    await routinesApi.update(id, { active: true, archived_at: null });
   } catch {
     /* best-effort */
   }

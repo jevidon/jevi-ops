@@ -9,6 +9,7 @@ export type SaveResult = { ok: true } | { ok: false; error: string };
 const VALID_TYPES = ['client', 'internal', 'content'] as const;
 const VALID_STATUSES = ['active', 'paused', 'done', 'archived'] as const;
 const VALID_ENGAGEMENTS = ['project', 'retainer'] as const;
+const VALID_KINDS = ['project', 'area'] as const;
 
 function readFields(formData: FormData): {
   name: string;
@@ -17,6 +18,7 @@ function readFields(formData: FormData): {
   type: 'client' | 'internal' | 'content' | null;
   status: 'active' | 'paused' | 'done' | 'archived' | null;
   engagement_type: 'project' | 'retainer';
+  kind: 'project' | 'area';
   quoted_hours: number | null;
   start_date: string | null;
   target_date: string | null;
@@ -37,6 +39,10 @@ function readFields(formData: FormData): {
   const engagement_type = (VALID_ENGAGEMENTS as readonly string[]).includes(rawEngagement)
     ? (rawEngagement as 'project' | 'retainer')
     : 'project';
+  const rawKind = String(formData.get('kind') ?? '').trim();
+  const kind = (VALID_KINDS as readonly string[]).includes(rawKind)
+    ? (rawKind as 'project' | 'area')
+    : 'project';
   const quotedRaw = String(formData.get('quoted_hours') ?? '').trim();
   const quoted_hours = quotedRaw && !Number.isNaN(parseFloat(quotedRaw))
     ? parseFloat(quotedRaw)
@@ -45,7 +51,7 @@ function readFields(formData: FormData): {
   const target_date = String(formData.get('target_date') ?? '').trim() || null;
   const color = String(formData.get('color') ?? '').trim() || null;
 
-  return { name, description, domain_id, type, status, engagement_type, quoted_hours, start_date, target_date, color };
+  return { name, description, domain_id, type, status, engagement_type, kind, quoted_hours, start_date, target_date, color };
 }
 
 export async function createProjectAction(
@@ -55,15 +61,22 @@ export async function createProjectAction(
   const fields = readFields(formData);
   if (!fields.name) return { ok: false, error: 'Name is required.' };
   // Status only applies on update; create defaults to 'active' via DB.
+  const isArea = fields.kind === 'area';
   const payload: ProjectCreate = {
     name: fields.name,
     description: fields.description,
     domain_id: fields.domain_id,
     type: fields.type,
-    engagement_type: fields.engagement_type,
-    quoted_hours: fields.quoted_hours,
-    start_date: fields.start_date,
-    target_date: fields.target_date,
+    // Areas don't have a billing model — force engagement_type to
+    // 'project' (the column default) regardless of any stale value
+    // that might be in the form.
+    engagement_type: isArea ? 'project' : fields.engagement_type,
+    kind: fields.kind,
+    // Project-only fields collapse to null for areas so we don't
+    // store stale dates/quotes that the UI won't render anyway.
+    quoted_hours: isArea ? null : fields.quoted_hours,
+    start_date: isArea ? null : fields.start_date,
+    target_date: isArea ? null : fields.target_date,
     color: fields.color,
   };
   let created;
@@ -92,15 +105,17 @@ export async function updateProjectAction(
   if (!id) return { ok: false, error: 'Missing id.' };
   const fields = readFields(formData);
   if (!fields.name) return { ok: false, error: 'Name is required.' };
+  const isArea = fields.kind === 'area';
   const payload: ProjectUpdate = {
     name: fields.name,
     description: fields.description,
     domain_id: fields.domain_id,
     type: fields.type,
-    engagement_type: fields.engagement_type,
-    quoted_hours: fields.quoted_hours,
-    start_date: fields.start_date,
-    target_date: fields.target_date,
+    engagement_type: isArea ? 'project' : fields.engagement_type,
+    kind: fields.kind,
+    quoted_hours: isArea ? null : fields.quoted_hours,
+    start_date: isArea ? null : fields.start_date,
+    target_date: isArea ? null : fields.target_date,
     color: fields.color,
   };
   if (fields.status) payload.status = fields.status;

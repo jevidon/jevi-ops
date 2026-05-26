@@ -32,6 +32,7 @@ const RECURRENCE_OPTIONS: Array<{ value: '' | RecurrencePattern; label: string }
   { value: 'weekly', label: 'Weekly' },
   { value: 'biweekly', label: 'Every 2 weeks' },
   { value: 'monthly', label: 'Monthly' },
+  { value: 'semiannually', label: 'Every 6 months' },
   { value: 'yearly', label: 'Yearly' },
 ];
 

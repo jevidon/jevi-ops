@@ -160,6 +160,7 @@ export function TaskForm({
             <option value="weekly">Weekly</option>
             <option value="biweekly">Every 2 weeks</option>
             <option value="monthly">Monthly</option>
+            <option value="semiannually">Every 6 months</option>
             <option value="yearly">Yearly</option>
           </select>
         </Field>

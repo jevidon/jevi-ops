@@ -60,7 +60,7 @@ export const api = {
 export { ApiError };
 
 // Typed helpers — one per known route. Add as new routes ship.
-import type { Task, Project, Domain } from '@jerad-ops/shared';
+import type { Task, Project, Domain, RecurrencePattern } from '@jerad-ops/shared';
 
 // Project list/detail include relations the bare Project type doesn't.
 export interface Milestone {
@@ -100,7 +100,7 @@ export interface ProjectChecklistItem {
   title: string;
   done: boolean;
   done_at: string | null;
-  recurrence_rule: 'daily' | 'weekdays' | 'weekly' | 'biweekly' | 'monthly' | 'yearly' | null;
+  recurrence_rule: RecurrencePattern | null;
   created_at: string;
   updated_at: string;
 }
@@ -133,6 +133,7 @@ export const tasksApi = {
 };
 
 export type EngagementType = 'project' | 'retainer';
+export type ProjectKind = 'project' | 'area';
 
 export interface ProjectCreate {
   name: string;
@@ -145,6 +146,7 @@ export interface ProjectCreate {
   target_date?: string | null;
   color?: string | null;
   engagement_type?: EngagementType;
+  kind?: ProjectKind;
 }
 
 export interface ProjectUpdate extends Partial<ProjectCreate> {
@@ -174,7 +176,7 @@ export const projectsApi = {
       body: {
         title: string;
         position?: number;
-        recurrence_rule?: 'daily' | 'weekdays' | 'weekly' | 'biweekly' | 'monthly' | 'yearly' | null;
+        recurrence_rule?: RecurrencePattern | null;
       },
     ) => api.post<ProjectChecklistItem>(`/api/projects/${projectId}/checklist`, body),
     update: (
@@ -184,7 +186,7 @@ export const projectsApi = {
         title?: string;
         done?: boolean;
         position?: number;
-        recurrence_rule?: 'daily' | 'weekdays' | 'weekly' | 'biweekly' | 'monthly' | 'yearly' | null;
+        recurrence_rule?: RecurrencePattern | null;
       },
     ) => api.patch<ProjectChecklistItem>(`/api/projects/${projectId}/checklist/${itemId}`, body),
     remove: (projectId: string, itemId: string) =>
@@ -615,6 +617,11 @@ export interface Routine {
   reminder_enabled: boolean;
   last_reminder_sent_date: string | null;
   last_missed_sent_date: string | null;
+  // Optional target streak in days. null = ongoing.
+  goal_days: number | null;
+  // When the routine was archived (manually or via goal completion).
+  // null = active or paused (see `active`).
+  archived_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -658,6 +665,7 @@ export const routinesApi = {
     time_of_day?: TimeOfDayBucket;
     specific_time?: string | null;
     reminder_enabled?: boolean;
+    goal_days?: number | null;
   }) => api.post<Routine>('/api/routines', body),
   update: (
     id: string,
@@ -669,6 +677,8 @@ export const routinesApi = {
       time_of_day: TimeOfDayBucket;
       specific_time: string | null;
       reminder_enabled: boolean;
+      goal_days: number | null;
+      archived_at: string | null;
     }>,
   ) => api.patch<Routine>(`/api/routines/${id}`, body),
   remove: (id: string) => api.delete(`/api/routines/${id}`),
@@ -917,4 +927,25 @@ export const notificationsApi = {
     api.patch<Notification>(`/api/notifications/${id}`, { status }),
   markAllRead: () =>
     api.post<{ marked_read: number }>('/api/notifications/mark-all-read'),
+};
+
+// ─── Settings / integrations status ──────────────────────────────────────
+
+export type IntegrationStatus = 'configured' | 'partial' | 'missing';
+export type IntegrationCategory =
+  | 'infrastructure' | 'ai' | 'integrations' | 'notifications';
+
+export interface IntegrationItem {
+  key: string;
+  label: string;
+  category: IntegrationCategory;
+  status: IntegrationStatus;
+  detail: string;
+  required: boolean;
+  purpose: string;
+}
+
+export const settingsApi = {
+  integrationsStatus: () =>
+    api.get<{ items: IntegrationItem[] }>('/api/settings/integrations-status'),
 };

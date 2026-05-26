@@ -144,6 +144,7 @@ export default async function RoutineDetailPage({
                   // Postgres may include seconds — strip them.
                   specific_time: routine.specific_time?.slice(0, 5) ?? '',
                   reminder_enabled: routine.reminder_enabled,
+                  goal_days: routine.goal_days,
                 }}
               />
             </div>

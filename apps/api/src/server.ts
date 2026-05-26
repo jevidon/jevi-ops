@@ -18,6 +18,7 @@ import { chatRoutes } from './routes/chat.js';
 import { notificationRoutes } from './routes/notifications.js';
 import { observationRoutes } from './routes/observations.js';
 import { cronRoutes } from './routes/cron.js';
+import { settingsRoutes } from './routes/settings.js';
 import { libraryRoutes } from './routes/library.js';
 import { contentRoutes } from './routes/content.js';
 import { searchRoutes } from './routes/search.js';
@@ -68,6 +69,7 @@ export async function buildServer() {
   await app.register(peopleRoutes);
   await app.register(routineRoutes);
   await app.register(uploadRoutes);
+  await app.register(settingsRoutes);
 
   app.get('/', async () => ({
     name: 'jerad-ops/api',

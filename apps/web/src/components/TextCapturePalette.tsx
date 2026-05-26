@@ -42,6 +42,17 @@ export function TextCapturePalette() {
     return () => window.removeEventListener('keydown', onKey);
   }, [open]);
 
+  // External components (e.g. the mobile text-capture FAB) dispatch
+  // `text-capture:open` to summon the palette. Keeps this component
+  // self-contained — no shared state needed.
+  useEffect(() => {
+    function onOpen() {
+      setOpen(true);
+    }
+    window.addEventListener('text-capture:open', onOpen);
+    return () => window.removeEventListener('text-capture:open', onOpen);
+  }, []);
+
   // Reset transient state whenever the palette is closed so reopening
   // gives a clean slate.
   useEffect(() => {
