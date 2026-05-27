@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 export const CaptureSourceSchema = z.enum([
-  'zapier', 'cowork', 'n8n', 'manual', 'webhook', 'smart_glasses', 'other',
+  'zapier', 'cowork', 'n8n', 'manual', 'webhook', 'smart_glasses', 'watch', 'other',
 ]);
 
 export const DisplayHintSchema = z.enum(['card', 'log', 'hidden']);
