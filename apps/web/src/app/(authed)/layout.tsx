@@ -2,6 +2,7 @@ import { BottomTabBar } from '@/components/BottomTabBar';
 import { DesktopRail } from '@/components/DesktopRail';
 import { MicFAB } from '@/components/MicFAB';
 import { TextCaptureFAB } from '@/components/TextCaptureFAB';
+import { NotificationBell } from '@/components/NotificationBell';
 import { SearchHotkey } from '@/components/SearchHotkey';
 import { TextCapturePalette } from '@/components/TextCapturePalette';
 import { TimezoneProvider } from '@/components/TimezoneProvider';
@@ -53,6 +54,7 @@ export default async function AuthedLayout({ children }: { children: React.React
           </main>
           <MicFAB />
           <TextCaptureFAB />
+          <NotificationBell unread={unreadNotifications} />
           <BottomTabBar />
           <SearchHotkey />
           <TextCapturePalette />
