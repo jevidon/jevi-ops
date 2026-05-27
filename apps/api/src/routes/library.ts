@@ -207,6 +207,10 @@ export const libraryRoutes: FastifyPluginAsync = async (app) => {
       .from('journal_entries')
       .select('*')
       .order('entry_date', { ascending: false })
+      // Secondary sort by created_at so multiple entries on the same
+      // day surface newest-first. Without this Postgres returns same-
+      // entry_date rows in insertion order — oldest at the top.
+      .order('created_at', { ascending: false })
       .limit(limit);
     if (error) throw app.httpErrors.internalServerError(error.message);
     return { entries: data ?? [] };
@@ -406,15 +410,25 @@ export const libraryRoutes: FastifyPluginAsync = async (app) => {
     for (const a of annotations.data ?? []) items.push({ kind: 'annotation', id: a.id, at: a.annotated_at, payload: a });
     // Journal entries: the user can backdate them, so the feed sorts
     // + displays by entry_date (the day the user attributes the entry
-    // to), not created_at (when the row was inserted). entry_date is a
-    // DATE column (YYYY-MM-DD); pin to noon UTC so it slots into the
-    // mixed timestamp/date sort correctly and Date parses it reliably.
-    for (const j of journal.data ?? []) items.push({
-      kind: 'journal',
-      id: j.id,
-      at: `${j.entry_date}T12:00:00Z`,
-      payload: j,
-    });
+    // to), not created_at (when the row was inserted).
+    //
+    // To preserve "newest first" WITHIN a given entry_date, we pin the
+    // entry to its created_at's time-of-day on the entry_date. So two
+    // journals both dated May 23 — one entered at 9am, one at 2pm —
+    // sort as May-23 14:00 above May-23 09:00 instead of collapsing
+    // to identical noon-UTC keys. Same-day notes/quotes mix in by
+    // their own timestamps too, which feels right.
+    for (const j of journal.data ?? []) {
+      const createdTime = j.created_at
+        ? new Date(j.created_at).toISOString().slice(11, 19)
+        : '12:00:00';
+      items.push({
+        kind: 'journal',
+        id: j.id,
+        at: `${j.entry_date}T${createdTime}Z`,
+        payload: j,
+      });
+    }
     items.sort((a, b) => b.at.localeCompare(a.at));
     return { items: items.slice(0, limit) };
   });
