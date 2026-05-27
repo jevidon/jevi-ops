@@ -64,7 +64,15 @@ export const ingestRoutes: FastifyPluginAsync = async (app) => {
 
     if (error) {
       req.log.error({ error }, 'ingest insert failed');
-      return reply.code(500).send({ error: 'insert_failed' });
+      // Surface the Postgres message in the response. Single-user app —
+      // no risk of cross-tenant info leakage — and it makes debugging
+      // schema/constraint mismatches from a watch shortcut much easier
+      // than spelunking through PM2 logs.
+      return reply.code(500).send({
+        error: 'insert_failed',
+        message: error.message,
+        code: error.code,
+      });
     }
 
     return reply.code(201).send(data);
