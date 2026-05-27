@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
-import { IngestRequestSchema, CaptureSourceSchema } from '@jerad-ops/shared/schemas';
+import { IngestRequestSchema, CaptureTranscriptSourceSchema } from '@jerad-ops/shared/schemas';
 import { env } from '../lib/env.js';
 import { supabaseAdmin, isSupabaseConfigured } from '../lib/supabase.js';
 import { parseTranscript } from '../lib/parser.js';
@@ -89,8 +89,10 @@ export const ingestRoutes: FastifyPluginAsync = async (app) => {
   // dictates text and posts the transcript.
   //
   // Body:
-  //   transcript: string  (required)
-  //   source?:    'watch' | 'webhook' | 'manual' | …  (defaults to 'watch')
+  //   transcript: string                  (required)
+  //   source?:    'voice' | 'text'        (defaults to 'voice' — the watch
+  //                                        user typically spoke it, even
+  //                                        though dictation hands us text)
   //
   // Returns the same response shape as /api/capture/voice:
   //   200 { status:'executed', actions: [...], transcript }
@@ -114,7 +116,7 @@ export const ingestRoutes: FastifyPluginAsync = async (app) => {
 
     const BodySchema = z.object({
       transcript: z.string().min(1),
-      source: CaptureSourceSchema.optional(),
+      source: CaptureTranscriptSourceSchema.optional(),
     });
     const parsed = BodySchema.safeParse(req.body);
     if (!parsed.success) {
@@ -124,7 +126,7 @@ export const ingestRoutes: FastifyPluginAsync = async (app) => {
       });
     }
     const transcript = parsed.data.transcript.trim();
-    const captureSource = parsed.data.source ?? 'watch';
+    const captureSource = parsed.data.source ?? 'voice';
 
     // Webhook context — no JWT user, so use the service-role client
     // throughout. The secret check above is the auth boundary.
