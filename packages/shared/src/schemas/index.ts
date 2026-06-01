@@ -11,3 +11,4 @@ export * from './content.js';
 export * from './captured.js';
 export * from './voice.js';
 export * from './app-settings.js';
+export * from './health.js';

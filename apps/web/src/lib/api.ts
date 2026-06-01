@@ -957,3 +957,221 @@ export const settingsApi = {
   updateApp: (body: { timezone?: string }) =>
     api.patch<AppSettings>('/api/settings/app', body),
 };
+
+// ─── Health (personal health record) ─────────────────────────────────────
+
+export type HealthMetricSource =
+  | 'manual' | 'garmin' | 'apple_health' | 'google_health' | 'whoop' | 'oura' | 'other';
+export type WorkoutSource =
+  | 'manual' | 'garmin' | 'apple_health' | 'google_health' | 'whoop' | 'strava' | 'other';
+export type VisitType =
+  | 'annual' | 'sick' | 'specialist' | 'follow_up' | 'lab' | 'imaging'
+  | 'urgent_care' | 'emergency' | 'telehealth' | 'other';
+export type MedicationKind = 'prescription' | 'supplement' | 'vitamin' | 'otc';
+export type LabResultFlag = 'low' | 'high' | 'critical_low' | 'critical_high' | 'abnormal';
+
+export interface HealthMetric {
+  id: string;
+  measured_at: string;
+  metric: string;
+  value: number | null;
+  value_secondary: number | null;
+  unit: string | null;
+  source: HealthMetricSource;
+  visit_id: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface HealthVisit {
+  id: string;
+  visit_date: string;
+  provider_name: string | null;
+  provider_specialty: string | null;
+  visit_type: VisitType | null;
+  reason: string | null;
+  assessment: string | null;
+  plan: string | null;
+  notes: string | null;
+  follow_up_date: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LabResult {
+  id: string;
+  panel_id: string;
+  analyte: string;
+  value: number | null;
+  value_text: string | null;
+  unit: string | null;
+  reference_range_low: number | null;
+  reference_range_high: number | null;
+  reference_text: string | null;
+  flag: LabResultFlag | null;
+  notes: string | null;
+  created_at: string;
+}
+
+export interface LabPanel {
+  id: string;
+  drawn_date: string;
+  panel_name: string;
+  ordering_provider: string | null;
+  lab_facility: string | null;
+  notes: string | null;
+  visit_id: string | null;
+  results?: LabResult[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WellbeingCheckIn {
+  id: string;
+  checked_in_at: string;
+  mood: number | null;
+  energy: number | null;
+  sleep_quality: number | null;
+  pain: number | null;
+  notes: string | null;
+  created_at: string;
+}
+
+export interface Medication {
+  id: string;
+  name: string;
+  kind: MedicationKind;
+  dosage: string | null;
+  frequency: string | null;
+  prescribing_provider: string | null;
+  reason: string | null;
+  start_date: string | null;
+  stop_date: string | null;
+  active: boolean;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface HistoryEntry {
+  name?: string;
+  procedure?: string;
+  allergen?: string;
+  vaccine?: string;
+  relation?: string;
+  condition?: string;
+  date?: string;
+  diagnosed_date?: string;
+  status?: string;
+  hospital?: string;
+  reaction?: string;
+  severity?: string;
+  notes?: string;
+}
+
+export interface HealthHistory {
+  narrative: string | null;
+  conditions: HistoryEntry[];
+  surgeries: HistoryEntry[];
+  allergies: HistoryEntry[];
+  immunizations: HistoryEntry[];
+  family_history: HistoryEntry[];
+  updated_at: string;
+}
+
+export interface HealthOverview {
+  latest_vitals: HealthMetric[];
+  recent_check_ins: WellbeingCheckIn[];
+  recent_labs: Array<Pick<LabPanel, 'id' | 'drawn_date' | 'panel_name'> & {
+    results: Array<Pick<LabResult, 'id' | 'analyte' | 'flag'>>;
+  }>;
+  upcoming_visits: Array<Pick<HealthVisit, 'id' | 'visit_date' | 'provider_name' | 'visit_type' | 'reason'>>;
+  active_medications: Medication[];
+}
+
+export const healthApi = {
+  overview: () => api.get<HealthOverview>('/api/health/overview'),
+
+  visits: {
+    list: () => api.get<{ visits: HealthVisit[] }>('/api/health/visits'),
+    get: (id: string) => api.get<{
+      visit: HealthVisit;
+      metrics: HealthMetric[];
+      panels: LabPanel[];
+      documents: unknown[];
+    }>(`/api/health/visits/${id}`),
+    create: (body: Partial<HealthVisit>) => api.post<HealthVisit>('/api/health/visits', body),
+    update: (id: string, body: Partial<HealthVisit>) =>
+      api.patch<HealthVisit>(`/api/health/visits/${id}`, body),
+    remove: (id: string) => api.delete(`/api/health/visits/${id}`),
+  },
+
+  metrics: {
+    list: (opts?: { metric?: string; source?: string; from?: string; to?: string; limit?: number }) => {
+      const qs = new URLSearchParams();
+      if (opts?.metric) qs.set('metric', opts.metric);
+      if (opts?.source) qs.set('source', opts.source);
+      if (opts?.from) qs.set('from', opts.from);
+      if (opts?.to) qs.set('to', opts.to);
+      if (opts?.limit) qs.set('limit', String(opts.limit));
+      const q = qs.toString();
+      return api.get<{ metrics: HealthMetric[] }>(`/api/health/metrics${q ? `?${q}` : ''}`);
+    },
+    create: (body: Partial<HealthMetric>) => api.post<HealthMetric>('/api/health/metrics', body),
+    update: (id: string, body: Partial<HealthMetric>) =>
+      api.patch<HealthMetric>(`/api/health/metrics/${id}`, body),
+    remove: (id: string) => api.delete(`/api/health/metrics/${id}`),
+  },
+
+  labs: {
+    listPanels: () => api.get<{ panels: LabPanel[] }>('/api/health/lab-panels'),
+    getPanel: (id: string) => api.get<LabPanel>(`/api/health/lab-panels/${id}`),
+    createPanel: (body: Partial<LabPanel> & { results?: Partial<LabResult>[] }) =>
+      api.post<LabPanel>('/api/health/lab-panels', body),
+    updatePanel: (id: string, body: Partial<LabPanel>) =>
+      api.patch<LabPanel>(`/api/health/lab-panels/${id}`, body),
+    removePanel: (id: string) => api.delete(`/api/health/lab-panels/${id}`),
+    addResult: (panelId: string, body: Partial<LabResult>) =>
+      api.post<LabResult>(`/api/health/lab-panels/${panelId}/results`, body),
+    removeResult: (id: string) => api.delete(`/api/health/lab-results/${id}`),
+    trend: (analyte: string) =>
+      api.get<{ analyte: string; results: unknown[] }>(
+        `/api/health/lab-trends?analyte=${encodeURIComponent(analyte)}`,
+      ),
+  },
+
+  checkIns: {
+    list: (opts?: { from?: string; to?: string; limit?: number }) => {
+      const qs = new URLSearchParams();
+      if (opts?.from) qs.set('from', opts.from);
+      if (opts?.to) qs.set('to', opts.to);
+      if (opts?.limit) qs.set('limit', String(opts.limit));
+      const q = qs.toString();
+      return api.get<{ check_ins: WellbeingCheckIn[] }>(`/api/health/check-ins${q ? `?${q}` : ''}`);
+    },
+    create: (body: Partial<WellbeingCheckIn>) =>
+      api.post<WellbeingCheckIn>('/api/health/check-ins', body),
+    remove: (id: string) => api.delete(`/api/health/check-ins/${id}`),
+  },
+
+  medications: {
+    list: (opts?: { active?: boolean; kind?: MedicationKind }) => {
+      const qs = new URLSearchParams();
+      if (opts?.active !== undefined) qs.set('active', String(opts.active));
+      if (opts?.kind) qs.set('kind', opts.kind);
+      const q = qs.toString();
+      return api.get<{ medications: Medication[] }>(`/api/health/medications${q ? `?${q}` : ''}`);
+    },
+    create: (body: Partial<Medication>) => api.post<Medication>('/api/health/medications', body),
+    update: (id: string, body: Partial<Medication>) =>
+      api.patch<Medication>(`/api/health/medications/${id}`, body),
+    remove: (id: string) => api.delete(`/api/health/medications/${id}`),
+  },
+
+  history: {
+    get: () => api.get<HealthHistory>('/api/health/history'),
+    update: (body: Partial<HealthHistory>) =>
+      api.patch<HealthHistory>('/api/health/history', body),
+  },
+};
