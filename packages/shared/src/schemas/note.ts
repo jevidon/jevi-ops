@@ -71,4 +71,6 @@ export const CreateNoteSchema = z.object({
   attachments: z.array(AttachmentSchema).optional(),
 });
 
-export const UpdateNoteSchema = CreateNoteSchema.partial();
+export const UpdateNoteSchema = CreateNoteSchema.partial().extend({
+  resurface_weight: z.number().min(0).optional(),
+});

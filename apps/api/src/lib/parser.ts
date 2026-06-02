@@ -91,6 +91,16 @@ Action types you may produce (use the exact "action" string for each):
   fact_type ∈ "anniversary" | "birthday" | "kid_name" | "shared" | "follow_up" | "other"
 - update_content_item: { action, item_match, status?, video_url?, outline_md? }
 - add_inventory_item: { action, category, brand?, model?, serial?, purchase_date?, purchase_price? }
+- set_resurface_weight: { action, target_kind, target_match, weight }
+  target_kind ∈ "quote" | "note" | "journal"
+  weight ∈ 0 (excluded) | 1 (normal) | 2 (boost 2×) | 5 (boost 5×)
+  Triggers: "boost", "surface more", "show me more often", "feature" → 2 (or 5 for "way more"/"top of mind")
+            "exclude", "hide", "stop showing", "don't surface" → 0
+            "reset", "back to normal", "default" → 1
+  Examples:
+  - "Boost the Cal Newport quote about focus" → {action:"set_resurface_weight", target_kind:"quote", target_match:"Cal Newport quote about focus", weight:2}
+  - "Stop surfacing that note about my failed experiment" → {..., target_kind:"note", target_match:"failed experiment", weight:0}
+  - "Feature yesterday's journal entry" → {..., target_kind:"journal", target_match:"yesterday's entry", weight:2}
 
 The *_match fields are short fuzzy phrases (e.g. "the Reviews plugin", "Randy", "Mere Christianity", \
 "that Cal Newport quote about focus"). The backend resolves them to IDs against the context below.

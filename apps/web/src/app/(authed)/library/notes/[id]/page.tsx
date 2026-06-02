@@ -4,6 +4,7 @@ import { ScreenHeader } from '@/components/ScreenHeader';
 import { libraryApi, ApiError, type Note, type NoteSourceType } from '@/lib/api';
 import { getAppTimezone } from '@/lib/app-settings';
 import { EditNoteForm } from './edit-note-form';
+import { BoostButton } from '@/components/BoostButton';
 
 // /library/notes/[id] — single-note detail with edit form. Related project,
 // person, and quote (if any) surface as small linked breadcrumbs above the
@@ -80,6 +81,11 @@ export default async function NoteDetailPage({
       <div className="hairline mb-6" />
 
       <div className="px-5 lg:px-0 max-w-2xl">
+        <div className="mb-6 flex items-center gap-3">
+          <span className="eyebrow">Resurfacing</span>
+          <BoostButton kind="note" id={note.id} weight={note.resurface_weight} />
+        </div>
+
         {/* Related context — only render if anything attached */}
         {(note.project || note.person || note.quote || note.source_reference) && (
           <div className="mb-6 flex flex-wrap items-center gap-x-3 gap-y-2 font-mono text-[10px] uppercase tracking-wider text-ink-3">

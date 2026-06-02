@@ -11,6 +11,7 @@ import {
 import { AddAnnotationForm } from './add-annotation-form';
 import { deleteAnnotationAction, deleteQuoteAction } from './actions';
 import { QuoteForm } from '../quote-form';
+import { BoostButton } from '@/components/BoostButton';
 import { getAppTimezone } from '@/lib/app-settings';
 
 // /library/quotes/[id] — quote at top in serif italic, then annotations
@@ -95,6 +96,14 @@ export default async function QuoteDetailPage({
       <div className="hairline mb-6" />
 
       <div className="px-5 lg:px-0 max-w-2xl">
+        {/* Resurface weight control. Cycles through Normal / Boost 2× /
+            Boost 5× / Excluded. Affects how often this quote can show up
+            in the Today page's Resurfacing panel. */}
+        <div className="mb-6 flex items-center gap-3">
+          <span className="eyebrow">Resurfacing</span>
+          <BoostButton kind="quote" id={quote.id} weight={quote.resurface_weight} />
+        </div>
+
         {/* Edit panel — collapsed by default to keep the focus on the
             quote text + annotations. Open it to fix transcription
             errors, change page number, add tags, rebind to a book, etc. */}

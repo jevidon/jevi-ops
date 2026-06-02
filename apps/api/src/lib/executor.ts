@@ -4,6 +4,7 @@ import type { CaptureSource } from '@jerad-ops/shared/schemas';
 import {
   matchProject, matchDomain, matchPerson, matchTask,
   matchBook, matchContentItem, matchMilestone, matchQuote,
+  matchNote, matchJournalEntry,
 } from './match.js';
 import { insertEvent as insertGoogleEvent, loadTokens as loadGoogleTokens } from './google.js';
 import { getAppTz } from './app-settings.js';
@@ -412,6 +413,54 @@ async function updateContentItem(sb: SupabaseClient, a: ParsedAction): Promise<A
   return { action: a.action, status: 'success', message: 'Content item updated', entity_id: id, entity_kind: 'content_items' };
 }
 
+// Resurface weight — "boost the Cal Newport quote about focus", "exclude
+// this from resurfacing", "5x the gratitude journal from Tuesday". The
+// parser emits the canonical numeric weight; we just route by kind and
+// fuzzy-match the target. Anything other than the four supported weights
+// (0 / 1 / 2 / 5) is treated as a request for the nearest one.
+async function setResurfaceWeight(sb: SupabaseClient, a: ParsedAction): Promise<ActionResult> {
+  const kind = str(a, 'target_kind');
+  const matchPhrase = str(a, 'target_match');
+  const rawWeight = num(a, 'weight');
+  if (!kind || !['quote', 'note', 'journal'].includes(kind)) {
+    return { action: a.action, status: 'failed', message: 'missing_or_invalid_target_kind' };
+  }
+  if (!matchPhrase) {
+    return { action: a.action, status: 'failed', message: 'missing_target_match' };
+  }
+  if (rawWeight === undefined) {
+    return { action: a.action, status: 'failed', message: 'missing_weight' };
+  }
+  // Snap to the supported cycle. The UI only ever sets {0,1,2,5}; arbitrary
+  // weights work in the DB but the user can never put them back through the
+  // UI again. Snapping keeps the system uniform.
+  const weight = [0, 1, 2, 5].reduce((closest, w) =>
+    Math.abs(w - rawWeight) < Math.abs(closest - rawWeight) ? w : closest, 1);
+
+  const table = kind === 'quote' ? 'quotes' : kind === 'note' ? 'notes' : 'journal_entries';
+  const matcher =
+    kind === 'quote' ? matchQuote :
+    kind === 'note' ? matchNote :
+    matchJournalEntry;
+  const id = await matcher(sb, matchPhrase);
+  if (!id) return { action: a.action, status: 'skipped', message: `${kind}_not_found` };
+
+  const { error } = await sb.from(table).update({ resurface_weight: weight }).eq('id', id);
+  if (error) return { action: a.action, status: 'failed', message: error.message };
+
+  const label =
+    weight === 0 ? 'excluded from resurfacing' :
+    weight === 1 ? 'reset to normal' :
+    `boosted ${weight}×`;
+  return {
+    action: a.action,
+    status: 'success',
+    message: `${kind[0]!.toUpperCase() + kind.slice(1)} ${label}`,
+    entity_id: id,
+    entity_kind: table,
+  };
+}
+
 async function addInventoryItem(sb: SupabaseClient, a: ParsedAction): Promise<ActionResult> {
   const category = str(a, 'category');
   if (!category) return { action: a.action, status: 'failed', message: 'missing_category' };
@@ -449,6 +498,7 @@ const handlers: HandlerMap = {
   create_person_fact: createPersonFact,
   update_content_item: updateContentItem,
   add_inventory_item: addInventoryItem,
+  set_resurface_weight: setResurfaceWeight,
 };
 
 // ─── Notification writers ───────────────────────────────────────────────
@@ -485,6 +535,7 @@ const ACTION_TITLE: Record<string, string> = {
   create_person_fact: 'Person fact saved',
   update_content_item: 'Content item updated',
   add_inventory_item: 'Inventory item added',
+  set_resurface_weight: 'Resurface weight updated',
 };
 
 async function recordNotification(

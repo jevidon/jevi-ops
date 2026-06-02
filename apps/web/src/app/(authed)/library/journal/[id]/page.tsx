@@ -4,6 +4,7 @@ import { ScreenHeader } from '@/components/ScreenHeader';
 import { libraryApi, ApiError, type JournalEntry } from '@/lib/api';
 import { getAppTimezone } from '@/lib/app-settings';
 import { JournalEditForm } from './edit-form';
+import { BoostButton } from '@/components/BoostButton';
 
 // /library/journal/[id] — detail + edit + delete. Voice still creates
 // journal entries; this page lets you come back to add an image, edit
@@ -61,7 +62,12 @@ export default async function JournalEntryPage({
       />
       <div className="hairline mb-6" />
 
-      <div className="px-5 lg:px-0">
+      <div className="px-5 lg:px-0 max-w-2xl">
+        <div className="mb-6 flex items-center gap-3">
+          <span className="eyebrow">Resurfacing</span>
+          <BoostButton kind="journal" id={entry.id} weight={entry.resurface_weight} />
+        </div>
+
         <JournalEditForm
           initial={{
             id: entry.id,

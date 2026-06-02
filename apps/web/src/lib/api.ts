@@ -423,6 +423,7 @@ export interface Note {
   related_quote_id: string | null;
   needs_review: boolean;
   attachments: Attachment[];
+  resurface_weight?: number;
   created_at: string;
   project?: { id: string; name: string; color: string | null } | null;
   person?: { id: string; name: string } | null;
@@ -439,6 +440,7 @@ export interface Quote {
   source_author: string | null;
   tags: string[];
   added_via: string;
+  resurface_weight?: number;
   created_at: string;
   book?: { id: string; title: string; author: string | null } | null;
   annotation_count?: number;
@@ -462,6 +464,7 @@ export interface JournalEntry {
   transcription_text: string | null;
   source: string;
   attachments: Attachment[];
+  resurface_weight?: number;
   created_at: string;
 }
 
@@ -550,11 +553,12 @@ export const libraryApi = {
       '/api/library/resurfacing',
     ),
   notes: {
-    list: (opts?: { source_type?: string; needs_review?: boolean; tag?: string }) => {
+    list: (opts?: { source_type?: string; needs_review?: boolean; tag?: string; resurface?: 'boosted' | 'excluded' }) => {
       const qs = new URLSearchParams();
       if (opts?.source_type) qs.set('source_type', opts.source_type);
       if (opts?.needs_review) qs.set('needs_review', 'true');
       if (opts?.tag) qs.set('tag', opts.tag);
+      if (opts?.resurface) qs.set('resurface', opts.resurface);
       const q = qs.toString();
       return api.get<{ notes: Note[] }>(`/api/notes${q ? `?${q}` : ''}`);
     },
@@ -563,9 +567,10 @@ export const libraryApi = {
     remove: (id: string) => api.delete(`/api/notes/${id}`),
   },
   quotes: {
-    list: (opts?: { tag?: string }) => {
+    list: (opts?: { tag?: string; resurface?: 'boosted' | 'excluded' }) => {
       const qs = new URLSearchParams();
       if (opts?.tag) qs.set('tag', opts.tag);
+      if (opts?.resurface) qs.set('resurface', opts.resurface);
       const q = qs.toString();
       return api.get<{ quotes: Quote[] }>(`/api/quotes${q ? `?${q}` : ''}`);
     },
@@ -594,12 +599,18 @@ export const libraryApi = {
     remove: (id: string) => api.delete(`/api/quote-annotations/${id}`),
   },
   journal: {
-    list: () => api.get<{ entries: JournalEntry[] }>('/api/journal-entries'),
+    list: (opts?: { resurface?: 'boosted' | 'excluded' }) => {
+      const qs = new URLSearchParams();
+      if (opts?.resurface) qs.set('resurface', opts.resurface);
+      const q = qs.toString();
+      return api.get<{ entries: JournalEntry[] }>(`/api/journal-entries${q ? `?${q}` : ''}`);
+    },
     get: (id: string) => api.get<JournalEntry>(`/api/journal-entries/${id}`),
     update: (id: string, body: Partial<{
       transcription_text: string | null;
       entry_date: string;
       attachments: Attachment[];
+      resurface_weight: number;
     }>) => api.patch<JournalEntry>(`/api/journal-entries/${id}`, body),
     remove: (id: string) => api.delete(`/api/journal-entries/${id}`),
   },

@@ -122,6 +122,41 @@ export async function matchQuote(sb: SupabaseClient, query: string | undefined):
   return best(query, candidates)?.id ?? null;
 }
 
+/** Fuzzy match a note by title + body excerpt + source_reference.
+ *  Useful for "that note about X" → note id (used by the resurface intent). */
+export async function matchNote(sb: SupabaseClient, query: string | undefined): Promise<string | null> {
+  if (!query) return null;
+  const { data } = await sb
+    .from('notes')
+    .select('id, title, body, source_reference')
+    .order('created_at', { ascending: false })
+    .limit(500);
+  type Row = { id: string; title: string | null; body: string; source_reference: string | null };
+  const candidates = ((data ?? []) as Row[]).map((r) => {
+    const parts = [r.title, r.source_reference, r.body.slice(0, 160)].filter(Boolean) as string[];
+    return { id: r.id, label: parts.join(' · ') };
+  });
+  return best(query, candidates)?.id ?? null;
+}
+
+/** Fuzzy match a journal entry by transcription excerpt. Dates ("yesterday's
+ *  journal", "Monday's entry") aren't handled here — the parser should
+ *  resolve those to a date and the executor can fetch by entry_date. */
+export async function matchJournalEntry(sb: SupabaseClient, query: string | undefined): Promise<string | null> {
+  if (!query) return null;
+  const { data } = await sb
+    .from('journal_entries')
+    .select('id, transcription_text, entry_date')
+    .order('entry_date', { ascending: false })
+    .limit(500);
+  type Row = { id: string; transcription_text: string | null; entry_date: string };
+  const candidates = ((data ?? []) as Row[]).map((r) => ({
+    id: r.id,
+    label: [r.entry_date, (r.transcription_text ?? '').slice(0, 180)].filter(Boolean).join(' · '),
+  }));
+  return best(query, candidates)?.id ?? null;
+}
+
 export async function matchMilestone(
   sb: SupabaseClient,
   projectId: string,

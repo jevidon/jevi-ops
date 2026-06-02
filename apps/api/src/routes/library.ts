@@ -26,7 +26,7 @@ export const libraryRoutes: FastifyPluginAsync = async (app) => {
 
   // ─── Notes ────────────────────────────────────────────────────────────
 
-  app.get<{ Querystring: { source_type?: string; needs_review?: string; tag?: string; limit?: string } }>(
+  app.get<{ Querystring: { source_type?: string; needs_review?: string; tag?: string; limit?: string; resurface?: string } }>(
     '/api/notes',
     async (req) => {
       const limit = Math.min(parseInt(req.query.limit ?? '500', 10) || 500, 2000);
@@ -40,6 +40,11 @@ export const libraryRoutes: FastifyPluginAsync = async (app) => {
       // tags is a text[] column — .contains() generates the @> operator
       // which matches rows whose array includes every element we pass.
       if (req.query.tag) q = q.contains('tags', [req.query.tag]);
+      // ?resurface=boosted → weight > 1, excluded → weight = 0. The default
+      // (no filter) shows everything regardless of weight so the list
+      // doesn't mysteriously hide rows.
+      if (req.query.resurface === 'boosted') q = q.gt('resurface_weight', 1);
+      else if (req.query.resurface === 'excluded') q = q.eq('resurface_weight', 0);
       const { data, error } = await q;
       if (error) throw app.httpErrors.internalServerError(error.message);
       return { notes: data ?? [] };
@@ -90,7 +95,7 @@ export const libraryRoutes: FastifyPluginAsync = async (app) => {
 
   // ─── Quotes ────────────────────────────────────────────────────────────
 
-  app.get<{ Querystring: { tag?: string; limit?: string } }>('/api/quotes', async (req) => {
+  app.get<{ Querystring: { tag?: string; limit?: string; resurface?: string } }>('/api/quotes', async (req) => {
     const limit = Math.min(parseInt(req.query.limit ?? '500', 10) || 500, 2000);
     let qb = req.supabase!
       .from('quotes')
@@ -98,6 +103,8 @@ export const libraryRoutes: FastifyPluginAsync = async (app) => {
       .order('created_at', { ascending: false })
       .limit(limit);
     if (req.query.tag) qb = qb.contains('tags', [req.query.tag]);
+    if (req.query.resurface === 'boosted') qb = qb.gt('resurface_weight', 1);
+    else if (req.query.resurface === 'excluded') qb = qb.eq('resurface_weight', 0);
     const { data, error } = await qb;
     if (error) throw app.httpErrors.internalServerError(error.message);
     // Compress annotation rows down to a count for the list view.
@@ -213,9 +220,9 @@ export const libraryRoutes: FastifyPluginAsync = async (app) => {
   // entries can be revisited after the fact (e.g., to add photos taken
   // during the moment that was journaled about).
 
-  app.get<{ Querystring: { limit?: string } }>('/api/journal-entries', async (req) => {
+  app.get<{ Querystring: { limit?: string; resurface?: string } }>('/api/journal-entries', async (req) => {
     const limit = Math.min(parseInt(req.query.limit ?? '500', 10) || 500, 2000);
-    const { data, error } = await req.supabase!
+    let qb = req.supabase!
       .from('journal_entries')
       .select('*')
       .order('entry_date', { ascending: false })
@@ -224,6 +231,9 @@ export const libraryRoutes: FastifyPluginAsync = async (app) => {
       // entry_date rows in insertion order — oldest at the top.
       .order('created_at', { ascending: false })
       .limit(limit);
+    if (req.query.resurface === 'boosted') qb = qb.gt('resurface_weight', 1);
+    else if (req.query.resurface === 'excluded') qb = qb.eq('resurface_weight', 0);
+    const { data, error } = await qb;
     if (error) throw app.httpErrors.internalServerError(error.message);
     return { entries: data ?? [] };
   });
@@ -245,6 +255,7 @@ export const libraryRoutes: FastifyPluginAsync = async (app) => {
       transcription_text?: string | null;
       entry_date?: string;
       attachments?: unknown[];
+      resurface_weight?: number;
     };
   }>('/api/journal-entries/:id', async (req, reply) => {
     const update: Record<string, unknown> = {};
@@ -258,6 +269,9 @@ export const libraryRoutes: FastifyPluginAsync = async (app) => {
     }
     if (Array.isArray(req.body?.attachments)) {
       update.attachments = req.body.attachments;
+    }
+    if (typeof req.body?.resurface_weight === 'number' && req.body.resurface_weight >= 0) {
+      update.resurface_weight = req.body.resurface_weight;
     }
     if (Object.keys(update).length === 0) {
       return reply.code(400).send({ error: 'empty_payload' });

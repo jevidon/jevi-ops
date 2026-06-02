@@ -26,10 +26,12 @@ const SOURCE_TYPE_FILTERS: Array<{ value: NoteSourceType | 'all'; label: string 
   { value: 'observation', label: 'Observation' },
 ];
 
+type ResurfaceFilter = 'boosted' | 'excluded' | null;
+
 export default async function NotesPage({
   searchParams,
 }: {
-  searchParams: Promise<{ source_type?: string; needs_review?: string; tag?: string }>;
+  searchParams: Promise<{ source_type?: string; needs_review?: string; tag?: string; resurface?: string }>;
 }) {
   const params = await searchParams;
   const tz = await getAppTimezone();
@@ -39,12 +41,14 @@ export default async function NotesPage({
   if (
     params.source_type === undefined &&
     params.needs_review === undefined &&
-    params.tag === undefined
+    params.tag === undefined &&
+    params.resurface === undefined
   ) {
     const jar = await cookies();
     const savedSourceType = jar.get('notes_source_type')?.value;
     const savedNeedsReview = jar.get('notes_needs_review')?.value;
     const savedTag = jar.get('notes_tag')?.value;
+    const savedResurface = jar.get('notes_resurface')?.value;
     const validSavedSourceType = savedSourceType && SOURCE_TYPE_FILTERS.find((f) => f.value === savedSourceType)
       ? savedSourceType
       : undefined;
@@ -52,6 +56,9 @@ export default async function NotesPage({
     if (validSavedSourceType && validSavedSourceType !== 'all') qs.set('source_type', validSavedSourceType);
     if (savedNeedsReview === 'true') qs.set('needs_review', 'true');
     if (savedTag) qs.set('tag', savedTag);
+    if (savedResurface === 'boosted' || savedResurface === 'excluded') {
+      qs.set('resurface', savedResurface);
+    }
     if (qs.toString()) redirect(`/library/notes?${qs.toString()}`);
   }
 
@@ -62,6 +69,8 @@ export default async function NotesPage({
   ) as NoteSourceType | 'all';
   const needsReviewOnly = params.needs_review === 'true';
   const tagFilter = params.tag?.trim() || null;
+  const resurfaceFilter: ResurfaceFilter =
+    params.resurface === 'boosted' || params.resurface === 'excluded' ? params.resurface : null;
 
   // Fetch notes + tag aggregates in parallel. The tag cloud doesn't change
   // when the source_type filter changes — we want to surface all tags
@@ -71,10 +80,11 @@ export default async function NotesPage({
   let tagAggregates: TagAggregate[] = [];
   let errorMessage: string | null = null;
   try {
-    const opts: { source_type?: string; needs_review?: boolean; tag?: string } = {};
+    const opts: { source_type?: string; needs_review?: boolean; tag?: string; resurface?: 'boosted' | 'excluded' } = {};
     if (filter !== 'all') opts.source_type = filter;
     if (needsReviewOnly) opts.needs_review = true;
     if (tagFilter) opts.tag = tagFilter;
+    if (resurfaceFilter) opts.resurface = resurfaceFilter;
     const [notesRes, tagsRes] = await Promise.all([
       libraryApi.notes.list(opts),
       libraryApi.tags(),
@@ -85,7 +95,12 @@ export default async function NotesPage({
     errorMessage = err instanceof ApiError ? `API ${err.status}` : (err as Error).message;
   }
 
-  const buildHref = (overrides: { source_type?: string; needs_review?: boolean; tag?: string | null }) => {
+  const buildHref = (overrides: {
+    source_type?: string;
+    needs_review?: boolean;
+    tag?: string | null;
+    resurface?: ResurfaceFilter;
+  }) => {
     const params = new URLSearchParams();
     const st = overrides.source_type ?? (filter === 'all' ? undefined : filter);
     if (st) params.set('source_type', st);
@@ -94,13 +109,15 @@ export default async function NotesPage({
     // null = explicit clear; undefined = inherit current.
     const tg = overrides.tag === undefined ? tagFilter : overrides.tag;
     if (tg) params.set('tag', tg);
+    const rs = overrides.resurface === undefined ? resurfaceFilter : overrides.resurface;
+    if (rs) params.set('resurface', rs);
     const qs = params.toString();
     return qs ? `/library/notes?${qs}` : '/library/notes';
   };
 
   return (
     <div>
-      <PrefsPersist cookiePrefix="notes" paramNames={['source_type', 'needs_review', 'tag']} />
+      <PrefsPersist cookiePrefix="notes" paramNames={['source_type', 'needs_review', 'tag', 'resurface']} />
       <ScreenHeader eyebrow="Library" title="Notes" meta={`${notes.length} entries`} />
       <div className="hairline" />
 
@@ -133,6 +150,30 @@ export default async function NotesPage({
           }`}
         >
           {needsReviewOnly ? '✓ Needs review' : 'Needs review'}
+        </Link>
+        {/* Resurface filter — toggles between off / boosted / excluded.
+            Three states so a single chip can both filter to weight > 1
+            ("show me everything I've starred") and weight = 0 ("show me
+            what I've hidden from rotation") without needing two chips. */}
+        <Link
+          href={buildHref({
+            resurface:
+              resurfaceFilter === null ? 'boosted' : resurfaceFilter === 'boosted' ? 'excluded' : null,
+          })}
+          className={`px-2.5 py-1 border font-mono text-[10px] uppercase tracking-wider transition-colors ${
+            resurfaceFilter === 'boosted'
+              ? 'bg-accent text-bg border-accent'
+              : resurfaceFilter === 'excluded'
+                ? 'bg-ink text-bg border-ink'
+                : 'border-line text-ink-2 hover:border-ink-2 hover:text-ink'
+          }`}
+          title="Click to cycle: off → boosted → excluded → off"
+        >
+          {resurfaceFilter === 'boosted'
+            ? '★ Boosted'
+            : resurfaceFilter === 'excluded'
+              ? '✕ Excluded'
+              : 'Resurface'}
         </Link>
       </div>
 

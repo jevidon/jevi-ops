@@ -30,10 +30,12 @@ const SORT_OPTIONS: Array<{ value: SortKey; label: string }> = [
   { value: 'annotations', label: 'Thoughts' },
 ];
 
+type ResurfaceFilter = 'boosted' | 'excluded' | null;
+
 export default async function QuotesListPage({
   searchParams,
 }: {
-  searchParams: Promise<{ source_type?: string; book_id?: string; sort?: string; tag?: string }>;
+  searchParams: Promise<{ source_type?: string; book_id?: string; sort?: string; tag?: string; resurface?: string }>;
 }) {
   const params = await searchParams;
 
@@ -42,13 +44,15 @@ export default async function QuotesListPage({
     params.source_type === undefined &&
     params.book_id === undefined &&
     params.sort === undefined &&
-    params.tag === undefined
+    params.tag === undefined &&
+    params.resurface === undefined
   ) {
     const jar = await cookies();
     const savedSourceType = jar.get('quotes_source_type')?.value;
     const savedBookId = jar.get('quotes_book_id')?.value;
     const savedSort = jar.get('quotes_sort')?.value;
     const savedTag = jar.get('quotes_tag')?.value;
+    const savedResurface = jar.get('quotes_resurface')?.value;
     const validSavedSourceType = savedSourceType && SOURCE_TYPE_FILTERS.find((f) => f.value === savedSourceType)
       ? savedSourceType
       : undefined;
@@ -60,6 +64,9 @@ export default async function QuotesListPage({
     if (savedBookId) qs.set('book_id', savedBookId);
     if (validSavedSort && validSavedSort !== 'recent') qs.set('sort', validSavedSort);
     if (savedTag) qs.set('tag', savedTag);
+    if (savedResurface === 'boosted' || savedResurface === 'excluded') {
+      qs.set('resurface', savedResurface);
+    }
     if (qs.toString()) redirect(`/library/quotes?${qs.toString()}`);
   }
 
@@ -75,6 +82,8 @@ export default async function QuotesListPage({
       : 'recent'
   ) as SortKey;
   const tagFilter = params.tag?.trim() || null;
+  const resurfaceFilter: ResurfaceFilter =
+    params.resurface === 'boosted' || params.resurface === 'excluded' ? params.resurface : null;
 
   // Fetch quotes + books + tag aggregates in parallel. Tag filter is
   // applied server-side (it can drastically cut the result set with 1500+
@@ -85,8 +94,9 @@ export default async function QuotesListPage({
   let tagAggregates: TagAggregate[] = [];
   let errorMessage: string | null = null;
   try {
-    const listOpts: { tag?: string } = {};
+    const listOpts: { tag?: string; resurface?: 'boosted' | 'excluded' } = {};
     if (tagFilter) listOpts.tag = tagFilter;
+    if (resurfaceFilter) listOpts.resurface = resurfaceFilter;
     const [quotesRes, booksRes, tagsRes] = await Promise.all([
       libraryApi.quotes.list(listOpts),
       libraryApi.books.list(),
@@ -120,16 +130,19 @@ export default async function QuotesListPage({
     book_id?: string;
     sort?: SortKey;
     tag?: string | null;
+    resurface?: ResurfaceFilter;
   }) => {
     const qs = new URLSearchParams();
     const st = overrides.source_type ?? sourceTypeFilter;
     const bk = overrides.book_id ?? bookFilter;
     const so = overrides.sort ?? sort;
     const tg = overrides.tag === undefined ? tagFilter : overrides.tag;
+    const rs = overrides.resurface === undefined ? resurfaceFilter : overrides.resurface;
     if (st !== 'all') qs.set('source_type', st);
     if (bk) qs.set('book_id', bk);
     if (so !== 'recent') qs.set('sort', so);
     if (tg) qs.set('tag', tg);
+    if (rs) qs.set('resurface', rs);
     const str = qs.toString();
     return str ? `/library/quotes?${str}` : '/library/quotes';
   };
@@ -138,7 +151,7 @@ export default async function QuotesListPage({
     <div>
       <PrefsPersist
         cookiePrefix="quotes"
-        paramNames={['source_type', 'book_id', 'sort', 'tag']}
+        paramNames={['source_type', 'book_id', 'sort', 'tag', 'resurface']}
       />
       <ScreenHeader
         eyebrow="Library"
@@ -186,6 +199,28 @@ export default async function QuotesListPage({
               </Link>
             ))}
           </div>
+          {/* Resurface filter — toggles off → boosted → excluded → off.
+              Same UX as on /library/notes so muscle memory carries over. */}
+          <Link
+            href={buildHref({
+              resurface:
+                resurfaceFilter === null ? 'boosted' : resurfaceFilter === 'boosted' ? 'excluded' : null,
+            })}
+            className={`px-2.5 py-1 border font-mono text-[10px] uppercase tracking-wider transition-colors ${
+              resurfaceFilter === 'boosted'
+                ? 'bg-accent text-bg border-accent'
+                : resurfaceFilter === 'excluded'
+                  ? 'bg-ink text-bg border-ink'
+                  : 'border-line text-ink-2 hover:border-ink-2 hover:text-ink'
+            }`}
+            title="Click to cycle: off → boosted → excluded → off"
+          >
+            {resurfaceFilter === 'boosted'
+              ? '★ Boosted'
+              : resurfaceFilter === 'excluded'
+                ? '✕ Excluded'
+                : 'Resurface'}
+          </Link>
           <Link
             href="/library/quotes/new"
             className="ml-auto font-mono text-[11px] uppercase tracking-wider text-ink-3 hover:text-accent transition-colors"

@@ -53,7 +53,9 @@ export const CreateQuoteSchema = z.object({
   added_via: z.enum(DB_ADDED_VIA).optional(),
 });
 
-export const UpdateQuoteSchema = CreateQuoteSchema.partial();
+export const UpdateQuoteSchema = CreateQuoteSchema.partial().extend({
+  resurface_weight: z.number().min(0).optional(),
+});
 
 // ─── Quote annotations ──────────────────────────────────────────────────
 
