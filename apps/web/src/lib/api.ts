@@ -533,10 +533,22 @@ export interface TagAggregate {
   total: number;
 }
 
+export interface ResurfacingItem {
+  kind: 'quote' | 'journal';
+  id: string;
+  excerpt: string;
+  source: string | null;
+  href: string;
+}
+
 export const libraryApi = {
   feed: (limit = 500) =>
     api.get<{ items: FeedItem[] }>(`/api/library/feed?limit=${limit}`),
   tags: () => api.get<{ tags: TagAggregate[] }>('/api/library/tags'),
+  resurfacing: () =>
+    api.get<{ item: ResurfacingItem | null; pool_size?: number; date?: string }>(
+      '/api/library/resurfacing',
+    ),
   notes: {
     list: (opts?: { source_type?: string; needs_review?: boolean; tag?: string }) => {
       const qs = new URLSearchParams();

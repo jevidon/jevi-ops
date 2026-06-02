@@ -94,12 +94,13 @@ export default async function TodayPage() {
   let needsReview: Note[] = [];
   let routines: RoutineListItem[] = [];
   let unreadCount = 0;
+  let resurface: import('@/lib/api').ResurfacingItem | null = null;
   let errorMessage: string | null = null;
 
   // Fetch in parallel — task list is the priority, everything else is
   // non-fatal (Google might not be connected, observations cron might not
   // have run, etc.).
-  const [taskRes, eventRes, notifRes, countRes, obsRes, reviewRes, routinesRes] = await Promise.allSettled([
+  const [taskRes, eventRes, notifRes, countRes, obsRes, reviewRes, routinesRes, resurfaceRes] = await Promise.allSettled([
     tasksApi.list(),
     calendarApi.upcoming(4),
     notificationsApi.list('unread', 3),
@@ -107,6 +108,7 @@ export default async function TodayPage() {
     observationsApi.list(true, 5),
     libraryApi.notes.list({ needs_review: true }),
     routinesApi.list(),
+    libraryApi.resurfacing(),
   ]);
   if (taskRes.status === 'fulfilled') {
     tasks = taskRes.value.tasks;
@@ -120,6 +122,7 @@ export default async function TodayPage() {
   if (obsRes.status === 'fulfilled') observations = obsRes.value.observations;
   if (reviewRes.status === 'fulfilled') needsReview = reviewRes.value.notes;
   if (routinesRes.status === 'fulfilled') routines = routinesRes.value.routines;
+  if (resurfaceRes.status === 'fulfilled') resurface = resurfaceRes.value.item;
 
   const routinesDoneCount = routines.filter((r) => r.stats.done_today).length;
 
@@ -229,7 +232,38 @@ export default async function TodayPage() {
           </Section>
 
           <Section label="Resurfacing">
-            <Hint>One journal entry, quote, or saved verse rotates here daily.</Hint>
+            {resurface ? (
+              <Link
+                href={resurface.href}
+                className="block group"
+              >
+                <div className="font-mono text-[10px] uppercase tracking-wider text-ink-3 mb-2">
+                  {resurface.kind === 'quote' ? 'Quote' : 'Journal'}
+                  {resurface.source && resurface.kind === 'quote' && (
+                    <span className="ml-2 text-ink-3/80 normal-case tracking-normal font-sans text-[12px]">
+                      — {resurface.source}
+                    </span>
+                  )}
+                </div>
+                <p className="font-serif text-[14px] text-ink-2 leading-relaxed group-hover:text-ink transition-colors">
+                  {resurface.kind === 'quote' ? (
+                    <>&ldquo;{resurface.excerpt}&rdquo;</>
+                  ) : (
+                    resurface.excerpt
+                  )}
+                </p>
+                {resurface.source && resurface.kind === 'journal' && (
+                  <div className="mt-1 font-mono text-[10px] uppercase tracking-wider text-ink-3">
+                    {resurface.source}
+                  </div>
+                )}
+              </Link>
+            ) : (
+              <Hint>
+                Nothing to resurface yet. Add a quote or journal entry and it&rsquo;ll
+                start rotating here daily.
+              </Hint>
+            )}
           </Section>
 
           {needsReview.length > 0 && (

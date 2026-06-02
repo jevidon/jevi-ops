@@ -9,6 +9,18 @@ import {
 // Library CRUD — notes, quotes, quote_annotations, journal_entries, books.
 // Auth-gated; uses the request-scoped Supabase client so RLS applies.
 
+// Stable 32-bit hash of a short string. Used to seed the daily
+// resurfacing pick from a date — same date in always yields the same
+// item, different dates rotate. djb2 variant; collision risk is fine
+// for a deterministic-per-day pick.
+function simpleHash(s: string): number {
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) {
+    h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+  }
+  return Math.abs(h);
+}
+
 export const libraryRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', app.requireAuth);
 
@@ -389,6 +401,114 @@ export const libraryRoutes: FastifyPluginAsync = async (app) => {
   });
 
   // ─── Unified library feed (all sources, chronological) ────────────────
+
+  // ─── Resurfacing — daily rotating pick ────────────────────────────────
+  //
+  // Pulls one item per day from the resurfacing pool (quotes +
+  // journal entries) for the Today page's Resurfacing panel.
+  //
+  // Selection is weighted-random seeded by today's date (in the
+  // requester's app timezone, defaulted to America/Denver server-side
+  // for now). Same item shows all day, rotates tomorrow. No state to
+  // update — pure read-only pick.
+  //
+  // Each row carries a resurface_weight column (default 1.0). Items
+  // with weight 0 are excluded. Higher weights = proportionally more
+  // likely to land. UI for adjusting weights ships later.
+  app.get<{ Querystring: { date?: string } }>('/api/library/resurfacing', async (req) => {
+    const sb = req.supabase!;
+    // Pull only what we need to pick + render. ~thousand rows max for
+    // a personal library; full scan is fine.
+    const [quotesRes, journalRes] = await Promise.all([
+      sb.from('quotes')
+        .select('id, text, source_author, resurface_weight, book:books(id, title, author)')
+        .gt('resurface_weight', 0),
+      sb.from('journal_entries')
+        .select('id, transcription_text, entry_date, resurface_weight')
+        .gt('resurface_weight', 0),
+    ]);
+
+    // Flatten everything into one weighted pool with a shared shape.
+    type PoolItem = {
+      kind: 'quote' | 'journal';
+      id: string;
+      weight: number;
+      excerpt: string;
+      source: string | null;
+      href: string;
+    };
+    const pool: PoolItem[] = [];
+
+    for (const q of quotesRes.data ?? []) {
+      const book = Array.isArray((q as { book?: unknown }).book)
+        ? ((q as { book: unknown[] }).book[0] as { title?: string; author?: string } | undefined)
+        : ((q as { book?: { title?: string; author?: string } | null }).book ?? undefined);
+      const sourceBits = [book?.title, book?.author ?? (q as { source_author?: string }).source_author]
+        .filter(Boolean);
+      pool.push({
+        kind: 'quote',
+        id: (q as { id: string }).id,
+        weight: Number((q as { resurface_weight?: number }).resurface_weight ?? 1),
+        excerpt: String((q as { text?: string }).text ?? ''),
+        source: sourceBits.length > 0 ? sourceBits.join(' · ') : null,
+        href: `/library/quotes/${(q as { id: string }).id}`,
+      });
+    }
+    for (const j of journalRes.data ?? []) {
+      pool.push({
+        kind: 'journal',
+        id: (j as { id: string }).id,
+        weight: Number((j as { resurface_weight?: number }).resurface_weight ?? 1),
+        excerpt: String((j as { transcription_text?: string }).transcription_text ?? ''),
+        source: (j as { entry_date?: string }).entry_date ?? null,
+        href: `/library/journal/${(j as { id: string }).id}`,
+      });
+    }
+
+    if (pool.length === 0) {
+      return { item: null };
+    }
+
+    // Deterministic seed: hash of today's date (or override via ?date).
+    const dateStr = (req.query.date ?? new Date().toISOString().slice(0, 10));
+    const seed = simpleHash(dateStr);
+
+    // Weighted pick: total weight × normalized seed → index.
+    const totalWeight = pool.reduce((sum, p) => sum + p.weight, 0);
+    if (totalWeight <= 0) return { item: null };
+    const pickAt = (seed % 1_000_000) / 1_000_000 * totalWeight;
+    let acc = 0;
+    let chosen: PoolItem = pool[0]!;
+    for (const item of pool) {
+      acc += item.weight;
+      if (acc >= pickAt) {
+        chosen = item;
+        break;
+      }
+    }
+
+    // Cap excerpt length so the Today card stays compact. Word-boundary
+    // truncation when possible, then an ellipsis.
+    const MAX = 240;
+    let excerpt = chosen.excerpt.trim();
+    if (excerpt.length > MAX) {
+      const cut = excerpt.slice(0, MAX);
+      const lastSpace = cut.lastIndexOf(' ');
+      excerpt = (lastSpace > 100 ? cut.slice(0, lastSpace) : cut) + '…';
+    }
+
+    return {
+      item: {
+        kind: chosen.kind,
+        id: chosen.id,
+        excerpt,
+        source: chosen.source,
+        href: chosen.href,
+      },
+      pool_size: pool.length,
+      date: dateStr,
+    };
+  });
 
   app.get<{ Querystring: { limit?: string } }>('/api/library/feed', async (req) => {
     // Raised from 200 → 2000 to accommodate bulk-imported vaults. At that
