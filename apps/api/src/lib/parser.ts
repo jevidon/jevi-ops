@@ -164,7 +164,13 @@ Rules:
 6. If you can't parse the input confidently, return the error shape.
 7. Keep titles concise (under 100 chars). Strip filler words from notes/activity entries.
 8. Default priority is 4 (lowest). Use 1-3 only if user explicitly says "important", "urgent", "high priority", etc.
-9. Default fact_type for ambiguous person facts is "other".`;
+9. Default fact_type for ambiguous person facts is "other".
+10. Task reminders (reminder_offsets) default rule:
+    - If the task has a due_time AND the user did NOT mention reminders → emit reminder_offsets: [0] (the cron treats 0 as "at the due moment").
+    - If the user explicitly said "no reminder" / "don't remind me" / "skip the reminder" → emit reminder_offsets: [].
+    - If the user specified a lead time ("remind me 15 minutes before", "an hour before", "30 min ahead") → emit reminder_offsets: [<minutes>], converting the spoken phrasing to integer minutes (1h = 60, 1.5h = 90, etc.).
+    - If the task has NO due_time → omit reminder_offsets entirely; reminders need a due_time to fire.
+    - Multiple reminders ("ping me an hour before AND at the start") → emit all the offsets in one array, sorted descending: [60, 0].`;
 
 // ─── Output schema (passed via output_config.format on every request) ────
 

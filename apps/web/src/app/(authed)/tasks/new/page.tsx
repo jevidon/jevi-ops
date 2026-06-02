@@ -68,7 +68,10 @@ export default async function NewTaskPage({
             priority: 4,
             project_id: preProject ?? '',
             content_item_id: preContent ?? '',
-            remind_minutes: '',
+            // Default to "At due time" (offset 0). The cron only fires
+            // when a due_time is actually set, so this is a no-op for
+            // timeless tasks. User can pick "No reminder" to opt out.
+            remind_minutes: 0,
             recurrence_rule: '',
           }}
           projects={projects}
