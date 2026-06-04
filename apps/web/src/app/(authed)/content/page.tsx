@@ -11,12 +11,20 @@ import { youtubeThumbnailUrl } from '@/lib/youtube';
 // status filter chips + sort. The pipeline status is the primary mental
 // model so we surface it prominently. Cookie-backed persistence via the
 // shared PrefsPersist component.
+//
+// Done items get their own section at the bottom — they don't intermix
+// with active work. The main section's status chip filters in-progress
+// items; the done section has its own domain filter so you can audit
+// "what's shipped on the main channel" without affecting the active
+// pipeline view.
 
-type StatusFilter = ContentItemStatus | 'all' | 'in_progress';
+type StatusFilter = Exclude<ContentItemStatus, 'done'> | 'all' | 'in_progress';
 type SortKey = 'updated' | 'status' | 'published';
 
 // "in_progress" is a convenience filter — everything not done or shipped.
-// Lets the user see "what am I actively working on" in one click.
+// Lets the user see "what am I actively working on" in one click. "Done"
+// is excluded from this list because done items always render in their
+// own section below, regardless of status filter.
 const STATUS_FILTERS: Array<{ value: StatusFilter; label: string }> = [
   { value: 'all', label: 'All' },
   { value: 'in_progress', label: 'In progress' },
@@ -25,7 +33,6 @@ const STATUS_FILTERS: Array<{ value: StatusFilter; label: string }> = [
   { value: 'filming', label: 'Filming' },
   { value: 'editing', label: 'Editing' },
   { value: 'published', label: 'Published' },
-  { value: 'done', label: 'Done' },
 ];
 
 // Status order for the "status" sort — matches the pipeline progression
@@ -59,16 +66,17 @@ const STATUS_LABELS: Record<ContentItemStatus, string> = {
 export default async function ContentPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; sort?: string }>;
+  searchParams: Promise<{ status?: string; sort?: string; done_domain?: string }>;
 }) {
   const params = await searchParams;
   const tz = await getAppTimezone();
 
   // Cookie restore — same pattern as /library/books.
-  if (params.status === undefined && params.sort === undefined) {
+  if (params.status === undefined && params.sort === undefined && params.done_domain === undefined) {
     const jar = await cookies();
     const savedStatus = jar.get('content_status')?.value;
     const savedSort = jar.get('content_sort')?.value;
+    const savedDoneDomain = jar.get('content_done_domain')?.value;
     const validSavedStatus = savedStatus && STATUS_FILTERS.find((f) => f.value === savedStatus)
       ? savedStatus
       : undefined;
@@ -78,6 +86,7 @@ export default async function ContentPage({
     const qs = new URLSearchParams();
     if (validSavedStatus && validSavedStatus !== 'all') qs.set('status', validSavedStatus);
     if (validSavedSort && validSavedSort !== 'updated') qs.set('sort', validSavedSort);
+    if (savedDoneDomain) qs.set('done_domain', savedDoneDomain);
     if (qs.toString()) redirect(`/content?${qs.toString()}`);
   }
 
@@ -91,6 +100,7 @@ export default async function ContentPage({
       ? params.sort
       : 'updated'
   ) as SortKey;
+  const doneDomainFilter = params.done_domain?.trim() || null;
 
   let items: ContentItem[] = [];
   let errorMessage: string | null = null;
@@ -104,32 +114,64 @@ export default async function ContentPage({
     errorMessage = err instanceof ApiError ? `API ${err.status}` : (err as Error).message;
   }
 
-  let filtered = items;
+  // Split into two streams. Done items always live in their own section
+  // regardless of the status filter; the main filter only applies to
+  // the in-progress stream above.
+  const activeItems = items.filter((i) => i.status !== 'done');
+  const doneItems = items.filter((i) => i.status === 'done');
+
+  let filteredActive = activeItems;
   if (status === 'in_progress') {
-    filtered = items.filter((i) => i.status !== 'done' && i.status !== 'published' && i.status !== 'derivatives_pending');
+    filteredActive = activeItems.filter(
+      (i) => i.status !== 'published' && i.status !== 'derivatives_pending',
+    );
   } else if (status !== 'all') {
-    filtered = items.filter((i) => i.status === status);
+    filteredActive = activeItems.filter((i) => i.status === status);
   }
+  filteredActive = [...filteredActive].sort((a, b) => sortContent(a, b, sort));
 
-  filtered = [...filtered].sort((a, b) => sortContent(a, b, sort));
+  // Build the domain chip set from done items only — there's no point
+  // showing a domain that has no done content to filter.
+  type DomainChip = { id: string; name: string; count: number };
+  const doneDomainMap = new Map<string, DomainChip>();
+  for (const item of doneItems) {
+    if (!item.domain) continue;
+    const existing = doneDomainMap.get(item.domain.id);
+    if (existing) existing.count += 1;
+    else doneDomainMap.set(item.domain.id, { id: item.domain.id, name: item.domain.name, count: 1 });
+  }
+  const doneDomains = Array.from(doneDomainMap.values()).sort((a, b) => a.name.localeCompare(b.name));
 
-  const buildHref = (overrides: { status?: StatusFilter; sort?: SortKey }) => {
+  let filteredDone = doneItems;
+  if (doneDomainFilter) {
+    filteredDone = doneItems.filter((i) => i.domain?.id === doneDomainFilter);
+  }
+  // Done section always sorts by release date, most recent first. Falls
+  // back to updated_at if no published_at — old imports might lack the
+  // canonical release date but we still want them ordered consistently.
+  filteredDone = [...filteredDone].sort(
+    (a, b) => (b.published_at ?? b.updated_at).localeCompare(a.published_at ?? a.updated_at),
+  );
+
+  const buildHref = (overrides: { status?: StatusFilter; sort?: SortKey; done_domain?: string | null }) => {
     const qs = new URLSearchParams();
     const s = overrides.status ?? status;
     const so = overrides.sort ?? sort;
+    const dd = overrides.done_domain === undefined ? doneDomainFilter : overrides.done_domain;
     if (s !== 'all') qs.set('status', s);
     if (so !== 'updated') qs.set('sort', so);
+    if (dd) qs.set('done_domain', dd);
     const str = qs.toString();
     return str ? `/content?${str}` : '/content';
   };
 
   return (
     <div>
-      <PrefsPersist cookiePrefix="content" paramNames={['status', 'sort']} />
+      <PrefsPersist cookiePrefix="content" paramNames={['status', 'sort', 'done_domain']} />
       <ScreenHeader
         eyebrow="Pipeline"
         title="Content"
-        meta={`${filtered.length} of ${items.length} items`}
+        meta={`${filteredActive.length} active · ${filteredDone.length} done`}
       />
       <div className="hairline" />
 
@@ -179,62 +221,130 @@ export default async function ContentPage({
         </div>
       </div>
 
+      {/* ─── Active items ─────────────────────────────────────────────── */}
       {errorMessage ? (
         <div className="px-5 lg:px-0 mt-6 font-sans text-[13px] text-ink-3">Error: {errorMessage}</div>
-      ) : filtered.length === 0 ? (
+      ) : filteredActive.length === 0 ? (
         <div className="px-5 lg:px-0 mt-6 font-sans text-[13px] text-ink-3 italic">
-          {items.length === 0
-            ? 'No content items yet. Add your first video idea.'
+          {activeItems.length === 0
+            ? 'No active content items. Add your first video idea.'
             : 'No content items match this filter.'}
         </div>
       ) : (
         <ul className="px-5 lg:px-0 mt-4">
-          {filtered.map((item) => {
-            const thumb = item.video_url ? youtubeThumbnailUrl(item.video_url, 'mq') : null;
-            return (
-              <li key={item.id} className="py-3 border-b border-line/40">
-                <Link
-                  href={`/content/${item.id}`}
-                  className="flex gap-3 hover:opacity-80 transition-opacity"
-                >
-                  {/* Thumbnail. 112px wide × 63px tall (16:9). Falls back to a
-                      placeholder so non-YouTube / no-URL rows stay aligned. */}
-                  <div className="w-28 aspect-video bg-surface border border-line shrink-0 overflow-hidden">
-                    {thumb ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={thumb}
-                        alt=""
-                        className="w-full h-full object-cover"
-                        loading="lazy"
-                      />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center font-mono text-[9px] uppercase tracking-wider text-ink-3">
-                        {item.type.replace('_', ' ')}
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-baseline justify-between gap-3">
-                      <span className="font-mono text-[10px] uppercase tracking-wider text-ink-3">
-                        {STATUS_LABELS[item.status]}
-                        {item.domain?.name ? ` · ${item.domain.name}` : ''}
-                      </span>
-                      <span className="font-mono text-[10px] uppercase tracking-wider text-ink-3 shrink-0">
-                        {formatDate(item.published_at || item.updated_at, tz)}
-                      </span>
-                    </div>
-                    <div className="mt-1 font-serif text-[15px] text-ink leading-tight line-clamp-2">
-                      {item.title}
-                    </div>
-                  </div>
-                </Link>
-              </li>
-            );
-          })}
+          {filteredActive.map((item) => (
+            <ContentRow key={item.id} item={item} tz={tz} />
+          ))}
         </ul>
       )}
+
+      {/* ─── Done section ─────────────────────────────────────────────── */}
+      {doneItems.length > 0 && (
+        <div className="mt-12">
+          <div className="px-5 lg:px-0 flex flex-wrap items-baseline justify-between gap-3 pb-2 border-b border-line">
+            <div className="flex items-baseline gap-3">
+              <span className="eyebrow">Done</span>
+              <span className="font-mono text-[10px] uppercase tracking-wider text-ink-3">
+                {filteredDone.length} of {doneItems.length}
+              </span>
+            </div>
+          </div>
+
+          {/* Domain filter — only render if there's more than one domain
+              represented in done items. With a single domain (or none)
+              the chip would just be visual noise. */}
+          {doneDomains.length > 1 && (
+            <div className="px-5 lg:px-0 pt-3 flex flex-wrap items-center gap-x-3 gap-y-2">
+              <span className="eyebrow">Domain</span>
+              <div className="flex flex-wrap gap-1.5">
+                <Link
+                  href={buildHref({ done_domain: null })}
+                  className={`px-2.5 py-1 border font-mono text-[10px] uppercase tracking-wider transition-colors ${
+                    !doneDomainFilter
+                      ? 'bg-ink text-bg border-ink'
+                      : 'border-line text-ink-2 hover:border-ink-2 hover:text-ink'
+                  }`}
+                >
+                  All
+                </Link>
+                {doneDomains.map((d) => (
+                  <Link
+                    key={d.id}
+                    href={buildHref({ done_domain: d.id })}
+                    className={`px-2.5 py-1 border font-mono text-[10px] uppercase tracking-wider transition-colors ${
+                      doneDomainFilter === d.id
+                        ? 'bg-ink text-bg border-ink'
+                        : 'border-line text-ink-2 hover:border-ink-2 hover:text-ink'
+                    }`}
+                  >
+                    {d.name} <span className="text-ink-3 ml-1">{d.count}</span>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {filteredDone.length === 0 ? (
+            <div className="px-5 lg:px-0 mt-4 font-sans text-[13px] text-ink-3 italic">
+              No done items in this domain.
+            </div>
+          ) : (
+            <ul className="px-5 lg:px-0 mt-4">
+              {filteredDone.map((item) => (
+                <ContentRow key={item.id} item={item} tz={tz} dim />
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
     </div>
+  );
+}
+
+// Row renderer factored out so the active and done sections render
+// identically. `dim` lowers the opacity slightly so done rows read as
+// archive rather than competing with active work for attention.
+function ContentRow({ item, tz, dim = false }: { item: ContentItem; tz: string; dim?: boolean }) {
+  const thumb = item.video_url ? youtubeThumbnailUrl(item.video_url, 'mq') : null;
+  return (
+    <li className={`py-3 border-b border-line/40 ${dim ? 'opacity-70 hover:opacity-100 transition-opacity' : ''}`}>
+      <Link
+        href={`/content/${item.id}`}
+        className="flex gap-3 hover:opacity-80 transition-opacity"
+      >
+        {/* Thumbnail. 112px wide × 63px tall (16:9). Falls back to a
+            placeholder so non-YouTube / no-URL rows stay aligned. */}
+        <div className="w-28 aspect-video bg-surface border border-line shrink-0 overflow-hidden">
+          {thumb ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={thumb}
+              alt=""
+              className="w-full h-full object-cover"
+              loading="lazy"
+            />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center font-mono text-[9px] uppercase tracking-wider text-ink-3">
+              {item.type.replace('_', ' ')}
+            </div>
+          )}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-baseline justify-between gap-3">
+            <span className="font-mono text-[10px] uppercase tracking-wider text-ink-3">
+              {STATUS_LABELS[item.status]}
+              {item.domain?.name ? ` · ${item.domain.name}` : ''}
+            </span>
+            <span className="font-mono text-[10px] uppercase tracking-wider text-ink-3 shrink-0">
+              {formatDate(item.published_at || item.updated_at, tz)}
+            </span>
+          </div>
+          <div className="mt-1 font-serif text-[15px] text-ink leading-tight line-clamp-2">
+            {item.title}
+          </div>
+        </div>
+      </Link>
+    </li>
   );
 }
 
@@ -278,4 +388,3 @@ function formatDate(iso: string | null, tz: string): string {
     day: 'numeric',
   });
 }
-
