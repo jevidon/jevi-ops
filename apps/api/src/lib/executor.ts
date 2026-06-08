@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { ParsedAction } from './parser.js';
 import type { CaptureSource } from '@jerad-ops/shared/schemas';
+import { INBOX_DOMAIN_ID } from '@jerad-ops/shared';
 import {
   matchProject, matchDomain, matchPerson, matchTask,
   matchBook, matchContentItem, matchMilestone, matchQuote,
@@ -66,10 +67,31 @@ async function createTask(
   const project_id = await matchProject(sb, str(a, 'project_match'));
   const parent_task_id = await matchTask(sb, str(a, 'parent_task_match'));
 
+  // Domain routing (Addendum 03). Three cases:
+  //   1. project_match resolved → use the project's domain
+  //   2. project_match unresolved but domain_match given → use that domain
+  //   3. Neither → fall through to Inbox
+  // We resolve domain_id here rather than letting the API endpoint do it
+  // because voice flows insert directly via the service-role client, not
+  // through /api/tasks. Keep the routing logic in one place: this function.
+  let domain_id: string;
+  if (project_id) {
+    const { data: project } = await sb
+      .from('projects')
+      .select('domain_id')
+      .eq('id', project_id)
+      .maybeSingle();
+    domain_id = (project?.domain_id as string | null) ?? INBOX_DOMAIN_ID;
+  } else {
+    const matchedDomain = await matchDomain(sb, str(a, 'domain_match'));
+    domain_id = matchedDomain ?? INBOX_DOMAIN_ID;
+  }
+
   const insert: Record<string, unknown> = {
     title,
     priority: num(a, 'priority') ?? 4,
     source: sourceFor('tasks', opts.captureSource),
+    domain_id,
   };
   if (str(a, 'due_date')) insert.due_date = str(a, 'due_date');
   if (str(a, 'due_time')) insert.due_time = str(a, 'due_time');
@@ -79,10 +101,19 @@ async function createTask(
 
   const { data, error } = await sb.from('tasks').insert(insert).select('id').single();
   if (error) return { action: a.action, status: 'failed', message: error.message };
+
+  // Surface the routing decision in the user-facing message so the Today
+  // notification chip tells the user "landed in Inbox" vs "landed in Life"
+  // rather than just "Task created."
+  const landedInInbox = domain_id === INBOX_DOMAIN_ID;
+  const message = landedInInbox
+    ? `Task captured to Inbox: ${title}`
+    : `Task created: ${title}`;
+
   return {
     action: a.action,
     status: 'success',
-    message: `Task created: ${title}`,
+    message,
     entity_id: data.id,
     entity_kind: 'tasks',
   };

@@ -70,7 +70,8 @@ of structured actions for the backend to execute against a Postgres database.
 
 Action types you may produce (use the exact "action" string for each):
 
-- create_task: { action, title, due_date?, due_time?, priority?, project_match?, parent_task_match?, reminder_offsets? }
+- create_task: { action, title, due_date?, due_time?, priority?, project_match?, domain_match?, parent_task_match?, reminder_offsets? }
+  domain_match is a sibling of project_match — set when the user names a domain ("Field Notes", "Life", "Site Nitro") without picking a project. If the user names a specific project, set project_match alone; the backend derives the domain from the project. If neither is clearly named, leave both empty — the server defaults the task to the Inbox catch-all domain.
 - complete_task: { action, task_match }
 - create_project: { action, name, domain_match?, target_date? }
 - update_project_status: { action, project_match, status }

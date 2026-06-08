@@ -24,28 +24,23 @@ function sortProjects(list: ProjectListItem[]): ProjectListItem[] {
 interface GroupedProjects {
   activeProjects: ProjectListItem[];
   retainers: ProjectListItem[];
-  areas: ProjectListItem[];
   paused: ProjectListItem[];
   done: ProjectListItem[];
   archived: ProjectListItem[];
 }
 
+// Addendum 03 retired kind='area' — direct-domain tasks replaced that
+// hack. The kind column is still on the DB but no rows carry 'area'
+// post-migration 0026, so we no longer route by it.
 function group(list: ProjectListItem[]): GroupedProjects {
   const g: GroupedProjects = {
     activeProjects: [],
     retainers: [],
-    areas: [],
     paused: [],
     done: [],
     archived: [],
   };
   for (const p of list) {
-    // Areas split off first — they don't follow the project lifecycle.
-    // An archived area still goes to 'archived' (rare but possible).
-    if (p.kind === 'area' && p.status === 'active') {
-      g.areas.push(p);
-      continue;
-    }
     if (p.status === 'paused') g.paused.push(p);
     else if (p.status === 'done') g.done.push(p);
     else if (p.status === 'archived') g.archived.push(p);
@@ -81,12 +76,6 @@ export default async function ProjectsPage() {
 
       <div className="px-5 lg:px-0 pt-3 flex justify-end gap-4">
         <Link
-          href="/projects/new?kind=area"
-          className="font-mono text-[11px] uppercase tracking-wider text-ink-3 hover:text-accent transition-colors"
-        >
-          + New area
-        </Link>
-        <Link
           href="/projects/new"
           className="font-mono text-[11px] uppercase tracking-wider text-ink-3 hover:text-accent transition-colors"
         >
@@ -108,9 +97,6 @@ export default async function ProjectsPage() {
           )}
           {grouped.retainers.length > 0 && (
             <ProjectGroup label={`Retainers · ${grouped.retainers.length}`} projects={grouped.retainers} tz={tz} />
-          )}
-          {grouped.areas.length > 0 && (
-            <ProjectGroup label={`Areas · ${grouped.areas.length}`} projects={grouped.areas} tz={tz} />
           )}
           {grouped.paused.length > 0 && (
             <CollapsedGroup label={`Paused · ${grouped.paused.length}`} projects={grouped.paused} tz={tz} />
@@ -174,8 +160,7 @@ function CollapsedGroup({
 }
 
 function ProjectRow({ project, tz }: { project: ProjectListItem; tz: string }) {
-  const isArea = project.kind === 'area';
-  const isRetainer = !isArea && project.engagement_type === 'retainer';
+  const isRetainer = project.engagement_type === 'retainer';
   const milestones = project.milestones ?? [];
   const doneCount = milestones.filter((m) => m.status === 'done').length;
   const totalCount = milestones.length;
@@ -217,12 +202,7 @@ function ProjectRow({ project, tz }: { project: ProjectListItem; tz: string }) {
 
         <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-[10px] uppercase tracking-wider text-ink-3">
           {project.domain?.name && <span>{project.domain.name}</span>}
-          {isArea ? (
-            // Areas don't have hours-vs-quote, milestones, or a target
-            // date — just the name + description + domain badge above.
-            // Tasks live on the detail page.
-            <span>Area</span>
-          ) : isRetainer ? (
+          {isRetainer ? (
             // For retainers we don't have hours_this_month on the list
             // endpoint (only the detail endpoint computes it). Surface
             // cumulative + monthly cap as the rollup signal here; tap

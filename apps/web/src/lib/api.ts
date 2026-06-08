@@ -115,19 +115,32 @@ export interface ProjectDetail {
   hours_last_month: number;
 }
 
+// Wire-level input shapes for task create/update. They're narrower than
+// the full Task record (server fills in id, status, timestamps) and wider
+// than Partial<Task> in one dimension: domain_id is z.string().uuid() on
+// the record (it's NOT NULL post-migration 0026) but the input may pass
+// null to let the server route via Inbox/project-inheritance.
+export type TaskInput = Partial<Omit<Task, 'domain_id' | 'project_id' | 'content_item_id'>> & {
+  domain_id?: string | null;
+  project_id?: string | null;
+  content_item_id?: string | null;
+};
+export type TaskCreateInput = TaskInput & { title: string };
+
 export const tasksApi = {
-  list: (opts?: { content_item_id?: string; project_id?: string; status?: string }) => {
+  list: (opts?: { content_item_id?: string; project_id?: string; status?: string; domain_id?: string }) => {
     const qs = new URLSearchParams();
     if (opts?.content_item_id) qs.set('content_item_id', opts.content_item_id);
     if (opts?.project_id) qs.set('project_id', opts.project_id);
     if (opts?.status) qs.set('status', opts.status);
+    if (opts?.domain_id) qs.set('domain_id', opts.domain_id);
     const s = qs.toString();
     return api.get<{ tasks: Task[] }>(`/api/tasks${s ? `?${s}` : ''}`);
   },
   get: (id: string) => api.get<Task>(`/api/tasks/${id}`),
-  create: (body: Partial<Task> & { title: string }) =>
+  create: (body: TaskCreateInput) =>
     api.post<Task>('/api/tasks', body),
-  update: (id: string, body: Partial<Task>) =>
+  update: (id: string, body: TaskInput) =>
     api.patch<Task>(`/api/tasks/${id}`, body),
   remove: (id: string) => api.delete(`/api/tasks/${id}`),
 };

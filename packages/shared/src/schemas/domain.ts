@@ -13,6 +13,9 @@ export const DomainSchema = z.object({
   failure_patterns: z.array(FailurePatternSchema).default([]),
   expected_cadence: z.string().nullable().optional(),
   active: z.boolean(),
+  // Added by migration 0026. System domains (currently just Inbox) are
+  // protected from rename/deactivate and excluded from slippage detection.
+  is_system: z.boolean().default(false),
   created_at: z.string().datetime({ offset: true }),
   updated_at: z.string().datetime({ offset: true }),
 });

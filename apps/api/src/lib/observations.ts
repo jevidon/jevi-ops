@@ -282,7 +282,11 @@ export async function runObservations(sb: SupabaseClient): Promise<ObservationsR
   const { data: domains } = await sb
     .from('stewardship_domains')
     .select('id, name, failure_patterns, active')
-    .eq('active', true);
+    .eq('active', true)
+    // Exclude system domains (Inbox). They're catch-alls for unsorted
+    // tasks — domain-level slippage rules don't apply because the whole
+    // point is that those tasks are awaiting triage.
+    .eq('is_system', false);
   if (!domains) return result;
 
   // Pre-load active observations once so we can dedupe in memory.

@@ -18,6 +18,7 @@ export const TaskSchema = z.object({
   due_time: nullableString(),
   priority: z.number().int().min(1).max(4),
   project_id: z.string().uuid().nullable().optional(),
+  domain_id: z.string().uuid(),
   content_item_id: z.string().uuid().nullable().optional(),
   parent_task_id: z.string().uuid().nullable().optional(),
   recurrence_rule: nullableString(),
@@ -48,6 +49,11 @@ export const CreateTaskSchema = z.object({
   due_time: nullableString(),
   priority: z.number().int().min(1).max(4).default(4),
   project_id: z.string().uuid().nullable().optional(),
+  // domain_id is optional at the schema level so frictionless capture works
+  // (no domain picked → server defaults to Inbox). When project_id is set,
+  // the server overwrites domain_id with the project's domain. When both
+  // are passed explicitly and mismatched, the server returns 400.
+  domain_id: z.string().uuid().nullable().optional(),
   content_item_id: z.string().uuid().nullable().optional(),
   parent_task_id: z.string().uuid().nullable().optional(),
   recurrence_rule: nullableString(),

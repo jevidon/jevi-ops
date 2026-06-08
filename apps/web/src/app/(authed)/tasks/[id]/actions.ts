@@ -8,16 +8,17 @@ import { isRecurrencePattern } from '@jerad-ops/shared';
 
 export type SaveResult = { ok: true } | { ok: false; error: string };
 
-// Form schema — captures every field the shared TaskForm posts. We accept
-// empty strings for the foreign-key dropdowns (project, content) and turn
-// them into null at the API call so the user can clear an existing link.
+// Form schema — captures every field the shared TaskForm posts. The
+// `selection` field encodes either "domain:<uuid>" or "project:<uuid>";
+// we decode it server-side before hitting the API. Empty selection on
+// create means "let the server default to Inbox."
 const TaskFormSchema = z.object({
   title: z.string().trim().min(1, 'Title is required'),
   notes: z.string().trim(),
   due_date: z.string(),
   due_time: z.string(),
   priority: z.coerce.number().int().min(1).max(4),
-  project_id: z.string(),
+  selection: z.string(),
   content_item_id: z.string(),
   // Single-offset reminder picker on the form. Multi-offset reminders
   // are still supported via the voice parser (which can produce multiple
@@ -34,11 +35,27 @@ function readFormFields(formData: FormData) {
     due_date: formData.get('due_date') ?? '',
     due_time: formData.get('due_time') ?? '',
     priority: formData.get('priority') ?? '4',
-    project_id: formData.get('project_id') ?? '',
+    selection: formData.get('selection') ?? '',
     content_item_id: formData.get('content_item_id') ?? '',
     remind_minutes: formData.get('remind_minutes') ?? '',
     recurrence_rule: formData.get('recurrence_rule') ?? '',
   });
+}
+
+// Decode "domain:<uuid>" / "project:<uuid>" / "" into the API shape. Both
+// IDs are sent as null when not present so a switch from project → domain
+// (or vice versa) clears the prior link.
+function decodeSelection(raw: string): { domain_id: string | null; project_id: string | null } {
+  if (raw.startsWith('domain:')) {
+    return { domain_id: raw.slice('domain:'.length) || null, project_id: null };
+  }
+  if (raw.startsWith('project:')) {
+    return { domain_id: null, project_id: raw.slice('project:'.length) || null };
+  }
+  // Empty or malformed → let the server route via its default (Inbox on
+  // create). On update with empty selection we send both as null so the
+  // server falls back to its routing logic.
+  return { domain_id: null, project_id: null };
 }
 
 function toApiPayload(parsed: z.infer<typeof TaskFormSchema>) {
@@ -53,13 +70,15 @@ function toApiPayload(parsed: z.infer<typeof TaskFormSchema>) {
   const recurrence_rule = isRecurrencePattern(parsed.recurrence_rule)
     ? parsed.recurrence_rule
     : null;
+  const { domain_id, project_id } = decodeSelection(parsed.selection);
   return {
     title: parsed.title,
     notes: parsed.notes || null,
     due_date: parsed.due_date || null,
     due_time: parsed.due_time || null,
     priority: parsed.priority,
-    project_id: parsed.project_id || null,
+    domain_id,
+    project_id,
     content_item_id: parsed.content_item_id || null,
     reminder_offsets,
     recurrence_rule,

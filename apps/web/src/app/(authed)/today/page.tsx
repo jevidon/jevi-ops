@@ -16,6 +16,7 @@ import {
 import { todayIsoDate, isToday } from '@/lib/today';
 import { getAppTimezone } from '@/lib/app-settings';
 import type { Task } from '@jerad-ops/shared';
+import { INBOX_DOMAIN_ID } from '@jerad-ops/shared';
 
 // Today screen — most important UI per spec §4.
 //
@@ -129,6 +130,14 @@ export default async function TodayPage() {
   const { top3, inbox, doneToday } = splitTasks(tasks, tz);
   const emptySlots = Math.max(0, 3 - top3.length);
 
+  // Inbox-domain triage count. Distinct from the local `inbox` variable
+  // above (which is Todoist-style "untiered open tasks"). Tasks here are
+  // the ones the user captured without routing to a real domain — they
+  // need a home before they can be tracked as part of stewardship work.
+  const inboxTriageCount = tasks.filter(
+    (t) => t.status === 'open' && t.domain_id === INBOX_DOMAIN_ID,
+  ).length;
+
   return (
     <div>
       <ScreenHeader eyebrow="Today" title={todayLabel(tz)} meta={tz} />
@@ -155,6 +164,25 @@ export default async function TodayPage() {
               </>
             )}
           </Section>
+
+          {inboxTriageCount > 0 && (
+            <Link
+              href="/inbox"
+              className="mb-5 block border border-line hover:border-accent transition-colors px-4 py-3"
+            >
+              <div className="flex items-baseline justify-between gap-3">
+                <span className="font-mono text-[11px] uppercase tracking-wider text-accent">
+                  📥 Inbox
+                </span>
+                <span className="font-mono text-[10px] uppercase tracking-wider text-ink-3">
+                  Triage →
+                </span>
+              </div>
+              <p className="mt-1 font-sans text-[13px] text-ink-2">
+                {inboxTriageCount} {inboxTriageCount === 1 ? 'task needs' : 'tasks need'} a home.
+              </p>
+            </Link>
+          )}
 
           <Section
             label="Up next"

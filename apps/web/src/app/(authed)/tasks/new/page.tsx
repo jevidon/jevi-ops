@@ -1,31 +1,40 @@
 import Link from 'next/link';
 import { ScreenHeader } from '@/components/ScreenHeader';
-import { projectsApi, contentApi, ApiError } from '@/lib/api';
+import { projectsApi, contentApi, domainsApi, ApiError } from '@/lib/api';
+import { INBOX_DOMAIN_ID } from '@jerad-ops/shared';
 import { TaskForm } from '../task-form';
 
 // /tasks/new — full-editor task creation. The /today page still has the
 // quick "+ Add task" inline (title only); this page is for when you want
-// to set due date, priority, project, and content_item up front.
+// to set due date, priority, domain/project, and content_item up front.
 
 export default async function NewTaskPage({
   searchParams,
 }: {
-  searchParams: Promise<{ project_id?: string; content_item_id?: string }>;
+  searchParams: Promise<{ project_id?: string; domain_id?: string; content_item_id?: string }>;
 }) {
-  const { project_id: preProject, content_item_id: preContent } = await searchParams;
+  const { project_id: preProject, domain_id: preDomain, content_item_id: preContent } = await searchParams;
 
-  let projects: { id: string; name: string }[] = [];
+  let projects: { id: string; name: string; domain_id: string | null }[] = [];
+  let domains: { id: string; name: string; is_system?: boolean }[] = [];
   let contentItems: { id: string; title: string }[] = [];
 
-  const [projectsRes, contentRes] = await Promise.allSettled([
+  const [projectsRes, domainsRes, contentRes] = await Promise.allSettled([
     projectsApi.list(),
+    domainsApi.list(),
     contentApi.list(),
   ]);
 
   if (projectsRes.status === 'fulfilled') {
     projects = projectsRes.value.projects
       .filter((p) => p.status === 'active')
-      .map((p) => ({ id: p.id, name: p.name }))
+      .map((p) => ({ id: p.id, name: p.name, domain_id: p.domain?.id ?? null }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  if (domainsRes.status === 'fulfilled') {
+    domains = domainsRes.value.domains
+      .map((d) => ({ id: d.id, name: d.name, is_system: d.is_system === true }))
       .sort((a, b) => a.name.localeCompare(b.name));
   }
 
@@ -47,6 +56,15 @@ export default async function NewTaskPage({
     }
   }
 
+  // Pre-select: explicit project takes precedence; then explicit domain;
+  // otherwise leave blank so the picker shows Inbox at the top and the
+  // server defaults the routing.
+  const initialSelection = preProject
+    ? `project:${preProject}`
+    : preDomain
+      ? `domain:${preDomain}`
+      : `domain:${INBOX_DOMAIN_ID}`;
+
   return (
     <div>
       <div className="px-5 lg:px-0 pt-4 pb-1 font-mono text-[10px] uppercase tracking-wider text-ink-3">
@@ -66,7 +84,7 @@ export default async function NewTaskPage({
             due_date: '',
             due_time: '',
             priority: 4,
-            project_id: preProject ?? '',
+            selection: initialSelection,
             content_item_id: preContent ?? '',
             // Default to "At due time" (offset 0). The cron only fires
             // when a due_time is actually set, so this is a no-op for
@@ -74,6 +92,7 @@ export default async function NewTaskPage({
             remind_minutes: 0,
             recurrence_rule: '',
           }}
+          domains={domains}
           projects={projects}
           contentItems={contentItems}
         />

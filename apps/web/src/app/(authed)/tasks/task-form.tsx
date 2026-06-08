@@ -15,12 +15,22 @@ import {
 interface ProjectOption {
   id: string;
   name: string;
+  domain_id: string | null;
+}
+interface DomainOption {
+  id: string;
+  name: string;
+  is_system?: boolean;
 }
 interface ContentItemOption {
   id: string;
   title: string;
 }
 
+// `selection` encodes either a domain pick (`domain:<id>`) or a project
+// pick (`project:<id>`). The server action splits it back apart before
+// hitting the task API. One field, one decision — keeps the form simple
+// while preserving the Addendum 03 picker semantics.
 interface InitialValues {
   id?: string;                 // present → edit mode
   title: string;
@@ -28,7 +38,7 @@ interface InitialValues {
   due_date: string;
   due_time: string;
   priority: number;
-  project_id: string;
+  selection: string;            // domain:<id> | project:<id> | '' (= Inbox default on create)
   content_item_id: string;
   remind_minutes: number | '';  // '' = no reminder; only effective when due_time is set
   recurrence_rule: string;     // '' = no repeat
@@ -39,10 +49,12 @@ interface InitialValues {
 // delete-row at the bottom renders.
 export function TaskForm({
   initial,
+  domains,
   projects,
   contentItems,
 }: {
   initial: InitialValues;
+  domains: DomainOption[];
   projects: ProjectOption[];
   contentItems: ContentItemOption[];
 }) {
@@ -107,17 +119,12 @@ export function TaskForm({
               <option value="4">4 · Low (default)</option>
             </select>
           </Field>
-          <Field label="Project">
-            <select
-              name="project_id"
-              defaultValue={initial.project_id}
-              className="w-full bg-transparent border border-line focus:border-ink-2 focus:outline-none p-2 font-sans text-[14px] text-ink"
-            >
-              <option value="">(none)</option>
-              {projects.map((p) => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </select>
+          <Field label="Domain / Project">
+            <DomainProjectPicker
+              domains={domains}
+              projects={projects}
+              defaultValue={initial.selection}
+            />
           </Field>
         </div>
 
@@ -185,6 +192,67 @@ export function TaskForm({
         <DeleteRow taskId={initial.id} title={initial.title} />
       )}
     </>
+  );
+}
+
+// Grouped picker: Inbox at top, then each domain as an <optgroup> containing
+// the domain itself (selectable to create a direct-domain task) followed by
+// any projects under it. System domains other than Inbox aren't expected in
+// the data set; if any show up, they're filtered out — only Inbox earns the
+// dedicated top slot.
+function DomainProjectPicker({
+  domains,
+  projects,
+  defaultValue,
+}: {
+  domains: DomainOption[];
+  projects: ProjectOption[];
+  defaultValue: string;
+}) {
+  const inbox = domains.find((d) => d.is_system);
+  const userDomains = domains.filter((d) => !d.is_system);
+  // Group projects under their domain so the optgroup can render them
+  // inline. Projects without a domain (orphans) get a final ungrouped
+  // section so they're still pickable.
+  const projectsByDomain = new Map<string, ProjectOption[]>();
+  const orphanProjects: ProjectOption[] = [];
+  for (const p of projects) {
+    if (p.domain_id) {
+      const list = projectsByDomain.get(p.domain_id) ?? [];
+      list.push(p);
+      projectsByDomain.set(p.domain_id, list);
+    } else {
+      orphanProjects.push(p);
+    }
+  }
+  return (
+    <select
+      name="selection"
+      defaultValue={defaultValue}
+      className="w-full bg-transparent border border-line focus:border-ink-2 focus:outline-none p-2 font-sans text-[14px] text-ink"
+    >
+      {inbox && (
+        <option value={`domain:${inbox.id}`}>📥 Inbox (default — for unsorted tasks)</option>
+      )}
+      {userDomains.map((d) => {
+        const projects = projectsByDomain.get(d.id) ?? [];
+        return (
+          <optgroup key={d.id} label={d.name}>
+            <option value={`domain:${d.id}`}>{d.name} (domain)</option>
+            {projects.map((p) => (
+              <option key={p.id} value={`project:${p.id}`}>{p.name}</option>
+            ))}
+          </optgroup>
+        );
+      })}
+      {orphanProjects.length > 0 && (
+        <optgroup label="Other projects">
+          {orphanProjects.map((p) => (
+            <option key={p.id} value={`project:${p.id}`}>{p.name}</option>
+          ))}
+        </optgroup>
+      )}
+    </select>
   );
 }
 
