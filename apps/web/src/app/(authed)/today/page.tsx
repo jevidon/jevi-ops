@@ -207,21 +207,34 @@ export default async function TodayPage() {
 
         {/* ─── Right: commitments rail ────────────────────────── */}
         <div className="mt-9 lg:mt-0">
-          {/* Today: events */}
+          {/* Today: events. Whole section is a doorway to /calendar so
+              tapping the next-event row jumps straight to the day view. */}
           {briefing && briefing.events_today_count > 0 && (
             <section className="px-5 lg:px-0">
-              <div className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3 mb-3">
-                Today
+              <div className="flex items-baseline justify-between mb-3">
+                <div className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3">
+                  Today · {briefing.events_today_count}{' '}
+                  {briefing.events_today_count === 1 ? 'event' : 'events'}
+                </div>
+                <Link
+                  href="/calendar"
+                  className="font-mono text-[10px] uppercase tracking-wider text-ink-3 hover:text-accent transition-colors"
+                >
+                  Open →
+                </Link>
               </div>
               {briefing.next_event && (
-                <div className="flex items-baseline gap-4 py-1.5 border-b border-line">
+                <Link
+                  href="/calendar"
+                  className="flex items-baseline gap-4 py-1.5 border-b border-line hover:opacity-80 transition-opacity"
+                >
                   <span className="font-mono text-[12px] text-ink tabular-nums shrink-0 w-12">
                     {briefing.next_event.time}
                   </span>
                   <span className="font-sans text-[13px] text-ink-2 truncate">
                     {briefing.next_event.title}
                   </span>
-                </div>
+                </Link>
               )}
               {briefing.events_today_count > 1 && (
                 <Link
@@ -240,19 +253,23 @@ export default async function TodayPage() {
               href="/tasks"
               className="px-5 lg:px-0 mt-6 block hover:opacity-80 transition-opacity"
             >
-              <div className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3 mb-1">
-                Doing · {briefing.doing_today.open_count} open
-                {briefing.doing_today.overdue_count > 0 && (
-                  <span className="text-accent ml-1">
-                    · {briefing.doing_today.overdue_count} overdue
-                  </span>
-                )}
+              <div className="flex items-baseline justify-between mb-1">
+                <div className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3">
+                  Doing · {briefing.doing_today.open_count} open
+                  {briefing.doing_today.overdue_count > 0 && (
+                    <span className="text-accent ml-1">
+                      · {briefing.doing_today.overdue_count} overdue
+                    </span>
+                  )}
+                </div>
+                <span className="font-mono text-[10px] uppercase tracking-wider text-ink-3">
+                  Open →
+                </span>
               </div>
               <div className="font-sans text-[13px] text-ink-2 leading-snug">
                 {briefing.doing_today.titles.length > 0
                   ? briefing.doing_today.titles.join(' · ')
-                  : 'Nothing pinned for today.'}
-                <span className="text-ink-3 ml-1">all tasks →</span>
+                  : 'No priorities pinned. Tap to open the task list.'}
               </div>
             </Link>
           )}
@@ -302,30 +319,43 @@ function buildAnchorLine(briefing: BriefingPayload | null): React.ReactNode {
   const tasksOpen = briefing.doing_today.open_count;
   if (eventsCount === 0 && tasksOpen === 0) return null;
 
+  // Each clause is a Link so the user can tap the count to jump straight
+  // to the calendar or task list. Underline on hover is the editorial
+  // convention here — chip styling would feel too heavy in this row.
   const parts: React.ReactNode[] = [];
   if (eventsCount > 0) {
-    if (briefing.next_event) {
-      parts.push(
-        <span key="ev">
-          {eventsCount} {eventsCount === 1 ? 'event' : 'events'} today — next{' '}
-          <span className="font-mono text-ink-2 tabular-nums">{briefing.next_event.time}</span>{' '}
-          {briefing.next_event.title}.
-        </span>,
-      );
-    } else {
-      parts.push(<span key="ev">{eventsCount} events today.</span>);
-    }
+    parts.push(
+      <Link
+        key="ev"
+        href="/calendar"
+        className="hover:text-ink hover:underline underline-offset-2 transition-colors"
+      >
+        {eventsCount} {eventsCount === 1 ? 'event' : 'events'} today
+        {briefing.next_event && (
+          <>
+            {' '}— next{' '}
+            <span className="font-mono text-ink-2 tabular-nums">{briefing.next_event.time}</span>{' '}
+            {briefing.next_event.title}
+          </>
+        )}
+        .
+      </Link>,
+    );
   }
   if (tasksOpen > 0) {
     parts.push(
-      <span key="tk">
+      <Link
+        key="tk"
+        href="/tasks"
+        className="hover:text-ink hover:underline underline-offset-2 transition-colors"
+      >
         {' '}
         {tasksOpen} {tasksOpen === 1 ? 'task' : 'tasks'} open
         {briefing.doing_today.overdue_count > 0 && (
           <span className="text-accent"> · {briefing.doing_today.overdue_count} overdue</span>
         )}
         .
-      </span>,
+      </Link>,
     );
   }
   return parts;

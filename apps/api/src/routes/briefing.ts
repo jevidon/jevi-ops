@@ -143,12 +143,26 @@ export const briefingRoutes: FastifyPluginAsync = async (app) => {
       : null;
 
     // ─── Doing today ───────────────────────────────────────────────────
+    // Surface a usable preview of what's actionable, in priority order:
+    // overdue first (most urgent), then today's due-list, then user-pinned
+    // top-3. Without overdue in the strip a user with no due-today / no
+    // top-3 task would see "Nothing pinned for today." even when work is
+    // visibly past deadline — bad UX.
     type Task = { id: string; title: string; due_date: string | null; top3_for_date: string | null };
     const openTasks = (openTasksRes.data ?? []) as Task[];
+    const overdue = openTasks
+      .filter((t) => t.due_date && t.due_date < today)
+      .sort((a, b) => (a.due_date ?? '').localeCompare(b.due_date ?? ''));
     const top3 = openTasks.filter((t) => t.top3_for_date === today);
     const dueToday = openTasks.filter((t) => t.due_date === today && !top3.find((s) => s.id === t.id));
-    const overdue = openTasks.filter((t) => t.due_date && t.due_date < today);
-    const doingTitles = [...top3, ...dueToday].slice(0, 3).map((t) => t.title);
+    const seen = new Set<string>();
+    const doingTitles: string[] = [];
+    for (const t of [...overdue, ...top3, ...dueToday]) {
+      if (seen.has(t.id)) continue;
+      seen.add(t.id);
+      doingTitles.push(t.title);
+      if (doingTitles.length >= 3) break;
+    }
 
     // ─── Routines for today ────────────────────────────────────────────
     type Routine = { id: string; name: string; last_done_date: string | null };
