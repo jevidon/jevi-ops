@@ -20,13 +20,16 @@ export const DomainSchema = z.object({
   updated_at: z.string().datetime({ offset: true }),
 });
 
-// Patch shape used by the UI's edit form. failure_patterns is intentionally
-// excluded — editing nested JSON in a form is a footgun, and these patterns
-// change rarely enough that SQL is fine for now.
+// Patch shape used by the UI's edit form. failure_patterns is included so
+// the cadence rule editor on the domain detail page can replace the whole
+// array atomically (advanced rule types still get edited via SQL; the
+// editor only manages the primary cadence rule, but it sends the merged
+// final array).
 export const UpdateDomainSchema = z.object({
   name: z.string().min(1).optional(),
   description: z.string().nullable().optional(),
   fruit_definition: z.string().nullable().optional(),
   expected_cadence: z.string().nullable().optional(),
   active: z.boolean().optional(),
+  failure_patterns: z.array(FailurePatternSchema).optional(),
 });

@@ -4,7 +4,55 @@ import { ScreenHeader } from '@/components/ScreenHeader';
 import { domainsApi, tasksApi, ApiError } from '@/lib/api';
 import type { Domain, Task } from '@jerad-ops/shared';
 import { EditDomainForm } from './edit-domain-form';
+import { CadenceEditor } from './cadence-editor';
+import { CADENCE_RULE_TYPES, type CadenceRuleType } from './actions';
 import { getAppTimezone } from '@/lib/app-settings';
+
+const PRIMARY_CADENCE_RULES = new Set<string>(
+  CADENCE_RULE_TYPES.filter((r) => r !== 'none'),
+);
+
+// Pull the primary cadence rule (one of days_since_journal /
+// days_since_publish / no_activity_days) out of failure_patterns so the
+// editor opens with the current setting pre-selected.
+function extractCadenceRule(patterns: unknown): { rule: CadenceRuleType; value: number | null } {
+  if (!Array.isArray(patterns)) return { rule: 'none', value: null };
+  for (const raw of patterns) {
+    if (!raw || typeof raw !== 'object') continue;
+    const p = raw as { rule?: string; value?: unknown };
+    if (typeof p.rule === 'string' && PRIMARY_CADENCE_RULES.has(p.rule)) {
+      const v = typeof p.value === 'number' ? p.value : null;
+      return { rule: p.rule as CadenceRuleType, value: v };
+    }
+  }
+  return { rule: 'none', value: null };
+}
+
+function advancedPatterns(patterns: unknown): unknown[] {
+  if (!Array.isArray(patterns)) return [];
+  return patterns.filter((p) => {
+    if (!p || typeof p !== 'object') return false;
+    const rule = (p as { rule?: string }).rule;
+    return typeof rule === 'string' && !PRIMARY_CADENCE_RULES.has(rule);
+  });
+}
+
+function hasAdvancedPatterns(patterns: unknown): boolean {
+  return advancedPatterns(patterns).length > 0;
+}
+
+// Header meta — show the active cadence rule + threshold when one is set;
+// otherwise say "no cadence rule" so the unconfigured state is honest.
+const CADENCE_RULE_SHORT: Record<string, string> = {
+  days_since_journal: 'days since journal',
+  days_since_publish: 'days since publish',
+  no_activity_days: 'days since activity',
+};
+function describeCadence(patterns: unknown): string {
+  const { rule, value } = extractCadenceRule(patterns);
+  if (rule === 'none' || value == null) return 'No cadence rule';
+  return `${value} ${CADENCE_RULE_SHORT[rule] ?? rule}`;
+}
 
 // /domains/[id] — domain detail + edit. Shows direct domain tasks and
 // project-grouped tasks so the user can see ongoing-responsibility work
@@ -75,9 +123,6 @@ export default async function DomainDetailPage({
     .sort((a, b) => a.name.localeCompare(b.name));
 
   const isInbox = domain.is_system === true;
-  const patternCount = Array.isArray(domain.failure_patterns)
-    ? domain.failure_patterns.length
-    : 0;
 
   return (
     <div>
@@ -92,7 +137,7 @@ export default async function DomainDetailPage({
         title={domain.name}
         meta={isInbox
           ? `${openTasks.length} ${openTasks.length === 1 ? 'task' : 'tasks'} awaiting triage`
-          : `${patternCount} failure ${patternCount === 1 ? 'pattern' : 'patterns'} watched`}
+          : describeCadence(domain.failure_patterns)}
       />
       <div className="hairline mb-6" />
 
@@ -171,16 +216,35 @@ export default async function DomainDetailPage({
           )}
         </div>
 
-        {/* Read-only failure patterns view (hidden for Inbox) */}
-        {!isInbox && patternCount > 0 && (
+        {/* Cadence rule editor (hidden for Inbox — system domain). The
+            briefing's "In brief" only reads `days_since_*` and
+            `no_activity_days` rules; this editor owns that one entry.
+            Advanced rule types still live in failure_patterns but get
+            edited via SQL — the action preserves them across saves. */}
+        {!isInbox && (
           <div className="mt-12 pt-6 border-t border-line">
-            <div className="eyebrow mb-3">Failure patterns (read-only)</div>
+            <div className="eyebrow mb-3">Cadence rule</div>
+            <CadenceEditor
+              domainId={domain.id}
+              currentRule={extractCadenceRule(domain.failure_patterns).rule}
+              currentValue={extractCadenceRule(domain.failure_patterns).value}
+            />
+          </div>
+        )}
+
+        {/* Advanced failure patterns — only render the read-only view when
+            there are any non-cadence rules in the array so users can see
+            what's still SQL-managed. */}
+        {!isInbox && hasAdvancedPatterns(domain.failure_patterns) && (
+          <div className="mt-10 pt-6 border-t border-line">
+            <div className="eyebrow mb-3">Advanced patterns (read-only)</div>
             <p className="font-sans text-[12px] text-ink-3 mb-3 leading-relaxed">
-              The observations cron evaluates these rules against this domain. Edit via SQL
-              for now — a dedicated UI is on the roadmap.
+              Advanced rule types (deadline windows, hours-over-quote,
+              shoot-checklist windows, etc.) take more parameters than the
+              cadence editor handles. Edit via SQL for now.
             </p>
             <pre className="font-mono text-[11px] text-ink-2 bg-surface border border-line p-3 overflow-auto">
-              {JSON.stringify(domain.failure_patterns, null, 2)}
+              {JSON.stringify(advancedPatterns(domain.failure_patterns), null, 2)}
             </pre>
           </div>
         )}

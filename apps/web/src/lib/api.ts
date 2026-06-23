@@ -226,6 +226,10 @@ export interface DomainUpdate {
   fruit_definition?: string | null;
   expected_cadence?: string | null;
   active?: boolean;
+  // Replaces the whole failure_patterns array. The cadence-rule editor
+  // sends a merged list (preserves SQL-managed advanced rules + replaces
+  // the primary cadence rule); other callers send their own complete set.
+  failure_patterns?: Array<{ rule: string; value?: unknown; [k: string]: unknown }>;
 }
 
 export const contentApi = {
