@@ -151,134 +151,143 @@ export default async function TodayPage() {
         </Link>
       )}
 
-      {/* ─── In brief ─────────────────────────────────────────────── */}
-      <section className="px-5 lg:px-0 mt-7">
-        <div className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3 mb-3">
-          In brief
-        </div>
-        {briefing && briefing.brief_lines.length === 0 ? (
-          <p className="font-serif text-[15px] text-ink-2 italic leading-relaxed">
-            Nothing past cadence. Every domain is within its rhythm — rare and
-            worth noticing.
-          </p>
-        ) : (
-          briefing?.brief_lines.map((line) => (
-            <BriefLineRow key={line.id} line={line} />
-          ))
-        )}
-      </section>
-
-      {/* ─── Resurfaced ───────────────────────────────────────────── */}
-      {resurface && (
-        <section className="mt-9 mx-5 lg:mx-0 bg-surface border-y border-line py-6 px-5">
-          <div className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3 mb-3">
-            Resurfaced
-          </div>
-          <blockquote className="font-serif text-[19px] italic leading-snug text-ink">
-            &ldquo;{resurface.excerpt}&rdquo;
-          </blockquote>
-          {resurface.source && (
-            <div className="mt-3 font-mono text-[11px] uppercase tracking-wider text-ink-3">
-              — {resurface.source}
+      {/* ─── Two-column grid on desktop ─────────────────────────────
+          Mobile keeps the original vertical flow (single column).
+          Desktop splits into editorial (in brief + resurfaced) on the
+          left and commitments + routines on the right so the whole
+          briefing fits in one viewport without scrolling. Inbox above
+          and Capture below stay full-width. Matches the design brief's
+          BriefingDesktop pattern, with routines added to the right rail
+          per Jerad's daily check-off use case. */}
+      <div className="mt-7 lg:grid lg:grid-cols-[1.5fr_1fr] lg:gap-x-10 lg:items-start">
+        {/* ─── Left: editorial body ───────────────────────────── */}
+        <div>
+          {/* In brief */}
+          <section className="px-5 lg:px-0">
+            <div className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3 mb-3">
+              In brief
             </div>
-          )}
-          {resurface.href && (
-            <Link
-              href={resurface.href}
-              className="mt-3 inline-block font-mono text-[10px] uppercase tracking-wider text-accent hover:text-accent-ink transition-colors"
-            >
-              Open in {resurface.kind === 'quote' ? 'Quotes' : 'Journal'} →
-            </Link>
-          )}
-        </section>
-      )}
-
-      {/* ─── Today: events ────────────────────────────────────────── */}
-      {briefing && briefing.events_today_count > 0 && (
-        <section className="px-5 lg:px-0 mt-9">
-          <div className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3 mb-3">
-            Today
-          </div>
-          {briefing.next_event && (
-            <div className="flex items-baseline gap-4 py-1.5 border-b border-line">
-              <span className="font-mono text-[12px] text-ink tabular-nums shrink-0 w-12">
-                {briefing.next_event.time}
-              </span>
-              <span className="font-sans text-[13px] text-ink-2 truncate">
-                {briefing.next_event.title}
-              </span>
-            </div>
-          )}
-          {briefing.events_today_count > 1 && (
-            <Link
-              href="/calendar"
-              className="mt-2 inline-block font-mono text-[10px] uppercase tracking-wider text-ink-3 hover:text-accent transition-colors"
-            >
-              + {briefing.events_today_count - 1} more →
-            </Link>
-          )}
-        </section>
-      )}
-
-      {/* ─── Doing today strip ───────────────────────────────────── */}
-      {briefing && briefing.doing_today.open_count > 0 && (
-        <Link
-          href="/tasks"
-          className="px-5 lg:px-0 mt-6 block hover:opacity-80 transition-opacity"
-        >
-          <div className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3 mb-1">
-            Doing · {briefing.doing_today.open_count} open
-            {briefing.doing_today.overdue_count > 0 && (
-              <span className="text-accent ml-1">
-                · {briefing.doing_today.overdue_count} overdue
-              </span>
+            {briefing && briefing.brief_lines.length === 0 ? (
+              <p className="font-serif text-[15px] text-ink-2 italic leading-relaxed">
+                Nothing past cadence. Every domain is within its rhythm —
+                rare and worth noticing.
+              </p>
+            ) : (
+              briefing?.brief_lines.map((line) => (
+                <BriefLineRow key={line.id} line={line} />
+              ))
             )}
-          </div>
-          <div className="font-sans text-[13px] text-ink-2 leading-snug">
-            {briefing.doing_today.titles.length > 0
-              ? briefing.doing_today.titles.join(' · ')
-              : 'Nothing pinned for today.'}
-            <span className="text-ink-3 ml-1">all tasks →</span>
-          </div>
-        </Link>
-      )}
+          </section>
 
-      {/* ─── Routines (inline check-off) ─────────────────────────────
-          Routines need to be checkable from Today — that's the whole
-          point of a daily habit list. The strip-with-doorway pattern
-          we use for tasks is wrong here; the user expects to tap the
-          checkbox in place. Header shows the count + a doorway to the
-          full /routines view (analytics, archive, etc.).
-
-          We render the section header even when the routines fetch
-          returned nothing so a silent failure (auth, network, server)
-          can be told apart from a true empty state. */}
-      <section className="px-5 lg:px-0 mt-7">
-        <div className="flex items-baseline justify-between mb-3">
-          <div className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3">
-            Routines · {briefing?.routines_today.done ?? 0} of{' '}
-            {briefing?.routines_today.total ?? routines.length} today
-          </div>
-          <Link
-            href="/routines"
-            className="font-mono text-[10px] uppercase tracking-wider text-ink-3 hover:text-accent transition-colors"
-          >
-            All →
-          </Link>
+          {/* Resurfaced */}
+          {resurface && (
+            <section className="mt-9 mx-5 lg:mx-0 bg-surface border-y border-line py-6 px-5">
+              <div className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3 mb-3">
+                Resurfaced
+              </div>
+              <blockquote className="font-serif text-[19px] italic leading-snug text-ink">
+                &ldquo;{resurface.excerpt}&rdquo;
+              </blockquote>
+              {resurface.source && (
+                <div className="mt-3 font-mono text-[11px] uppercase tracking-wider text-ink-3">
+                  — {resurface.source}
+                </div>
+              )}
+              {resurface.href && (
+                <Link
+                  href={resurface.href}
+                  className="mt-3 inline-block font-mono text-[10px] uppercase tracking-wider text-accent hover:text-accent-ink transition-colors"
+                >
+                  Open in {resurface.kind === 'quote' ? 'Quotes' : 'Journal'} →
+                </Link>
+              )}
+            </section>
+          )}
         </div>
-        {routines.length > 0 ? (
-          <RoutinesTodayList routines={routines} compact today={today} />
-        ) : (
-          <Link
-            href="/routines"
-            className="block font-sans text-[13px] text-ink-3 italic hover:text-ink-2 transition-colors"
-          >
-            {routinesRes.status === 'rejected'
-              ? 'Couldn’t load routines — open /routines to check.'
-              : 'No active routines. Add one →'}
-          </Link>
-        )}
-      </section>
+
+        {/* ─── Right: commitments rail ────────────────────────── */}
+        <div className="mt-9 lg:mt-0">
+          {/* Today: events */}
+          {briefing && briefing.events_today_count > 0 && (
+            <section className="px-5 lg:px-0">
+              <div className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3 mb-3">
+                Today
+              </div>
+              {briefing.next_event && (
+                <div className="flex items-baseline gap-4 py-1.5 border-b border-line">
+                  <span className="font-mono text-[12px] text-ink tabular-nums shrink-0 w-12">
+                    {briefing.next_event.time}
+                  </span>
+                  <span className="font-sans text-[13px] text-ink-2 truncate">
+                    {briefing.next_event.title}
+                  </span>
+                </div>
+              )}
+              {briefing.events_today_count > 1 && (
+                <Link
+                  href="/calendar"
+                  className="mt-2 inline-block font-mono text-[10px] uppercase tracking-wider text-ink-3 hover:text-accent transition-colors"
+                >
+                  + {briefing.events_today_count - 1} more →
+                </Link>
+              )}
+            </section>
+          )}
+
+          {/* Doing today strip */}
+          {briefing && briefing.doing_today.open_count > 0 && (
+            <Link
+              href="/tasks"
+              className="px-5 lg:px-0 mt-6 block hover:opacity-80 transition-opacity"
+            >
+              <div className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3 mb-1">
+                Doing · {briefing.doing_today.open_count} open
+                {briefing.doing_today.overdue_count > 0 && (
+                  <span className="text-accent ml-1">
+                    · {briefing.doing_today.overdue_count} overdue
+                  </span>
+                )}
+              </div>
+              <div className="font-sans text-[13px] text-ink-2 leading-snug">
+                {briefing.doing_today.titles.length > 0
+                  ? briefing.doing_today.titles.join(' · ')
+                  : 'Nothing pinned for today.'}
+                <span className="text-ink-3 ml-1">all tasks →</span>
+              </div>
+            </Link>
+          )}
+
+          {/* Routines (inline check-off). Header renders even when the
+              fetch returns empty so a silent failure (auth, network,
+              server) is told apart from a real empty state. */}
+          <section className="px-5 lg:px-0 mt-7">
+            <div className="flex items-baseline justify-between mb-3">
+              <div className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3">
+                Routines · {briefing?.routines_today.done ?? 0} of{' '}
+                {briefing?.routines_today.total ?? routines.length} today
+              </div>
+              <Link
+                href="/routines"
+                className="font-mono text-[10px] uppercase tracking-wider text-ink-3 hover:text-accent transition-colors"
+              >
+                All →
+              </Link>
+            </div>
+            {routines.length > 0 ? (
+              <RoutinesTodayList routines={routines} compact today={today} />
+            ) : (
+              <Link
+                href="/routines"
+                className="block font-sans text-[13px] text-ink-3 italic hover:text-ink-2 transition-colors"
+              >
+                {routinesRes.status === 'rejected'
+                  ? 'Couldn’t load routines — open /routines to check.'
+                  : 'No active routines. Add one →'}
+              </Link>
+            )}
+          </section>
+        </div>
+      </div>
 
 
       {/* ─── Capture chips ───────────────────────────────────────── */}
