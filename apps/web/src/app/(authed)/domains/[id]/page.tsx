@@ -165,7 +165,6 @@ export default async function DomainDetailPage({
               name: domain.name,
               description: domain.description ?? '',
               fruit_definition: domain.fruit_definition ?? '',
-              expected_cadence: domain.expected_cadence ?? '',
               active: domain.active,
             }}
           />

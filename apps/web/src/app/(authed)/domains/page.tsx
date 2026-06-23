@@ -152,9 +152,18 @@ function QuietRow({ row }: { row: CadenceRow }) {
   );
 }
 
-// Unconfigured domain (no days_since_X rule, or no data yet). Quietest
-// visual treatment so they don't compete with the slipping rows.
+// Unconfigured domain — two cases:
+//   1. row.rule === null     → no cadence rule defined yet ("no cadence rule")
+//   2. row.rule !== null     → rule is set but the source data is empty
+//                              (Field Notes with no published content_items,
+//                              Personal with no journal entries, etc.) — the
+//                              metric can't be computed yet. Caller needs to
+//                              know the rule exists; it's not "the user forgot
+//                              to set this up," it's "the data isn't there."
 function UnconfiguredRow({ row }: { row: CadenceRow }) {
+  const meta = row.rule == null
+    ? 'no cadence rule'
+    : 'rule set · no data yet';
   return (
     <Link
       href={`/domains/${row.id}`}
@@ -162,7 +171,7 @@ function UnconfiguredRow({ row }: { row: CadenceRow }) {
     >
       <span className="font-serif text-[15px] text-ink-3 truncate">{row.name}</span>
       <span className="font-mono text-[10px] uppercase tracking-wider text-ink-4">
-        no cadence rule
+        {meta}
       </span>
     </Link>
   );

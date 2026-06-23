@@ -21,10 +21,10 @@ export async function updateDomainAction(
   if (!name) return { ok: false, error: 'Name is required.' };
 
   // Nullable text fields — empty string becomes null in the DB so we don't
-  // store blank strings.
+  // store blank strings. expected_cadence dropped from the form (made
+  // redundant by the cadence rule editor); the column stays in the DB.
   const description = (String(formData.get('description') ?? '').trim()) || null;
   const fruit_definition = (String(formData.get('fruit_definition') ?? '').trim()) || null;
-  const expected_cadence = (String(formData.get('expected_cadence') ?? '').trim()) || null;
   const active = formData.get('active') === 'on';
 
   try {
@@ -32,7 +32,6 @@ export async function updateDomainAction(
       name,
       description,
       fruit_definition,
-      expected_cadence,
       active,
     });
   } catch (err) {

@@ -5,12 +5,15 @@ import { useFormStatus } from 'react-dom';
 import { updateDomainAction, type SaveResult } from './actions';
 import { useTransientSaveResult } from '@/lib/use-transient-save-result';
 
+// `expected_cadence` used to live in this form as a free-text field —
+// removed once the cadence rule editor below the form became the
+// machine-readable source of truth. The column stays in the DB for
+// backwards compat but isn't editable from the UI anymore.
 interface InitialValues {
   id: string;
   name: string;
   description: string;
   fruit_definition: string;
-  expected_cadence: string;
   active: boolean;
 }
 
@@ -53,16 +56,6 @@ export function EditDomainForm({ initial }: { initial: InitialValues }) {
           defaultValue={initial.fruit_definition}
           placeholder="What good looks like in this domain."
           className="w-full bg-transparent border border-line focus:border-ink-2 focus:outline-none p-2 font-sans text-[14px] text-ink resize-y"
-        />
-      </Field>
-
-      <Field label="Expected cadence">
-        <input
-          type="text"
-          name="expected_cadence"
-          defaultValue={initial.expected_cadence}
-          placeholder='e.g. "one publish every 7-10 days"'
-          className="w-full bg-transparent border-b border-line focus:border-ink-2 focus:outline-none py-1.5 font-sans text-[14px] text-ink"
         />
       </Field>
 
