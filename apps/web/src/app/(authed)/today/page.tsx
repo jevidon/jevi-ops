@@ -248,24 +248,38 @@ export default async function TodayPage() {
           point of a daily habit list. The strip-with-doorway pattern
           we use for tasks is wrong here; the user expects to tap the
           checkbox in place. Header shows the count + a doorway to the
-          full /routines view (analytics, archive, etc.). */}
-      {routines.length > 0 && (
-        <section className="px-5 lg:px-0 mt-7">
-          <div className="flex items-baseline justify-between mb-3">
-            <div className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3">
-              Routines · {briefing?.routines_today.done ?? 0} of{' '}
-              {briefing?.routines_today.total ?? routines.length} today
-            </div>
-            <Link
-              href="/routines"
-              className="font-mono text-[10px] uppercase tracking-wider text-ink-3 hover:text-accent transition-colors"
-            >
-              All →
-            </Link>
+          full /routines view (analytics, archive, etc.).
+
+          We render the section header even when the routines fetch
+          returned nothing so a silent failure (auth, network, server)
+          can be told apart from a true empty state. */}
+      <section className="px-5 lg:px-0 mt-7">
+        <div className="flex items-baseline justify-between mb-3">
+          <div className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3">
+            Routines · {briefing?.routines_today.done ?? 0} of{' '}
+            {briefing?.routines_today.total ?? routines.length} today
           </div>
+          <Link
+            href="/routines"
+            className="font-mono text-[10px] uppercase tracking-wider text-ink-3 hover:text-accent transition-colors"
+          >
+            All →
+          </Link>
+        </div>
+        {routines.length > 0 ? (
           <RoutinesTodayList routines={routines} compact today={today} />
-        </section>
-      )}
+        ) : (
+          <Link
+            href="/routines"
+            className="block font-sans text-[13px] text-ink-3 italic hover:text-ink-2 transition-colors"
+          >
+            {routinesRes.status === 'rejected'
+              ? 'Couldn’t load routines — open /routines to check.'
+              : 'No active routines. Add one →'}
+          </Link>
+        )}
+      </section>
+
 
       {/* ─── Capture chips ───────────────────────────────────────── */}
       <CaptureChips />
