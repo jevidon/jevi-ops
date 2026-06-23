@@ -5,6 +5,7 @@ import { domainsApi, tasksApi, ApiError } from '@/lib/api';
 import type { Domain, Task } from '@jerad-ops/shared';
 import { EditDomainForm } from './edit-domain-form';
 import { CadenceEditor } from './cadence-editor';
+import { MarkShipped } from './mark-shipped';
 import { PRIMARY_CADENCE_RULES, type CadenceRuleType } from './cadence-rules';
 import { getAppTimezone } from '@/lib/app-settings';
 
@@ -224,6 +225,25 @@ export default async function DomainDetailPage({
               currentRule={extractCadenceRule(domain.failure_patterns).rule}
               currentValue={extractCadenceRule(domain.failure_patterns).value}
             />
+            {/* Mark-shipped button — only useful for days_since_publish
+                rules. For days_since_journal we read from journal_entries
+                directly; for no_activity_days we read activity_log. */}
+            {extractCadenceRule(domain.failure_patterns).rule === 'days_since_publish' && (
+              <div className="mt-5 pt-5 border-t border-line/40">
+                <div className="eyebrow mb-2">Off-dashboard publishes</div>
+                <p className="font-sans text-[12px] text-ink-3 mb-3 leading-relaxed">
+                  If you publish for this domain outside the dashboard (Substack,
+                  social, etc.) and don&rsquo;t plan to log every piece as a
+                  content item, tap below to record the publish manually. The
+                  cadence reads whichever&rsquo;s more recent.
+                </p>
+                <MarkShipped
+                  domainId={domain.id}
+                  lastShippedAt={domain.last_shipped_at ?? null}
+                  tz={tz}
+                />
+              </div>
+            )}
           </div>
         )}
 

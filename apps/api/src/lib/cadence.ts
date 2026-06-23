@@ -96,9 +96,15 @@ export async function computeDomainCadences(sb: SupabaseClient): Promise<Cadence
 
   // Pull active, non-system domains + the three rollups in parallel.
   // Each rollup is one query — cheaper than N domain-by-domain reads.
+  //
+  // last_shipped_at is the manual "I shipped something" timestamp added
+  // in migration 0027. For days_since_publish rules we take MAX of the
+  // latest content_items.published_at and this column, so domains whose
+  // work happens off-dashboard (Substack essays, etc.) can still keep
+  // a real cadence by tapping the "Mark shipped" button.
   const [domainsRes, lastJournalRes, publishesRes, activitiesRes] = await Promise.all([
     sb.from('stewardship_domains')
-      .select('id, name, failure_patterns')
+      .select('id, name, failure_patterns, last_shipped_at')
       .eq('active', true)
       .eq('is_system', false),
     sb.from('journal_entries')
@@ -116,7 +122,12 @@ export async function computeDomainCadences(sb: SupabaseClient): Promise<Cadence
       .limit(500),
   ]);
 
-  const domains = (domainsRes.data ?? []) as Array<{ id: string; name: string; failure_patterns: unknown }>;
+  const domains = (domainsRes.data ?? []) as Array<{
+    id: string;
+    name: string;
+    failure_patterns: unknown;
+    last_shipped_at: string | null;
+  }>;
   const lastJournalDate = (lastJournalRes.data?.[0]?.entry_date as string | undefined) ?? null;
 
   type PubRow = { domain_id: string | null; published_at: string };
@@ -164,9 +175,26 @@ export async function computeDomainCadences(sb: SupabaseClient): Promise<Cadence
 
     let lastIso: string | null = null;
     switch (hit.rule) {
-      case 'days_since_journal': lastIso = lastJournalDate; break;
-      case 'days_since_publish': lastIso = latestPublishByDomain.get(d.id) ?? null; break;
-      case 'no_activity_days': lastIso = latestActivityByDomain.get(d.id) ?? null; break;
+      case 'days_since_journal':
+        lastIso = lastJournalDate;
+        break;
+      case 'days_since_publish': {
+        // Take whichever's most recent: latest tracked content_items
+        // publish OR the manual "Mark shipped" timestamp on the domain.
+        // Lets domains whose work lives off-dashboard (Substack, etc.)
+        // record a cadence without logging every external piece.
+        const contentLatest = latestPublishByDomain.get(d.id) ?? null;
+        const manualLatest = d.last_shipped_at ?? null;
+        if (contentLatest && manualLatest) {
+          lastIso = contentLatest > manualLatest ? contentLatest : manualLatest;
+        } else {
+          lastIso = contentLatest ?? manualLatest;
+        }
+        break;
+      }
+      case 'no_activity_days':
+        lastIso = latestActivityByDomain.get(d.id) ?? null;
+        break;
     }
 
     if (!lastIso) {

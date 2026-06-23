@@ -16,6 +16,11 @@ export const DomainSchema = z.object({
   // Added by migration 0026. System domains (currently just Inbox) are
   // protected from rename/deactivate and excluded from slippage detection.
   is_system: z.boolean().default(false),
+  // Added by migration 0027. Manual "I shipped something" timestamp for
+  // domains whose work lives off-dashboard (Substack, social, etc.). The
+  // cadence helper's days_since_publish rule reads MAX of this and the
+  // latest content_items.published_at.
+  last_shipped_at: z.string().datetime({ offset: true }).nullable().optional(),
   created_at: z.string().datetime({ offset: true }),
   updated_at: z.string().datetime({ offset: true }),
 });
@@ -32,4 +37,7 @@ export const UpdateDomainSchema = z.object({
   expected_cadence: z.string().nullable().optional(),
   active: z.boolean().optional(),
   failure_patterns: z.array(FailurePatternSchema).optional(),
+  // Stamped via the "Mark shipped" button on the domain detail page.
+  // Accept ISO datetime or null (to clear).
+  last_shipped_at: z.string().datetime({ offset: true }).nullable().optional(),
 });

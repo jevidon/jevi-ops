@@ -115,3 +115,38 @@ export async function setCadenceRuleAction(
   revalidatePath('/today');
   return { ok: true };
 }
+
+// ─── Mark shipped ────────────────────────────────────────────────────────
+//
+// One-tap "I shipped something for this domain" — stamps the
+// last_shipped_at timestamp to now. The cadence helper reads MAX of this
+// and the latest content_items.published_at for days_since_publish, so
+// users whose work lives off-dashboard (Substack essays, social video,
+// etc.) can still keep a real cadence without logging every external
+// post as a content_items row.
+
+export type MarkShippedResult = { ok: true; at: string } | { ok: false; error: string };
+
+export async function markShippedAction(
+  _prev: MarkShippedResult | null,
+  formData: FormData,
+): Promise<MarkShippedResult> {
+  const id = String(formData.get('id') ?? '');
+  if (!id) return { ok: false, error: 'Missing id.' };
+
+  const at = new Date().toISOString();
+  try {
+    await domainsApi.update(id, { last_shipped_at: at });
+  } catch (err) {
+    if (err instanceof ApiError) {
+      const body = err.body as { error?: string } | null;
+      return { ok: false, error: body?.error ?? `API ${err.status}` };
+    }
+    return { ok: false, error: (err as Error).message };
+  }
+
+  revalidatePath(`/domains/${id}`);
+  revalidatePath('/domains');
+  revalidatePath('/today');
+  return { ok: true, at };
+}

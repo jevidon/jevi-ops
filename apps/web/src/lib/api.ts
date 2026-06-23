@@ -230,6 +230,9 @@ export interface DomainUpdate {
   // sends a merged list (preserves SQL-managed advanced rules + replaces
   // the primary cadence rule); other callers send their own complete set.
   failure_patterns?: Array<{ rule: string; value?: unknown; [k: string]: unknown }>;
+  // "Mark shipped" timestamp — manually stamped via the domain detail
+  // page button. The cadence helper reads MAX(this, content_items.publish).
+  last_shipped_at?: string | null;
 }
 
 export const contentApi = {
