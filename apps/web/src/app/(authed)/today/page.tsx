@@ -1,605 +1,326 @@
-import { ScreenHeader } from '@/components/ScreenHeader';
-import { AccountChip } from '@/components/AccountChip';
-import { TaskItem } from '@/components/TaskItem';
-import { AddTaskForm } from './add-task-form';
 import Link from 'next/link';
-import { tasksApi, calendarApi, notificationsApi, observationsApi, libraryApi, routinesApi, ApiError, type CalendarEvent, type Notification, type Observation, type Note, type RoutineListItem } from '@/lib/api';
-import { RoutinesTodayList } from '@/app/(authed)/routines/routines-today-list';
-import { dismissObservationAction } from './actions';
 import {
-  classifyAsOwnThoughtAction,
-  classifyAsReadingAction,
-  classifyAsMeetingAction,
-  classifyAsBrainstormAction,
-  clearReviewFlagAction,
-} from './needs-review-actions';
-import { todayIsoDate, isToday } from '@/lib/today';
+  briefingApi,
+  libraryApi,
+  notificationsApi,
+  ApiError,
+  type BriefingPayload,
+  type ResurfacingItem,
+} from '@/lib/api';
 import { getAppTimezone } from '@/lib/app-settings';
-import type { Task } from '@jerad-ops/shared';
-import { INBOX_DOMAIN_ID } from '@jerad-ops/shared';
+import { BriefLineRow } from './brief-line';
 
-// Today screen — most important UI per spec §4.
+// The Briefing — editorial home screen (Jun 2026 redesign).
 //
-// Mobile: single column, everything stacks top-to-bottom.
-// Desktop (lg+): two-column grid (1.6fr 1fr). Left = focus (Top 3, calendar,
-//   all open tasks). Right = ambient (slipping, observation, resurfacing,
-//   notifications, completed-today). Section order is the same source-of-
-//   truth in both viewports — just rearranged by CSS grid.
+// Lead with state, not a checklist. The page reads like a newspaper:
+// masthead → commitments anchor line → Inbox triage (when active) → "In
+// brief" lines (one per slipping domain, with a fact and a routing label)
+// → resurfaced pull-quote → today's events + "Doing today" + "Routines
+// today" strips → capture chips.
+//
+// Tone is strict: facts only. "23 days since a journal entry." never
+// "you should journal." Discomfort comes from size and prominence of
+// facts, never from alert colors or nudge copy.
 
-function todayLabel(tz: string) {
+function mastheadDate(tz: string): { day: string; meta: string } {
   const d = new Date();
-  return d.toLocaleDateString('en-US', {
+  const day = d.toLocaleDateString('en-US', {
     timeZone: tz,
     weekday: 'long',
     month: 'long',
     day: 'numeric',
   });
+  // Editorial "WEEK 26" style dateline. ISO week-of-year not in
+  // Intl.DateTimeFormat — compute manually using the standard ISO formula.
+  const isoWeek = computeIsoWeek(d, tz);
+  const meta = d
+    .toLocaleDateString('en-US', { timeZone: tz, weekday: 'short', month: 'short', day: '2-digit' })
+    .toUpperCase() + ` · WEEK ${isoWeek}`;
+  return { day, meta };
 }
 
-function splitTasks(tasks: Task[], tz: string) {
-  const today = todayIsoDate(tz);
-  const open = tasks.filter((t) => t.status === 'open');
-
-  const top3 = open
-    .filter((t) => t.top3_for_date === today)
-    .sort((a, b) => a.created_at.localeCompare(b.created_at));
-
-  const top3Ids = new Set(top3.map((t) => t.id));
-
-  // Inbox sort tiers (Todoist/Reminders-style):
-  //   1. Overdue (past dates, ascending — oldest first so most-overdue at top)
-  //   2. Due today
-  //   3. No due date (most recently created first)
-  //   4. Future due (ascending — tomorrow first)
-  // The motivation: tomorrow's task shouldn't dominate today's view; it
-  // sits below the "do whenever" pile so you only see it after dealing
-  // with everything immediate.
-  const tier = (t: Task): number => {
-    if (!t.due_date) return 2;
-    if (t.due_date < today) return 0;  // overdue
-    if (t.due_date === today) return 1;  // today
-    return 3;  // future
-  };
-  const inbox = open
-    .filter((t) => !top3Ids.has(t.id))
-    .sort((a, b) => {
-      const ta = tier(a);
-      const tb = tier(b);
-      if (ta !== tb) return ta - tb;
-
-      switch (ta) {
-        case 0:  // overdue — oldest first
-        case 3:  // future — soonest first
-          return (a.due_date ?? '').localeCompare(b.due_date ?? '');
-        case 1:  // today — most recently created (newest first)
-        case 2:  // undated — most recently created
-          return b.created_at.localeCompare(a.created_at);
-      }
-      return 0;
-    });
-
-  const doneToday = tasks
-    .filter((t) => t.status === 'done' && isToday(tz, t.completed_at ?? null))
-    .sort((a, b) => (b.completed_at ?? '').localeCompare(a.completed_at ?? ''));
-
-  return { top3, inbox, doneToday };
+function computeIsoWeek(now: Date, tz: string): number {
+  const isoDate = new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(now);
+  const d = new Date(isoDate + 'T00:00:00Z');
+  // Standard ISO week computation per Wikipedia.
+  d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  return Math.ceil(((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
 }
 
 export default async function TodayPage() {
   const tz = await getAppTimezone();
-  const today = todayIsoDate(tz);
-  let tasks: Task[] = [];
-  let events: CalendarEvent[] = [];
-  let notifications: Notification[] = [];
-  let observations: Observation[] = [];
-  let needsReview: Note[] = [];
-  let routines: RoutineListItem[] = [];
+  let briefing: BriefingPayload | null = null;
+  let resurface: ResurfacingItem | null = null;
   let unreadCount = 0;
-  let resurface: import('@/lib/api').ResurfacingItem | null = null;
   let errorMessage: string | null = null;
 
-  // Fetch in parallel — task list is the priority, everything else is
-  // non-fatal (Google might not be connected, observations cron might not
-  // have run, etc.).
-  const [taskRes, eventRes, notifRes, countRes, obsRes, reviewRes, routinesRes, resurfaceRes] = await Promise.allSettled([
-    tasksApi.list(),
-    calendarApi.upcoming(4),
-    notificationsApi.list('unread', 3),
-    notificationsApi.count(),
-    observationsApi.list(true, 5),
-    libraryApi.notes.list({ needs_review: true }),
-    routinesApi.list(),
+  const [briefingRes, resurfaceRes, countRes] = await Promise.allSettled([
+    briefingApi.today(),
     libraryApi.resurfacing(),
+    notificationsApi.count(),
   ]);
-  if (taskRes.status === 'fulfilled') {
-    tasks = taskRes.value.tasks;
+  if (briefingRes.status === 'fulfilled') {
+    briefing = briefingRes.value;
   } else {
-    const err = taskRes.reason;
+    const err = briefingRes.reason;
     errorMessage = err instanceof ApiError ? `API ${err.status}` : (err as Error).message;
   }
-  if (eventRes.status === 'fulfilled') events = eventRes.value.events;
-  if (notifRes.status === 'fulfilled') notifications = notifRes.value.notifications;
-  if (countRes.status === 'fulfilled') unreadCount = countRes.value.unread;
-  if (obsRes.status === 'fulfilled') observations = obsRes.value.observations;
-  if (reviewRes.status === 'fulfilled') needsReview = reviewRes.value.notes;
-  if (routinesRes.status === 'fulfilled') routines = routinesRes.value.routines;
   if (resurfaceRes.status === 'fulfilled') resurface = resurfaceRes.value.item;
+  if (countRes.status === 'fulfilled') unreadCount = countRes.value.unread;
 
-  const routinesDoneCount = routines.filter((r) => r.stats.done_today).length;
+  const { day, meta } = mastheadDate(tz);
 
-  const { top3, inbox, doneToday } = splitTasks(tasks, tz);
-  const emptySlots = Math.max(0, 3 - top3.length);
-
-  // Inbox-domain triage count. Distinct from the local `inbox` variable
-  // above (which is Todoist-style "untiered open tasks"). Tasks here are
-  // the ones the user captured without routing to a real domain — they
-  // need a home before they can be tracked as part of stewardship work.
-  const inboxTriageCount = tasks.filter(
-    (t) => t.status === 'open' && t.domain_id === INBOX_DOMAIN_ID,
-  ).length;
+  // The commitments anchor: "4 events today — next 10:30 X. 3 tasks set."
+  // Built from briefing.events + doing_today.open_count.
+  const anchorLine = buildAnchorLine(briefing);
 
   return (
-    <div>
-      <ScreenHeader eyebrow="Today" title={todayLabel(tz)} meta={tz} />
-      <div className="hairline lg:mb-2" />
-
-      <div className="lg:grid lg:grid-cols-[1.6fr_1fr] lg:gap-x-14">
-        {/* ─── Left column — focus ─────────────────────────────────────── */}
-        <div>
-          <Section label="Top 3 for today">
-            {errorMessage ? (
-              <Hint>Couldn't load tasks: {errorMessage}</Hint>
-            ) : (
-              <>
-                {top3.map((t) => (
-                  <TaskItem key={t.id} task={t} />
-                ))}
-                {Array.from({ length: emptySlots }).map((_, i) => (
-                  <div key={`slot-${i}`} className="flex items-center gap-3 py-2">
-                    <span className="h-5 w-5 border border-line" aria-hidden />
-                    <span className="font-sans text-[14px] text-ink-3 italic">(open spot)</span>
-                  </div>
-                ))}
-                <Hint>Star a task below to set it as today's top 3.</Hint>
-              </>
-            )}
-          </Section>
-
-          {inboxTriageCount > 0 && (
-            <Link
-              href="/inbox"
-              className="mb-5 block border border-line hover:border-accent transition-colors px-4 py-3"
-            >
-              <div className="flex items-baseline justify-between gap-3">
-                <span className="font-mono text-[11px] uppercase tracking-wider text-accent">
-                  📥 Inbox
-                </span>
-                <span className="font-mono text-[10px] uppercase tracking-wider text-ink-3">
-                  Triage →
-                </span>
-              </div>
-              <p className="mt-1 font-sans text-[13px] text-ink-2">
-                {inboxTriageCount} {inboxTriageCount === 1 ? 'task needs' : 'tasks need'} a home.
-              </p>
-            </Link>
-          )}
-
-          <Section
-            label="Up next"
-            actionHref={events.length > 0 ? '/calendar' : undefined}
-            actionLabel="View all"
-          >
-            {events.length === 0 ? (
-              <>
-                <EventRow time="—:—" title="No events" subtle />
-                <Hint>Connect Google Calendar in Settings.</Hint>
-              </>
-            ) : (
-              events.map((e) => (
-                <EventRow
-                  key={e.id}
-                  time={formatEventTime(e, tz)}
-                  title={e.title}
-                  location={e.location}
-                  createdHere={e.source === 'created_here'}
-                />
-              ))
-            )}
-          </Section>
-
-          <Section label={`All open${inbox.length > 0 ? ` · ${inbox.length}` : ''}`}>
-            {errorMessage ? (
-              <Hint>Couldn't load tasks.</Hint>
-            ) : (
-              <>
-                {inbox.length === 0 ? (
-                  <p className="font-sans text-[13px] text-ink-3 italic py-1">No open tasks.</p>
-                ) : (
-                  inbox.map((t) => <TaskItem key={t.id} task={t} />)
-                )}
-                <AddTaskForm />
-              </>
-            )}
-          </Section>
-        </div>
-
-        {/* ─── Right column — ambient ──────────────────────────────────── */}
-        <div>
-          <Section label={`Slipping${observations.length > 0 ? ` · ${observations.length}` : ''}`}>
-            {observations.length === 0 ? (
-              <Hint>
-                Nothing slipping right now. Projects that go quiet — or
-                miss patterns set on their domain — will surface here.
-              </Hint>
-            ) : (
-              <ul className="flex flex-col gap-3">
-                {observations.map((o) => (
-                  <ObservationCard key={o.id} observation={o} />
-                ))}
-              </ul>
-            )}
-          </Section>
-
-          <Section
-            label={
-              routines.length > 0
-                ? `Routines · ${routinesDoneCount}/${routines.length}`
-                : 'Routines'
-            }
-            actionHref="/routines"
-            actionLabel={routines.length > 0 ? 'View all' : '+ Add'}
-          >
-            {routines.length === 0 ? (
-              <Hint>
-                Track daily habits separately from tasks &mdash; check email, read,
-                meds. Each builds a streak.
-              </Hint>
-            ) : (
-              <RoutinesTodayList routines={routines} compact today={today} />
-            )}
-          </Section>
-
-          <Section label="Resurfacing">
-            {resurface ? (
-              <Link
-                href={resurface.href}
-                className="block group"
-              >
-                <div className="font-mono text-[10px] uppercase tracking-wider text-ink-3 mb-2">
-                  {resurface.kind === 'quote' ? 'Quote' : 'Journal'}
-                  {resurface.source && resurface.kind === 'quote' && (
-                    <span className="ml-2 text-ink-3/80 normal-case tracking-normal font-sans text-[12px]">
-                      — {resurface.source}
-                    </span>
-                  )}
-                </div>
-                <p className="font-serif text-[14px] text-ink-2 leading-relaxed group-hover:text-ink transition-colors">
-                  {resurface.kind === 'quote' ? (
-                    <>&ldquo;{resurface.excerpt}&rdquo;</>
-                  ) : (
-                    resurface.excerpt
-                  )}
-                </p>
-                {resurface.source && resurface.kind === 'journal' && (
-                  <div className="mt-1 font-mono text-[10px] uppercase tracking-wider text-ink-3">
-                    {resurface.source}
-                  </div>
-                )}
-              </Link>
-            ) : (
-              <Hint>
-                Nothing to resurface yet. Add a quote or journal entry and it&rsquo;ll
-                start rotating here daily.
-              </Hint>
-            )}
-          </Section>
-
-          {needsReview.length > 0 && (
-            <Section
-              label={`Needs review · ${needsReview.length}`}
-              actionHref="/library/notes?needs_review=true"
-              actionLabel="View all"
-            >
-              <ul className="flex flex-col gap-3">
-                {needsReview.slice(0, 6).map((n) => (
-                  <NeedsReviewRow key={n.id} note={n} />
-                ))}
-              </ul>
-            </Section>
-          )}
-
-          <Section
-            label={`Notifications${unreadCount > 0 ? ` · ${unreadCount} unread` : ''}`}
-            actionHref="/notifications"
-            actionLabel="View all"
-          >
-            {notifications.length === 0 ? (
-              <Hint>
-                {unreadCount === 0
-                  ? 'All caught up.'
-                  : 'Recent activity will show up here.'}
-              </Hint>
-            ) : (
-              <ul>
-                {notifications.map((n) => (
-                  <li key={n.id} className="py-1.5">
-                    <div className="flex items-baseline justify-between gap-3">
-                      <div className="font-sans text-[13px] text-ink leading-snug min-w-0">
-                        {n.source_url ? (
-                          <Link href={n.source_url} className="hover:text-accent transition-colors">
-                            {n.title}
-                          </Link>
-                        ) : (
-                          n.title
-                        )}
-                      </div>
-                      <div className="font-mono text-[10px] uppercase tracking-wider text-ink-3 shrink-0">
-                        {relativeAgo(n.created_at)}
-                      </div>
-                    </div>
-                    {n.body && (
-                      <div className="font-sans text-[11px] text-ink-3 leading-snug truncate">
-                        {n.body}
-                      </div>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Section>
-
-          {doneToday.length > 0 && (
-            <section className="px-5 lg:px-0 pt-6">
-              <details className="group">
-                <summary className="eyebrow pb-2 border-b border-line cursor-pointer list-none flex items-center justify-between hover:text-ink-2 transition-colors">
-                  <span>✓ {doneToday.length} done today</span>
-                  <span
-                    className="font-mono text-[10px] text-ink-3 transition-transform group-open:rotate-90"
-                    aria-hidden
-                  >
-                    ▶
-                  </span>
-                </summary>
-                <div className="mt-3">
-                  {doneToday.map((t) => (
-                    <TaskItem key={t.id} task={t} showStar={false} />
-                  ))}
-                  <Hint>Click the checkbox to undo.</Hint>
-                </div>
-              </details>
-            </section>
-          )}
-        </div>
-      </div>
-
-      {/* Mobile-only account footer (desktop puts it in the rail) */}
-      <div className="lg:hidden">
-        <AccountChip />
-      </div>
-    </div>
-  );
-}
-
-function Section({
-  label,
-  children,
-  actionHref,
-  actionLabel,
-}: {
-  label: string;
-  children: React.ReactNode;
-  actionHref?: string;
-  actionLabel?: string;
-}) {
-  return (
-    <section className="px-5 lg:px-0 pt-6">
-      <div className="eyebrow pb-2 border-b border-line mb-3 flex items-center justify-between">
-        <span>{label}</span>
-        {actionHref && actionLabel && (
-          <a
-            href={actionHref}
-            className="text-ink-3 hover:text-ink-2 normal-case tracking-normal transition-colors"
-          >
-            {actionLabel} →
-          </a>
-        )}
-      </div>
-      {children}
-    </section>
-  );
-}
-
-function EventRow({
-  time,
-  title,
-  location,
-  subtle,
-  createdHere,
-}: {
-  time: string;
-  title: string;
-  location?: string | null;
-  subtle?: boolean;
-  createdHere?: boolean;
-}) {
-  return (
-    <div className="flex items-start gap-4 py-2">
-      <span className="font-mono text-[12px] text-ink-3 w-14 pt-0.5 tabular-nums">{time}</span>
-      <div className="flex-1 min-w-0">
-        <div className={`font-sans text-[14px] leading-snug ${subtle ? 'text-ink-3 italic' : 'text-ink'}`}>
-          {title}
-        </div>
-        {location && (
-          <div className="font-sans text-[11px] text-ink-3 mt-0.5 truncate">{location}</div>
-        )}
-      </div>
-      {createdHere && (
-        <span
-          className="mt-1.5 h-1.5 w-1.5 rounded-full bg-accent shrink-0"
-          title="Created here"
-          aria-hidden
-        />
-      )}
-    </div>
-  );
-}
-
-function formatEventTime(e: CalendarEvent, tz: string): string {
-  if (e.all_day) return 'all day';
-  const today = todayIsoDate(tz);
-  const startDate = new Date(e.start_at);
-  const startDay = new Intl.DateTimeFormat('en-CA', {
-    timeZone: tz,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(startDate);
-  const time = startDate.toLocaleTimeString('en-US', {
-    timeZone: tz,
-    hour: 'numeric',
-    minute: '2-digit',
-  });
-  // Show a day prefix for events that aren't today (e.g. "Fri 2:00 PM").
-  if (startDay !== today) {
-    const day = startDate.toLocaleDateString('en-US', { timeZone: tz, weekday: 'short' });
-    return `${day} ${time}`;
-  }
-  return time;
-}
-
-function Hint({ children }: { children: React.ReactNode }) {
-  return <p className="font-sans text-[12px] text-ink-3 leading-relaxed mt-1">{children}</p>;
-}
-
-function ObservationCard({ observation }: { observation: Observation }) {
-  const concerning = observation.severity === 'concerning';
-  const link = observation.project ? `/projects/${observation.project.id}` : null;
-
-  return (
-    <li className="border border-line p-3 bg-surface">
-      <div className="flex items-start gap-3">
-        <span
-          className={`mt-1.5 h-1.5 w-1.5 rounded-full shrink-0 ${
-            concerning ? 'bg-accent' : 'bg-ink-2'
-          }`}
-          aria-hidden
-        />
-        <div className="flex-1 min-w-0">
-          <div className="font-serif text-[15px] text-ink leading-snug">
-            {link ? (
-              <Link href={link} className="hover:text-accent transition-colors">
-                {observation.title}
-              </Link>
-            ) : (
-              observation.title
-            )}
+    <div className="pb-32">
+      {/* ─── Masthead ──────────────────────────────────────────────── */}
+      <div className="px-5 lg:px-0 pt-5">
+        <div className="flex items-baseline justify-between gap-3">
+          <div>
+            <div className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3 mb-2">
+              {meta}
+            </div>
+            <h1 className="font-serif text-[26px] font-semibold leading-none tracking-[-0.5px] text-ink">
+              The Briefing
+            </h1>
           </div>
-          {observation.body && (
-            <div className="mt-1 font-sans text-[12px] text-ink-2 leading-snug">
-              {observation.body}
+          <Link
+            href="/notifications"
+            aria-label={`${unreadCount} unread notifications`}
+            className="flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-wider text-ink-3 hover:text-ink-2 transition-colors"
+          >
+            {unreadCount > 0 && <span className="h-2 w-2 rounded-full bg-accent" aria-hidden />}
+            <span>{unreadCount}</span>
+          </Link>
+        </div>
+        <div className="mt-1 font-mono text-[10px] uppercase tracking-wider text-ink-3">
+          {day}
+        </div>
+      </div>
+      <div className="hairline-strong mt-3 mx-5 lg:mx-0" />
+
+      {errorMessage && (
+        <div className="px-5 lg:px-0 mt-6 font-sans text-[13px] text-ink-3">
+          Couldn&rsquo;t load the briefing: {errorMessage}
+        </div>
+      )}
+
+      {/* ─── Commitments anchor line ─────────────────────────────── */}
+      {anchorLine && (
+        <div className="px-5 lg:px-0 mt-3 font-sans text-[12px] text-ink-2 leading-snug">
+          {anchorLine}
+        </div>
+      )}
+
+      {/* ─── Inbox triage strip ──────────────────────────────────── */}
+      {briefing && briefing.inbox_triage_count > 0 && (
+        <Link
+          href="/inbox"
+          className="mt-5 mx-5 lg:mx-0 flex items-baseline justify-between gap-3 border-l-2 border-accent pl-3 py-2 hover:bg-accent/[0.04] transition-colors"
+        >
+          <div>
+            <div className="font-mono text-[10px] uppercase tracking-[0.08em] text-accent">
+              Inbox
+            </div>
+            <div className="font-sans text-[13px] text-ink mt-0.5">
+              {briefing.inbox_triage_count}{' '}
+              {briefing.inbox_triage_count === 1 ? 'task needs' : 'tasks need'} a home.
+            </div>
+          </div>
+          <span className="font-mono text-[10px] uppercase tracking-wider text-accent shrink-0">
+            Triage →
+          </span>
+        </Link>
+      )}
+
+      {/* ─── In brief ─────────────────────────────────────────────── */}
+      <section className="px-5 lg:px-0 mt-7">
+        <div className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3 mb-3">
+          In brief
+        </div>
+        {briefing && briefing.brief_lines.length === 0 ? (
+          <p className="font-serif text-[15px] text-ink-2 italic leading-relaxed">
+            Nothing past cadence. Every domain is within its rhythm — rare and
+            worth noticing.
+          </p>
+        ) : (
+          briefing?.brief_lines.map((line) => (
+            <BriefLineRow key={line.id} line={line} />
+          ))
+        )}
+      </section>
+
+      {/* ─── Resurfaced ───────────────────────────────────────────── */}
+      {resurface && (
+        <section className="mt-9 mx-5 lg:mx-0 bg-surface border-y border-line py-6 px-5">
+          <div className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3 mb-3">
+            Resurfaced
+          </div>
+          <blockquote className="font-serif text-[19px] italic leading-snug text-ink">
+            &ldquo;{resurface.excerpt}&rdquo;
+          </blockquote>
+          {resurface.source && (
+            <div className="mt-3 font-mono text-[11px] uppercase tracking-wider text-ink-3">
+              — {resurface.source}
             </div>
           )}
-          <div className="mt-2 flex items-center gap-3">
-            {observation.domain?.name && (
-              <span className="font-mono text-[10px] uppercase tracking-wider text-ink-3">
-                {observation.domain.name}
+          {resurface.href && (
+            <Link
+              href={resurface.href}
+              className="mt-3 inline-block font-mono text-[10px] uppercase tracking-wider text-accent hover:text-accent-ink transition-colors"
+            >
+              Open in {resurface.kind === 'quote' ? 'Quotes' : 'Journal'} →
+            </Link>
+          )}
+        </section>
+      )}
+
+      {/* ─── Today: events ────────────────────────────────────────── */}
+      {briefing && briefing.events_today_count > 0 && (
+        <section className="px-5 lg:px-0 mt-9">
+          <div className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3 mb-3">
+            Today
+          </div>
+          {briefing.next_event && (
+            <div className="flex items-baseline gap-4 py-1.5 border-b border-line">
+              <span className="font-mono text-[12px] text-ink tabular-nums shrink-0 w-12">
+                {briefing.next_event.time}
+              </span>
+              <span className="font-sans text-[13px] text-ink-2 truncate">
+                {briefing.next_event.title}
+              </span>
+            </div>
+          )}
+          {briefing.events_today_count > 1 && (
+            <Link
+              href="/calendar"
+              className="mt-2 inline-block font-mono text-[10px] uppercase tracking-wider text-ink-3 hover:text-accent transition-colors"
+            >
+              + {briefing.events_today_count - 1} more →
+            </Link>
+          )}
+        </section>
+      )}
+
+      {/* ─── Doing today strip ───────────────────────────────────── */}
+      {briefing && briefing.doing_today.open_count > 0 && (
+        <Link
+          href="/tasks"
+          className="px-5 lg:px-0 mt-6 block hover:opacity-80 transition-opacity"
+        >
+          <div className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3 mb-1">
+            Doing · {briefing.doing_today.open_count} open
+            {briefing.doing_today.overdue_count > 0 && (
+              <span className="text-accent ml-1">
+                · {briefing.doing_today.overdue_count} overdue
               </span>
             )}
-            <form action={dismissObservationAction}>
-              <input type="hidden" name="id" value={observation.id} />
-              <button
-                type="submit"
-                className="font-mono text-[10px] uppercase tracking-wider text-ink-3 hover:text-accent transition-colors"
-              >
-                Dismiss
-              </button>
-            </form>
           </div>
-        </div>
-      </div>
-    </li>
-  );
-}
-
-// One row in the Needs Review rail. Each classify button is its own
-// form so the buttons stay independent and the action runs server-side.
-function NeedsReviewRow({ note }: { note: Note }) {
-  const headline = note.title?.trim()
-    ? note.title
-    : note.body.length > 70
-      ? note.body.slice(0, 70).trimEnd() + '…'
-      : note.body;
-
-  return (
-    <li className="border border-line p-3">
-      <Link
-        href={`/library/notes/${note.id}`}
-        className="block font-serif text-[14px] text-ink leading-snug hover:text-accent transition-colors mb-2"
-      >
-        {headline}
-      </Link>
-      {note.body && note.title && (
-        <div className="font-sans text-[12px] text-ink-2 leading-snug line-clamp-2 mb-2">
-          {note.body}
-        </div>
+          <div className="font-sans text-[13px] text-ink-2 leading-snug">
+            {briefing.doing_today.titles.length > 0
+              ? briefing.doing_today.titles.join(' · ')
+              : 'Nothing pinned for today.'}
+            <span className="text-ink-3 ml-1">all tasks →</span>
+          </div>
+        </Link>
       )}
-      <div className="flex flex-wrap gap-1.5">
-        <ClassifyChip action={classifyAsOwnThoughtAction} id={note.id} label="Own" />
-        <ClassifyChip action={classifyAsReadingAction} id={note.id} label="Reading" />
-        <ClassifyChip action={classifyAsMeetingAction} id={note.id} label="Meeting" />
-        <ClassifyChip action={classifyAsBrainstormAction} id={note.id} label="Brainstorm" />
-        <ClassifyChip
-          action={clearReviewFlagAction}
-          id={note.id}
-          label="✓ Clear"
-          subtle
-        />
-      </div>
-    </li>
+
+      {/* ─── Routines today strip ────────────────────────────────── */}
+      {briefing && briefing.routines_today.total > 0 && (
+        <Link
+          href="/routines"
+          className="px-5 lg:px-0 mt-4 block hover:opacity-80 transition-opacity"
+        >
+          <div className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3 mb-1">
+            Routines · {briefing.routines_today.done} of {briefing.routines_today.total} today
+          </div>
+          <div className="font-sans text-[13px] text-ink-2 leading-snug">
+            {briefing.routines_today.remaining_names.length > 0
+              ? briefing.routines_today.remaining_names.join(' · ') + ' remain'
+              : 'All done.'}
+            <span className="text-ink-3 ml-1">open →</span>
+          </div>
+        </Link>
+      )}
+
+      {/* ─── Capture chips ───────────────────────────────────────── */}
+      <CaptureChips />
+    </div>
   );
 }
 
-// Each chip is a tiny form wrapping a single submit button. Distinct
-// component to keep the JSX inside NeedsReviewRow readable.
-function ClassifyChip({
-  action,
-  id,
-  label,
-  subtle = false,
-}: {
-  action: (formData: FormData) => Promise<void>;
-  id: string;
-  label: string;
-  subtle?: boolean;
-}) {
+function buildAnchorLine(briefing: BriefingPayload | null): React.ReactNode {
+  if (!briefing) return null;
+  const eventsCount = briefing.events_today_count;
+  const tasksOpen = briefing.doing_today.open_count;
+  if (eventsCount === 0 && tasksOpen === 0) return null;
+
+  const parts: React.ReactNode[] = [];
+  if (eventsCount > 0) {
+    if (briefing.next_event) {
+      parts.push(
+        <span key="ev">
+          {eventsCount} {eventsCount === 1 ? 'event' : 'events'} today — next{' '}
+          <span className="font-mono text-ink-2 tabular-nums">{briefing.next_event.time}</span>{' '}
+          {briefing.next_event.title}.
+        </span>,
+      );
+    } else {
+      parts.push(<span key="ev">{eventsCount} events today.</span>);
+    }
+  }
+  if (tasksOpen > 0) {
+    parts.push(
+      <span key="tk">
+        {' '}
+        {tasksOpen} {tasksOpen === 1 ? 'task' : 'tasks'} open
+        {briefing.doing_today.overdue_count > 0 && (
+          <span className="text-accent"> · {briefing.doing_today.overdue_count} overdue</span>
+        )}
+        .
+      </span>,
+    );
+  }
+  return parts;
+}
+
+// Capture chip strip — in-flow at the bottom of the Briefing (the
+// floating MicFAB occupies the bottom-right corner; a fixed strip would
+// collide). Each chip routes to a compose surface; voice handles the
+// same actions via the FAB. The full CaptureMenu bottom-sheet (per
+// Section 6 of the brief) is a later phase.
+function CaptureChips() {
+  const chips = [
+    { label: 'Journal', href: '/library/journal' },
+    { label: 'Quote', href: '/library/quotes/new' },
+    { label: 'Note', href: '/library/notes' },
+    { label: 'Task', href: '/tasks/new' },
+  ];
   return (
-    <form action={action}>
-      <input type="hidden" name="id" value={id} />
-      <button
-        type="submit"
-        className={`px-2 py-0.5 border font-mono text-[10px] uppercase tracking-wider transition-colors ${
-          subtle
-            ? 'border-line text-ink-3 hover:border-ink-2 hover:text-ink-2'
-            : 'border-line text-ink-2 hover:border-ink hover:text-ink hover:bg-surface'
-        }`}
-      >
-        {label}
-      </button>
-    </form>
+    <section className="px-5 lg:px-0 mt-9">
+      <div className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3 mb-2">
+        Capture
+      </div>
+      <div className="flex items-center gap-2 flex-wrap">
+        {chips.map((c) => (
+          <Link
+            key={c.label}
+            href={c.href}
+            className="font-sans text-[12px] font-medium text-ink-2 hover:text-ink px-3 py-1.5 border border-line whitespace-nowrap transition-colors"
+          >
+            {c.label}
+          </Link>
+        ))}
+        <span className="font-mono text-[10px] uppercase tracking-wider text-ink-3 ml-1">
+          — or hold the mic.
+        </span>
+      </div>
+    </section>
   );
-}
-
-// Compact "5m ago" / "2h ago" / "3d ago" for the Today notifications strip.
-function relativeAgo(iso: string): string {
-  const then = new Date(iso).getTime();
-  const now = Date.now();
-  const secs = Math.max(0, Math.floor((now - then) / 1000));
-  if (secs < 60) return `${secs}s ago`;
-  const mins = Math.floor(secs / 60);
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days < 30) return `${days}d ago`;
-  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }

@@ -938,6 +938,44 @@ export const observationsApi = {
     api.post<Observation>(`/api/observations/${id}/acted`),
 };
 
+// ─── Briefing (the new home / today data) ────────────────────────────────
+
+export interface BriefLine {
+  kind: 'domain' | 'routine';
+  id: string;
+  name: string;
+  metric: number;
+  big: string;
+  unit: string;
+  cadence: number;
+  ratio: number;
+  status: 'slip' | 'stale';
+  last: string | null;
+  next: string;
+  routeTo: { href: string; label: string };
+}
+
+export interface BriefingPayload {
+  inbox_triage_count: number;
+  brief_lines: BriefLine[];
+  events_today_count: number;
+  next_event: { time: string; title: string } | null;
+  doing_today: {
+    open_count: number;
+    overdue_count: number;
+    titles: string[];
+  };
+  routines_today: {
+    total: number;
+    done: number;
+    remaining_names: string[];
+  };
+}
+
+export const briefingApi = {
+  today: () => api.get<BriefingPayload>('/api/briefing/today'),
+};
+
 // ─── Notifications ───────────────────────────────────────────────────────
 
 export interface Notification {
