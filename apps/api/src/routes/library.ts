@@ -11,13 +11,24 @@ import {
 
 // Stable 32-bit hash of a short string. Used to seed the daily
 // resurfacing pick from a date — same date in always yields the same
-// item, different dates rotate. djb2 variant; collision risk is fine
-// for a deterministic-per-day pick.
+// item, different dates rotate.
+//
+// djb2 alone is too weak here: for "YYYY-MM-DD" strings on consecutive
+// days, the hashes differ by only ~1 (last byte changes by 1), and the
+// subsequent `% 1_000_000` step collapses those tiny differences back
+// onto the same normalized pickAt. Result: the same item ran for weeks
+// instead of rotating. Appending a murmur3 finalizer mixes the small
+// input deltas into the full 32-bit width, restoring real rotation.
 function simpleHash(s: string): number {
   let h = 5381;
   for (let i = 0; i < s.length; i++) {
     h = ((h << 5) + h + s.charCodeAt(i)) | 0;
   }
+  // Murmur3 finalizer — avalanche so a 1-byte input diff scrambles the
+  // whole hash. Math.imul handles 32-bit overflow correctly.
+  h = Math.imul(h ^ (h >>> 16), 0x85ebca6b);
+  h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35);
+  h = h ^ (h >>> 16);
   return Math.abs(h);
 }
 
