@@ -1,6 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify';
-import type { SupabaseClient } from '@supabase/supabase-js';
 import { getAppTz } from '../lib/app-settings.js';
+import { computeDomainCadences, type CadenceRow } from '../lib/cadence.js';
 
 // /api/briefing/today — the data layer for the new editorial home screen.
 //
@@ -57,50 +57,26 @@ interface BriefingPayload {
   };
 }
 
-function daysBetween(isoA: string, isoB: string): number {
-  const a = new Date(isoA).getTime();
-  const b = new Date(isoB).getTime();
-  return Math.max(0, Math.floor((b - a) / (24 * 60 * 60 * 1000)));
-}
-
-// Parse the failure_patterns array to find the "headline" cadence rule
-// for a domain. We only know how to surface days_since_* rules right now;
-// quote_exceed / shoot_within_days / etc. live in the observations cron
-// and surface there, not on the Briefing's editorial column.
-interface CadenceRule {
-  rule: 'days_since_journal' | 'days_since_publish' | 'no_activity_days';
-  cadence: number;
-}
-function pickCadenceRule(patterns: unknown): CadenceRule | null {
-  if (!Array.isArray(patterns)) return null;
-  for (const raw of patterns) {
-    if (!raw || typeof raw !== 'object') continue;
-    const p = raw as { rule?: string; value?: number };
-    if (typeof p.rule !== 'string' || typeof p.value !== 'number') continue;
-    if (p.rule === 'days_since_journal' || p.rule === 'days_since_publish' || p.rule === 'no_activity_days') {
-      return { rule: p.rule, cadence: p.value };
-    }
-  }
-  return null;
-}
-
-function unitFor(rule: CadenceRule['rule']): string {
-  switch (rule) {
-    case 'days_since_journal': return 'days since a journal entry';
-    case 'days_since_publish': return 'days since publish';
-    case 'no_activity_days': return 'days since project activity';
-  }
-}
-
-function nextActionFor(rule: CadenceRule['rule']): { next: string; routeTo: BriefLine['routeTo'] } {
-  switch (rule) {
-    case 'days_since_journal':
-      return { next: 'Capture a journal entry', routeTo: { href: '/library/journal', label: 'Journal · capture a new entry' } };
-    case 'days_since_publish':
-      return { next: 'Open the editing pipeline', routeTo: { href: '/content', label: 'Content · ship something →' } };
-    case 'no_activity_days':
-      return { next: 'Open the project list', routeTo: { href: '/projects', label: 'Projects · open one →' } };
-  }
+function cadenceRowToBriefLine(row: CadenceRow): BriefLine | null {
+  // Brief lines only surface slipping/stale items — everything else is
+  // quiet by design (the Briefing leads with what's slipping, not a
+  // status board). The Domains pulse view shows the full set.
+  if (row.status === 'ok' || row.status === 'unconfigured') return null;
+  if (row.metric == null || row.cadence == null) return null;
+  return {
+    kind: 'domain',
+    id: row.id,
+    name: row.name,
+    metric: row.metric,
+    big: String(row.metric),
+    unit: row.unit,
+    cadence: row.cadence,
+    ratio: row.ratio,
+    status: row.status,
+    last: row.last,
+    next: row.next,
+    routeTo: row.routeTo,
+  };
 }
 
 export const briefingRoutes: FastifyPluginAsync = async (app) => {
@@ -119,38 +95,17 @@ export const briefingRoutes: FastifyPluginAsync = async (app) => {
     // the import surface stable across the API/shared boundary.
     const INBOX_ID = 'acf035ee-b247-4c96-a07e-5946bc2b2e91';
 
-    // Fan out the data fetches. Each computation is independent — one DB
-    // round trip per category. Keeping these in parallel matters because
-    // the Today page renders synchronously off the consolidated payload.
+    // Fan out the per-request fetches. The domain cadence computation
+    // (shared helper) runs its own internal rollups in parallel; here we
+    // just kick it off alongside the Today-specific queries.
     const [
-      domainsRes,
-      lastJournalRes,
-      publishesRes,
-      activitiesRes,
+      cadenceRows,
       inboxCountRes,
       eventsRes,
       openTasksRes,
       routinesRes,
     ] = await Promise.all([
-      sb.from('stewardship_domains')
-        .select('id, name, failure_patterns, expected_cadence')
-        .eq('active', true)
-        .eq('is_system', false),
-      sb.from('journal_entries')
-        .select('entry_date')
-        .order('entry_date', { ascending: false })
-        .limit(1),
-      // One row per domain that has any published content_items.
-      sb.from('content_items')
-        .select('domain_id, published_at')
-        .eq('status', 'published')
-        .not('published_at', 'is', null)
-        .order('published_at', { ascending: false }),
-      // Activity log joined to project so we know the domain.
-      sb.from('activity_log')
-        .select('logged_at, project:projects(domain_id)')
-        .order('logged_at', { ascending: false })
-        .limit(200),
+      computeDomainCadences(sb),
       sb.from('tasks')
         .select('id', { count: 'exact', head: true })
         .eq('domain_id', INBOX_ID)
@@ -169,76 +124,10 @@ export const briefingRoutes: FastifyPluginAsync = async (app) => {
         .is('archived_at', null),
     ]);
 
-    const domains = domainsRes.data ?? [];
-    const lastJournalDate = (lastJournalRes.data?.[0]?.entry_date as string | undefined) ?? null;
-
-    // Roll up: latest publish per domain.
-    type PubRow = { domain_id: string | null; published_at: string };
-    const latestPublishByDomain = new Map<string, string>();
-    for (const r of (publishesRes.data ?? []) as PubRow[]) {
-      if (!r.domain_id || !r.published_at) continue;
-      if (!latestPublishByDomain.has(r.domain_id)) {
-        latestPublishByDomain.set(r.domain_id, r.published_at);
-      }
-    }
-
-    // Roll up: latest activity per domain.
-    type ActRow = { logged_at: string; project: { domain_id: string | null } | { domain_id: string | null }[] | null };
-    const latestActivityByDomain = new Map<string, string>();
-    for (const r of (activitiesRes.data ?? []) as ActRow[]) {
-      const proj = Array.isArray(r.project) ? r.project[0] : r.project;
-      const did = proj?.domain_id;
-      if (!did) continue;
-      if (!latestActivityByDomain.has(did)) {
-        latestActivityByDomain.set(did, r.logged_at);
-      }
-    }
-
-    // Compute brief lines.
-    const briefLines: BriefLine[] = [];
-    for (const d of domains as Array<{ id: string; name: string; failure_patterns: unknown }>) {
-      const rule = pickCadenceRule(d.failure_patterns);
-      if (!rule) continue;
-
-      let lastIso: string | null = null;
-      switch (rule.rule) {
-        case 'days_since_journal': lastIso = lastJournalDate; break;
-        case 'days_since_publish': lastIso = latestPublishByDomain.get(d.id) ?? null; break;
-        case 'no_activity_days': lastIso = latestActivityByDomain.get(d.id) ?? null; break;
-      }
-
-      // No data at all → don't surface (the domain has never been touched;
-      // that's a "set it up first" condition, not "slipping").
-      if (!lastIso) continue;
-
-      const metric = daysBetween(lastIso, nowIso);
-      const ratio = rule.cadence > 0 ? metric / rule.cadence : 0;
-      // Only surface if past the cadence threshold (slipping) or close
-      // enough to be worth noting (stale = above 70% of threshold).
-      if (ratio < 0.7) continue;
-      const status: BriefLine['status'] = ratio > 1 ? 'slip' : 'stale';
-
-      const { next, routeTo } = nextActionFor(rule.rule);
-      const lastDateLabel = lastIso.slice(0, 10);
-
-      briefLines.push({
-        kind: 'domain',
-        id: d.id,
-        name: d.name,
-        metric,
-        big: String(metric),
-        unit: unitFor(rule.rule),
-        cadence: rule.cadence,
-        ratio,
-        status,
-        last: `Last ${rule.rule === 'days_since_journal' ? 'entry' : rule.rule === 'days_since_publish' ? 'publish' : 'activity'} ${lastDateLabel}`,
-        next,
-        routeTo,
-      });
-    }
-
-    // Sort worst-first by ratio.
-    briefLines.sort((a, b) => b.ratio - a.ratio);
+    // ─── Brief lines — only slipping/stale cadence rows surface here. ──
+    const briefLines: BriefLine[] = cadenceRows
+      .map(cadenceRowToBriefLine)
+      .filter((b): b is BriefLine => b !== null);
 
     // ─── Inbox count ───────────────────────────────────────────────────
     const inboxCount = inboxCountRes.count ?? 0;
@@ -285,5 +174,14 @@ export const briefingRoutes: FastifyPluginAsync = async (app) => {
     };
 
     return payload;
+  });
+
+  // /api/briefing/domains — full cadence list for the Domains pulse
+  // board. Returns every active non-system domain with its cadence row
+  // (slip / stale / ok / unconfigured), sorted worst-first.
+  app.get('/api/briefing/domains', async (req) => {
+    const sb = req.supabase!;
+    const rows = await computeDomainCadences(sb);
+    return { domains: rows };
   });
 };

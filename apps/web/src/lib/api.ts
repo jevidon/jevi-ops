@@ -972,8 +972,23 @@ export interface BriefingPayload {
   };
 }
 
+export interface CadenceRow {
+  id: string;
+  name: string;
+  rule: 'days_since_journal' | 'days_since_publish' | 'no_activity_days' | null;
+  metric: number | null;
+  cadence: number | null;
+  ratio: number;
+  status: 'slip' | 'stale' | 'ok' | 'unconfigured';
+  last: string | null;
+  unit: string;
+  next: string;
+  routeTo: { href: string; label: string };
+}
+
 export const briefingApi = {
   today: () => api.get<BriefingPayload>('/api/briefing/today'),
+  domains: () => api.get<{ domains: CadenceRow[] }>('/api/briefing/domains'),
 };
 
 // ─── Notifications ───────────────────────────────────────────────────────
