@@ -32,5 +32,39 @@ body {
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: #8b7f73;
+  color: #928a7e;
+}
+
+/* Stronger hairline — section rules and dividers that need to read at
+   the same weight as adjacent text. */
+.hairline-strong {
+  height: 1px;
+  width: 100%;
+  background: rgba(26, 22, 18, 0.16);
+}
+
+/* Editorial briefing-line wash. Applied to `.brief-clickable` so the row
+   has a touchable feel without a chip border. From the design spec
+   (today-redesign.jsx `brief-clickable-css`). */
+.brief-clickable {
+  margin: 0 -10px;
+  padding-left: 10px;
+  padding-right: 10px;
+  transition: background 0.12s;
+}
+.brief-clickable:hover {
+  background: rgba(26, 22, 18, 0.035);
+}
+.brief-clickable:active {
+  background: rgba(26, 22, 18, 0.06);
+}
+
+/* Density toggle. `[data-density="compact"]` halves the vertical rhythm
+   on list rows and Briefing sections. Picked up by Tailwind classes that
+   read `data-density` via the variant `data-[density=compact]:py-*`. */
+[data-density='compact'] {
+  --row-pad-y: 0.5rem;
+}
+[data-density='comfortable'] {
+  --row-pad-y: 0.875rem;
 }

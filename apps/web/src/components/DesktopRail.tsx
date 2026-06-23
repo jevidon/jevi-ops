@@ -33,19 +33,27 @@ function CaptureRailButton() {
 }
 
 // Left-rail nav for desktop viewports (lg:+). Mirrors the bottom tab bar's
-// tabs list but presented vertically with active-tab indication on the left
-// edge. Hidden on mobile (BottomTabBar takes over).
+// six core tabs in the same order, then adds Routines and Health (which
+// don't fit on mobile but have room here). Hidden on mobile entirely —
+// BottomTabBar takes over there.
+//
+// Briefing redesign (Jun 2026): Tasks no longer has a tab. The full list
+// is reachable from the Briefing's "Doing today" strip; Today stays
+// active while it's open. Same applies to /inbox.
 const TABS = [
   { href: '/today', label: 'Today' },
-  { href: '/tasks', label: 'Tasks' },
-  { href: '/routines', label: 'Routines' },
+  { href: '/domains', label: 'Domains' },
   { href: '/projects', label: 'Projects' },
   { href: '/content', label: 'Content' },
   { href: '/people', label: 'People' },
   { href: '/library', label: 'Library' },
+  { href: '/routines', label: 'Routines' },
   { href: '/health', label: 'Health' },
-  { href: '/domains', label: 'Domains' },
 ] as const;
+
+// Routes that count as "Today sub-views" — keep Today highlighted when
+// they're open so the user reads them as doorways, not destinations.
+const TODAY_SUBVIEWS = ['/tasks', '/inbox'];
 
 export function DesktopRail({
   email,
@@ -77,7 +85,11 @@ export function DesktopRail({
       <nav className="flex-1 py-2">
         <ul>
           {TABS.map((tab) => {
-            const active = pathname === tab.href || pathname.startsWith(tab.href + '/');
+            const isExactMatch = pathname === tab.href || pathname.startsWith(tab.href + '/');
+            const isTodaySubview =
+              tab.href === '/today' &&
+              TODAY_SUBVIEWS.some((p) => pathname === p || pathname.startsWith(p + '/'));
+            const active = isExactMatch || isTodaySubview;
             return (
               <li key={tab.href}>
                 <Link
