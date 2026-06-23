@@ -11,6 +11,7 @@ import {
 import { isToday } from '@/lib/today';
 import { getAppTimezone } from '@/lib/app-settings';
 import { ProjectColorPicker } from './color-picker';
+import { ProjectStatusChips } from './status-chips';
 import { ProjectForm } from '../project-form';
 import { MilestonesSection } from './milestones-section';
 import { ChecklistSection } from './checklist-section';
@@ -115,8 +116,16 @@ export default async function ProjectDetailPage({
       />
       <div className="hairline" />
 
-      {/* Color picker row */}
-      <div className="px-5 lg:px-0 pt-5">
+      {/* Status + color row. Areas don't follow the project lifecycle
+          (active/paused/done/archived) — they're ongoing contexts — so
+          the chip row is project-only. */}
+      <div className="px-5 lg:px-0 pt-5 flex flex-col gap-3">
+        {!isArea && (
+          <ProjectStatusChips
+            projectId={project.id}
+            current={project.status as 'active' | 'paused' | 'done' | 'archived'}
+          />
+        )}
         <ProjectColorPicker projectId={project.id} current={project.color ?? null} />
       </div>
 

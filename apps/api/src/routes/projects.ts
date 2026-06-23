@@ -120,7 +120,15 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
       });
     }
     const update: Record<string, unknown> = { ...parsed.data };
-    if (parsed.data.status === 'done') update.completed_at = new Date().toISOString();
+    // Status flips stamp / clear completed_at so analytics never see a
+    // stale finish on a project that's back in flight. Mirrors the
+    // tasks PATCH handler. Archived keeps completed_at if it was set
+    // (an archived row was usually done first).
+    if (parsed.data.status === 'done') {
+      update.completed_at = new Date().toISOString();
+    } else if (parsed.data.status === 'active' || parsed.data.status === 'paused') {
+      update.completed_at = null;
+    }
     const { data, error } = await req.supabase!
       .from('projects')
       .update(update)
