@@ -3,12 +3,16 @@ import {
   briefingApi,
   libraryApi,
   notificationsApi,
+  routinesApi,
   ApiError,
   type BriefingPayload,
   type ResurfacingItem,
+  type RoutineListItem,
 } from '@/lib/api';
 import { getAppTimezone } from '@/lib/app-settings';
+import { todayIsoDate } from '@/lib/today';
 import { BriefLineRow } from './brief-line';
+import { RoutinesTodayList } from '@/app/(authed)/routines/routines-today-list';
 
 // The Briefing — editorial home screen (Jun 2026 redesign).
 //
@@ -52,15 +56,18 @@ function computeIsoWeek(now: Date, tz: string): number {
 
 export default async function TodayPage() {
   const tz = await getAppTimezone();
+  const today = todayIsoDate(tz);
   let briefing: BriefingPayload | null = null;
   let resurface: ResurfacingItem | null = null;
+  let routines: RoutineListItem[] = [];
   let unreadCount = 0;
   let errorMessage: string | null = null;
 
-  const [briefingRes, resurfaceRes, countRes] = await Promise.allSettled([
+  const [briefingRes, resurfaceRes, countRes, routinesRes] = await Promise.allSettled([
     briefingApi.today(),
     libraryApi.resurfacing(),
     notificationsApi.count(),
+    routinesApi.list(),
   ]);
   if (briefingRes.status === 'fulfilled') {
     briefing = briefingRes.value;
@@ -70,6 +77,11 @@ export default async function TodayPage() {
   }
   if (resurfaceRes.status === 'fulfilled') resurface = resurfaceRes.value.item;
   if (countRes.status === 'fulfilled') unreadCount = countRes.value.unread;
+  if (routinesRes.status === 'fulfilled') {
+    // Only show active, non-archived routines on the Briefing — the
+    // /routines page is the full management view.
+    routines = routinesRes.value.routines.filter((r) => r.active && !r.archived_at);
+  }
 
   const { day, meta } = mastheadDate(tz);
 
@@ -231,22 +243,28 @@ export default async function TodayPage() {
         </Link>
       )}
 
-      {/* ─── Routines today strip ────────────────────────────────── */}
-      {briefing && briefing.routines_today.total > 0 && (
-        <Link
-          href="/routines"
-          className="px-5 lg:px-0 mt-4 block hover:opacity-80 transition-opacity"
-        >
-          <div className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3 mb-1">
-            Routines · {briefing.routines_today.done} of {briefing.routines_today.total} today
+      {/* ─── Routines (inline check-off) ─────────────────────────────
+          Routines need to be checkable from Today — that's the whole
+          point of a daily habit list. The strip-with-doorway pattern
+          we use for tasks is wrong here; the user expects to tap the
+          checkbox in place. Header shows the count + a doorway to the
+          full /routines view (analytics, archive, etc.). */}
+      {routines.length > 0 && (
+        <section className="px-5 lg:px-0 mt-7">
+          <div className="flex items-baseline justify-between mb-3">
+            <div className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3">
+              Routines · {briefing?.routines_today.done ?? 0} of{' '}
+              {briefing?.routines_today.total ?? routines.length} today
+            </div>
+            <Link
+              href="/routines"
+              className="font-mono text-[10px] uppercase tracking-wider text-ink-3 hover:text-accent transition-colors"
+            >
+              All →
+            </Link>
           </div>
-          <div className="font-sans text-[13px] text-ink-2 leading-snug">
-            {briefing.routines_today.remaining_names.length > 0
-              ? briefing.routines_today.remaining_names.join(' · ') + ' remain'
-              : 'All done.'}
-            <span className="text-ink-3 ml-1">open →</span>
-          </div>
-        </Link>
+          <RoutinesTodayList routines={routines} compact today={today} />
+        </section>
       )}
 
       {/* ─── Capture chips ───────────────────────────────────────── */}
