@@ -91,10 +91,33 @@ export const contentRoutes: FastifyPluginAsync = async (app) => {
     if (Object.keys(parsed.data).length === 0) {
       return reply.code(400).send({ error: 'empty_payload' });
     }
-    // Bump updated_at since the DB doesn't auto-do that here.
+    const update: Record<string, unknown> = { ...parsed.data, updated_at: new Date().toISOString() };
+
+    // Auto-stamp published_at when the status flips to a shipped state
+    // and there's no timestamp yet. The domains pulse board's
+    // days_since_publish rule reads MAX(content_items.published_at,
+    // domain.last_shipped_at), so without this stamp the row never
+    // counts and the domain stays "rule set · no data yet" forever.
+    // If the client sends an explicit published_at in this patch we
+    // leave it alone — they win over the auto-stamp.
+    const SHIPPED_STATUSES = new Set(['published', 'derivatives_pending', 'done']);
+    const incomingStatus = typeof parsed.data.status === 'string' ? parsed.data.status : null;
+    const incomingPublishedAt =
+      'published_at' in parsed.data ? parsed.data.published_at : undefined;
+    if (incomingStatus && SHIPPED_STATUSES.has(incomingStatus) && incomingPublishedAt === undefined) {
+      const { data: existing } = await req.supabase!
+        .from('content_items')
+        .select('published_at')
+        .eq('id', req.params.id)
+        .maybeSingle();
+      if (!existing?.published_at) {
+        update.published_at = new Date().toISOString();
+      }
+    }
+
     const { data, error } = await req.supabase!
       .from('content_items')
-      .update({ ...parsed.data, updated_at: new Date().toISOString() })
+      .update(update)
       .eq('id', req.params.id)
       .select('*')
       .single();
