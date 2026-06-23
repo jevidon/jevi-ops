@@ -2,6 +2,11 @@
 
 import { revalidatePath } from 'next/cache';
 import { domainsApi, ApiError } from '@/lib/api';
+import {
+  CADENCE_RULE_TYPES,
+  PRIMARY_CADENCE_RULES,
+  type CadenceRuleType,
+} from './cadence-rules';
 
 export type SaveResult = { ok: true } | { ok: false; error: string };
 
@@ -48,25 +53,9 @@ export async function updateDomainAction(
 // "unconfigured." The editor here owns that one rule and merges it back
 // with any pre-existing advanced rules so SQL-only rule types
 // (deadline_within_days, hours_exceed_quote, etc.) survive a save.
-
-export const CADENCE_RULE_TYPES = [
-  'none',
-  'days_since_journal',
-  'days_since_publish',
-  'no_activity_days',
-] as const;
-export type CadenceRuleType = (typeof CADENCE_RULE_TYPES)[number];
-
-const PRIMARY_CADENCE_RULES: Set<string> = new Set(
-  CADENCE_RULE_TYPES.filter((r) => r !== 'none'),
-);
-
-export const CADENCE_RULE_LABELS: Record<CadenceRuleType, string> = {
-  none: 'None — unconfigured',
-  days_since_journal: 'Days since a journal entry',
-  days_since_publish: 'Days since publish (content_items)',
-  no_activity_days: 'Days since project activity (activity_log)',
-};
+//
+// The shared constants live in ./cadence-rules to keep this file as a
+// pure 'use server' module (every export here must be an async function).
 
 export type CadenceSaveResult = { ok: true } | { ok: false; error: string };
 

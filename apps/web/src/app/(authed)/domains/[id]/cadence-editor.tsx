@@ -2,13 +2,12 @@
 
 import { useActionState } from 'react';
 import { useFormStatus } from 'react-dom';
+import { setCadenceRuleAction, type CadenceSaveResult } from './actions';
 import {
-  setCadenceRuleAction,
   CADENCE_RULE_LABELS,
   CADENCE_RULE_TYPES,
   type CadenceRuleType,
-  type CadenceSaveResult,
-} from './actions';
+} from './cadence-rules';
 
 // Cadence rule editor. Owns the one entry in failure_patterns that the
 // Briefing's "In brief" and the /domains pulse board care about. The

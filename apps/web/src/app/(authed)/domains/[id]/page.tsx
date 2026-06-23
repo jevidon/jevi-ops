@@ -5,12 +5,8 @@ import { domainsApi, tasksApi, ApiError } from '@/lib/api';
 import type { Domain, Task } from '@jerad-ops/shared';
 import { EditDomainForm } from './edit-domain-form';
 import { CadenceEditor } from './cadence-editor';
-import { CADENCE_RULE_TYPES, type CadenceRuleType } from './actions';
+import { PRIMARY_CADENCE_RULES, type CadenceRuleType } from './cadence-rules';
 import { getAppTimezone } from '@/lib/app-settings';
-
-const PRIMARY_CADENCE_RULES = new Set<string>(
-  CADENCE_RULE_TYPES.filter((r) => r !== 'none'),
-);
 
 // Pull the primary cadence rule (one of days_since_journal /
 // days_since_publish / no_activity_days) out of failure_patterns so the
