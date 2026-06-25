@@ -120,7 +120,7 @@ export default async function QuoteDetailPage({
                 book_id: quote.book?.id ?? '',
                 source_type: quote.source_type ?? '',
                 source_author: quote.source_author ?? '',
-                source_ref: quote.source_reference ?? '',
+                source_reference: quote.source_reference ?? '',
                 page_number: quote.page_number != null ? String(quote.page_number) : '',
                 chapter: quote.chapter ?? '',
                 tags: (quote.tags ?? []).join(', '),

@@ -8,8 +8,8 @@ export type SaveResult = { ok: true; id?: string } | { ok: false; error: string 
 
 // Source types that the DB CHECK constraint actually accepts. We keep the
 // list here in addition to the shared schema so a junk value in the form
-// can't slip through into a query.
-const VALID_SOURCE_TYPES = ['book', 'article', 'podcast', 'conversation', 'other'] as const;
+// can't slip through into a query. Migration 0029 added 'sermon'.
+const VALID_SOURCE_TYPES = ['book', 'article', 'podcast', 'conversation', 'sermon', 'other'] as const;
 
 // Pulls and normalizes the editable highlight fields from FormData.
 // Empty strings become null so the DB stores null instead of empty text.
@@ -21,7 +21,7 @@ function readQuoteFields(formData: FormData) {
     ? (sourceTypeRaw as (typeof VALID_SOURCE_TYPES)[number])
     : null;
   const sourceAuthor = String(formData.get('source_author') ?? '').trim() || null;
-  const sourceRef = String(formData.get('source_ref') ?? '').trim() || null;
+  const sourceReference = String(formData.get('source_reference') ?? '').trim() || null;
   const pageRaw = String(formData.get('page_number') ?? '').trim();
   const page_number = pageRaw && /^\d+$/.test(pageRaw) ? parseInt(pageRaw, 10) : null;
   const chapter = String(formData.get('chapter') ?? '').trim() || null;
@@ -35,7 +35,7 @@ function readQuoteFields(formData: FormData) {
     book_id: bookId,
     source_type,
     source_author: sourceAuthor,
-    source_ref: sourceRef,
+    source_reference: sourceReference,
     page_number,
     chapter,
     tags,

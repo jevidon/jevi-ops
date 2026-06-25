@@ -665,7 +665,7 @@ async function insertRow(sb: SupabaseClient, file: ParsedFile, route: Route): Pr
         page_number: hl.location, // Kindle Location number, fits in integer
         source_type: route.source_type,
         source_author: route.author,
-        source_ref: route.source_url ?? null,
+        source_reference: route.source_url ?? null,
         tags: hl.tags,
         added_via: 'readwise_import',
         created_at: file.createdAt,

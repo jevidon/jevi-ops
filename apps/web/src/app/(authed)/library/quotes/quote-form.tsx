@@ -17,7 +17,7 @@ interface InitialValues {
   book_id: string;             // '' = no book link
   source_type: string;         // '' = unset
   source_author: string;
-  source_ref: string;
+  source_reference: string;
   page_number: string;         // input value is always string
   chapter: string;
   tags: string;                // comma-separated input
@@ -29,6 +29,7 @@ const SOURCE_TYPE_OPTIONS: Array<{ value: string; label: string }> = [
   { value: 'article', label: 'Article' },
   { value: 'podcast', label: 'Podcast' },
   { value: 'conversation', label: 'Conversation' },
+  { value: 'sermon', label: 'Sermon' },
   { value: 'other', label: 'Other' },
 ];
 
@@ -119,8 +120,8 @@ export function QuoteForm({
         <Field label="Source URL / reference">
           <input
             type="text"
-            name="source_ref"
-            defaultValue={initial.source_ref}
+            name="source_reference"
+            defaultValue={initial.source_reference}
             placeholder="optional"
             className="w-full bg-transparent border-b border-line focus:border-ink-2 focus:outline-none py-1.5 font-sans text-[13px] text-ink"
           />

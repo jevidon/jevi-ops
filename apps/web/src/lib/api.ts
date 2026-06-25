@@ -602,7 +602,7 @@ export const libraryApi = {
       page_number?: number | null;
       chapter?: string | null;
       source_type?: string | null;
-      source_ref?: string | null;
+      source_reference?: string | null;
       source_author?: string | null;
       tags?: string[];
       added_via?: string;

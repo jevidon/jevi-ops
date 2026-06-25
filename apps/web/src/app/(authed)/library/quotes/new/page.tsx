@@ -60,7 +60,7 @@ export default async function NewQuotePage({
             book_id: bookIdFromQuery ?? '',
             source_type: prefillSourceType,
             source_author: prefillSourceAuthor,
-            source_ref: '',
+            source_reference: '',
             page_number: '',
             chapter: '',
             tags: '',
