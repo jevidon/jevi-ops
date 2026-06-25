@@ -249,6 +249,37 @@ export const libraryRoutes: FastifyPluginAsync = async (app) => {
     return { entries: data ?? [] };
   });
 
+  app.post<{
+    Body: {
+      transcription_text?: string | null;
+      entry_date?: string;
+      attachments?: unknown[];
+      source?: string;
+    };
+  }>('/api/journal-entries', async (req, reply) => {
+    // Minimal validation — the column constraints on journal_entries do
+    // the heavy lifting. Manual creates via the web form land here; the
+    // voice path inserts directly via the executor.
+    const body = req.body ?? {};
+    const insert: Record<string, unknown> = {
+      transcription_text: typeof body.transcription_text === 'string'
+        ? body.transcription_text
+        : null,
+      entry_date: typeof body.entry_date === 'string' && body.entry_date
+        ? body.entry_date
+        : new Date().toISOString().slice(0, 10),
+      attachments: Array.isArray(body.attachments) ? body.attachments : [],
+      source: typeof body.source === 'string' ? body.source : 'manual',
+    };
+    const { data, error } = await req.supabase!
+      .from('journal_entries')
+      .insert(insert)
+      .select('*')
+      .single();
+    if (error) throw app.httpErrors.internalServerError(error.message);
+    return reply.code(201).send(data);
+  });
+
   app.get<{ Params: { id: string } }>('/api/journal-entries/:id', async (req, reply) => {
     const { data, error } = await req.supabase!
       .from('journal_entries')

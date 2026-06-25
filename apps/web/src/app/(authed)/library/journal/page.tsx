@@ -54,6 +54,15 @@ export default async function JournalListPage({
       <div className="hairline" />
       <LibraryTabBar active="journal" />
 
+      <div className="px-5 lg:px-0 pt-3 flex justify-end">
+        <Link
+          href="/library/journal/new"
+          className="font-mono text-[11px] uppercase tracking-wider text-ink-3 hover:text-accent transition-colors"
+        >
+          + New entry
+        </Link>
+      </div>
+
       <div className="px-5 lg:px-0 pt-3 flex flex-wrap items-center gap-x-3 gap-y-2">
         <Link
           href={buildHref({

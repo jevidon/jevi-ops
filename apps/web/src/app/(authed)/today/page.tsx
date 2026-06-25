@@ -368,9 +368,9 @@ function buildAnchorLine(briefing: BriefingPayload | null): React.ReactNode {
 // Section 6 of the brief) is a later phase.
 function CaptureChips() {
   const chips = [
-    { label: 'Journal', href: '/library/journal' },
+    { label: 'Journal', href: '/library/journal/new' },
     { label: 'Quote', href: '/library/quotes/new' },
-    { label: 'Note', href: '/library/notes' },
+    { label: 'Note', href: '/library/notes/new' },
     { label: 'Task', href: '/tasks/new' },
   ];
   return (

@@ -123,6 +123,15 @@ export default async function NotesPage({
 
       <LibraryTabBar active="notes" />
 
+      <div className="px-5 lg:px-0 pt-3 flex justify-end">
+        <Link
+          href="/library/notes/new"
+          className="font-mono text-[11px] uppercase tracking-wider text-ink-3 hover:text-accent transition-colors"
+        >
+          + New note
+        </Link>
+      </div>
+
       {/* Filter chips */}
       <div className="px-5 lg:px-0 pt-3 flex flex-wrap items-center gap-x-3 gap-y-2">
         <span className="eyebrow">Source</span>

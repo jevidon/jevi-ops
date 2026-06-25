@@ -584,6 +584,15 @@ export const libraryApi = {
       return api.get<{ notes: Note[] }>(`/api/notes${q ? `?${q}` : ''}`);
     },
     get: (id: string) => api.get<Note>(`/api/notes/${id}`),
+    create: (body: {
+      body: string;
+      title?: string | null;
+      source_type?: string;
+      source_reference?: string | null;
+      tags?: string[];
+      needs_review?: boolean;
+      attachments?: Attachment[];
+    }) => api.post<Note>('/api/notes', body),
     update: (id: string, body: Partial<Note>) => api.patch<Note>(`/api/notes/${id}`, body),
     remove: (id: string) => api.delete(`/api/notes/${id}`),
   },
@@ -628,6 +637,12 @@ export const libraryApi = {
       return api.get<{ entries: JournalEntry[] }>(`/api/journal-entries${q ? `?${q}` : ''}`);
     },
     get: (id: string) => api.get<JournalEntry>(`/api/journal-entries/${id}`),
+    create: (body: {
+      transcription_text?: string | null;
+      entry_date?: string;
+      attachments?: Attachment[];
+      source?: string;
+    }) => api.post<JournalEntry>('/api/journal-entries', body),
     update: (id: string, body: Partial<{
       transcription_text: string | null;
       entry_date: string;
