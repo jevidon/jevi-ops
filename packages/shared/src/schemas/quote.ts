@@ -7,8 +7,9 @@ export const QuoteSourceTypeSchema = z.enum([
   'book',
   'article',
   'podcast',
-  'conversation',
   'sermon',
+  'video',
+  'conversation',
   'other',
 ]);
 
@@ -28,6 +29,7 @@ export const QuoteSchema = z.object({
   chapter: z.string().nullable().optional(),
   source_type: QuoteSourceTypeSchema.nullable().optional(),
   source_reference: z.string().nullable().optional(),
+  source_url: z.string().url().nullable().optional(),
   source_author: z.string().nullable().optional(),
   tags: z.array(z.string()).default([]),
   added_via: QuoteAddedViaSchema.default('manual'),
@@ -36,9 +38,9 @@ export const QuoteSchema = z.object({
 });
 
 // Source types and added_via values that the DB CHECK constraint accepts.
-// Migration 0029 added 'sermon' to the source_type set + renamed
-// source_ref → source_reference on the quotes table.
-const DB_SOURCE_TYPES = ['book', 'article', 'podcast', 'conversation', 'sermon', 'other'] as const;
+// Migration 0029 added 'sermon' + renamed source_ref → source_reference.
+// Migration 0030 added 'video' + a source_url column.
+const DB_SOURCE_TYPES = ['book', 'article', 'podcast', 'sermon', 'video', 'conversation', 'other'] as const;
 const DB_ADDED_VIA = ['voice', 'readwise_import', 'manual', 'journal_extraction'] as const;
 
 export const CreateQuoteSchema = z.object({
@@ -48,6 +50,7 @@ export const CreateQuoteSchema = z.object({
   chapter: z.string().nullable().optional(),
   source_type: z.enum(DB_SOURCE_TYPES).nullable().optional(),
   source_reference: z.string().nullable().optional(),
+  source_url: z.string().url().nullable().optional(),
   source_author: z.string().nullable().optional(),
   tags: z.array(z.string()).optional(),
   added_via: z.enum(DB_ADDED_VIA).optional(),

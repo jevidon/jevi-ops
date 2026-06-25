@@ -95,6 +95,22 @@ export default async function QuoteDetailPage({
       />
       <div className="hairline mb-6" />
 
+      {/* External source link — when the user attached a URL (e.g. the
+          YouTube video the quote came from). Rendered separately from
+          the meta line so it stays a clean affordance. */}
+      {quote.source_url && (
+        <div className="px-5 lg:px-0 -mt-3 mb-6">
+          <a
+            href={quote.source_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-mono text-[10px] uppercase tracking-wider text-accent hover:text-accent-ink transition-colors"
+          >
+            Open source ↗
+          </a>
+        </div>
+      )}
+
       <div className="px-5 lg:px-0 max-w-2xl">
         {/* Resurface weight control. Cycles through Normal / Boost 2× /
             Boost 5× / Excluded. Affects how often this quote can show up
@@ -121,6 +137,7 @@ export default async function QuoteDetailPage({
                 source_type: quote.source_type ?? '',
                 source_author: quote.source_author ?? '',
                 source_reference: quote.source_reference ?? '',
+                source_url: quote.source_url ?? '',
                 page_number: quote.page_number != null ? String(quote.page_number) : '',
                 chapter: quote.chapter ?? '',
                 tags: (quote.tags ?? []).join(', '),

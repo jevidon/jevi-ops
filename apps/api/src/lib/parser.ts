@@ -82,8 +82,11 @@ Action types you may produce (use the exact "action" string for each):
   start/end are ISO 8601 with timezone offset
 - create_note: { action, body, source_type?, source_reference?, tags?, project_match?, person_match?, quote_match?, needs_review? }
   source_type ∈ "own_thought" | "reading_response" | "meeting_note" | "brainstorm" | "observation" | "other"
-- create_quote: { action, text, book_match?, page_number?, chapter?, source_type?, source_reference?, source_author?, tags?, annotation_body? }
-  source_type ∈ "book" | "article" | "podcast" | "conversation" | "sermon" | "other"
+- create_quote: { action, text, book_match?, page_number?, chapter?, source_type?, source_reference?, source_url?, source_author?, tags?, annotation_body? }
+  source_type ∈ "book" | "article" | "podcast" | "sermon" | "video" | "conversation" | "other"
+  source_reference is the title/show/episode of the source (e.g. "The Problem That Won't Let You Go")
+  source_url is the link to the source — used for YouTube videos, podcast episode pages, article URLs, etc. ALWAYS set this when the user provides a URL alongside a quote; it's separate from source_reference so the UI can render the title as a hyperlink.
+  source_type='video' specifically for YouTube / Vimeo / standalone videos. Use 'podcast' for podcast episodes even if streamed on YouTube.
   annotation_body is OPTIONAL — only set when the user bundles a thought with the quote in the same utterance
 - create_quote_annotation: { action, quote_match, body, context?, tags? }
   context ∈ "on_capture" | "on_revisit" | "on_surface" | "unspecified"

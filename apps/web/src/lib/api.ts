@@ -457,6 +457,7 @@ export interface Quote {
   chapter: string | null;
   source_type: string | null;
   source_reference: string | null;
+  source_url: string | null;
   source_author: string | null;
   tags: string[];
   added_via: string;
@@ -603,6 +604,7 @@ export const libraryApi = {
       chapter?: string | null;
       source_type?: string | null;
       source_reference?: string | null;
+      source_url?: string | null;
       source_author?: string | null;
       tags?: string[];
       added_via?: string;

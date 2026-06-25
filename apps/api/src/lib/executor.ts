@@ -337,6 +337,7 @@ async function createQuote(sb: SupabaseClient, a: ParsedAction): Promise<ActionR
   if (str(a, 'chapter')) insert.chapter = str(a, 'chapter');
   if (str(a, 'source_type')) insert.source_type = str(a, 'source_type');
   if (str(a, 'source_reference')) insert.source_reference = str(a, 'source_reference');
+  if (str(a, 'source_url')) insert.source_url = str(a, 'source_url');
   if (str(a, 'source_author')) insert.source_author = str(a, 'source_author');
   if (Array.isArray(a.tags)) insert.tags = a.tags;
 

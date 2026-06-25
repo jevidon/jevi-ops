@@ -18,6 +18,7 @@ interface InitialValues {
   source_type: string;         // '' = unset
   source_author: string;
   source_reference: string;
+  source_url: string;
   page_number: string;         // input value is always string
   chapter: string;
   tags: string;                // comma-separated input
@@ -28,8 +29,9 @@ const SOURCE_TYPE_OPTIONS: Array<{ value: string; label: string }> = [
   { value: 'book', label: 'Book' },
   { value: 'article', label: 'Article' },
   { value: 'podcast', label: 'Podcast' },
-  { value: 'conversation', label: 'Conversation' },
   { value: 'sermon', label: 'Sermon' },
+  { value: 'video', label: 'Video' },
+  { value: 'conversation', label: 'Conversation' },
   { value: 'other', label: 'Other' },
 ];
 
@@ -117,7 +119,7 @@ export function QuoteForm({
             className="w-full bg-transparent border-b border-line focus:border-ink-2 focus:outline-none py-1.5 font-sans text-[13px] text-ink"
           />
         </Field>
-        <Field label="Source URL / reference">
+        <Field label="Source title (article, episode, video name)">
           <input
             type="text"
             name="source_reference"
@@ -127,6 +129,16 @@ export function QuoteForm({
           />
         </Field>
       </div>
+
+      <Field label="Source URL (link to the video / podcast / article)">
+        <input
+          type="url"
+          name="source_url"
+          defaultValue={initial.source_url}
+          placeholder="https://…"
+          className="w-full bg-transparent border-b border-line focus:border-ink-2 focus:outline-none py-1.5 font-sans text-[13px] text-ink"
+        />
+      </Field>
 
       <Field label="Tags (comma-separated)">
         <input
