@@ -43,6 +43,11 @@ const EnvSchema = z.object({
   // pg_cron, system cron, etc.) passes this in the X-Cron-Secret header.
   CRON_SECRET: z.string().min(20).optional(),
 
+  // Widget secret for /api/widget/* endpoints. iOS Scriptable / Android
+  // HTTP Shortcuts widgets pass this as ?secret=... since they can't
+  // carry a Supabase session.
+  WIDGET_SECRET: z.string().min(20).optional(),
+
   // Anthropic — required once voice capture is wired.
   ANTHROPIC_API_KEY: z.string().optional(),
   // Override the parser model. Default is the current best for structured
