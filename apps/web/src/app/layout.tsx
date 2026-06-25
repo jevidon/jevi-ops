@@ -43,6 +43,13 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 1,
   userScalable: false,
+  // viewport-fit=cover lets the PWA draw under the iOS home indicator,
+  // which in turn makes env(safe-area-inset-bottom) report a real value
+  // instead of 0. The BottomTabBar / MicFAB / TextCaptureFAB / main pb
+  // all reference that inset to keep clear of the home indicator. In
+  // regular Safari the inset is 0 so nothing extra renders — the cost
+  // is paid only where it's needed.
+  viewportFit: 'cover',
 };
 
 // Bare shell: font links + body. The tab bar + mic FAB live inside the

@@ -48,8 +48,17 @@ export default async function AuthedLayout({ children }: { children: React.React
 
         <div className="flex-1 flex flex-col min-w-0">
           {/* Inner wrapper: clamp width on mobile so the layout matches what
-              we had before; on desktop, let it fill the rail-less space. */}
-          <main className="flex-1 pb-24 lg:pb-12 mx-auto w-full max-w-[480px] lg:max-w-[1280px] lg:px-12">
+              we had before; on desktop, let it fill the rail-less space.
+
+              Bottom padding adapts: a base value clears the tab bar in
+              regular Safari (where env(safe-area-inset-bottom) is 0), and
+              the inset adds on top of that in PWA mode so the last row of
+              content stays above the home indicator without any over-
+              padding in browser mode. */}
+          <main
+            className="flex-1 lg:pb-12 mx-auto w-full max-w-[480px] lg:max-w-[1280px] lg:px-12"
+            style={{ paddingBottom: 'calc(5rem + env(safe-area-inset-bottom))' }}
+          >
             {children}
           </main>
           <MicFAB />
