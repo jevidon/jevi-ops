@@ -30,10 +30,21 @@ const QUOTE_COLOR = new Color('#FFFFFF');
 const META_COLOR = new Color('#B5B5BB');
 const META_DIM_COLOR = new Color('#8E8E93');
 const ACCENT_COLOR = new Color('#B8442B');
-const QUOTE_FONT = Font.semiboldSystemFont(15);
 const SOURCE_TITLE_FONT = Font.boldSystemFont(13);
 const SOURCE_AUTHOR_FONT = Font.systemFont(12);
 const FOOTER_FONT = Font.mediumSystemFont(9);
+
+// Quote font scales to length. Short quotes get more visual weight so
+// they don't float at the top of the card; long ones drop a few points
+// so they fit without truncation. Each band tuned against a medium
+// widget on 6.1"–6.7" iPhones.
+function quoteFontFor(text) {
+  const len = (text ?? '').length;
+  if (len < 70)  return Font.semiboldSystemFont(22);
+  if (len < 140) return Font.semiboldSystemFont(18);
+  if (len < 220) return Font.semiboldSystemFont(16);
+  return Font.semiboldSystemFont(15);
+}
 
 // ─── main ──────────────────────────────────────────────────────────────
 const quote = await fetchQuote();
@@ -82,17 +93,23 @@ async function buildWidget(quote) {
   // Tap → open the quote in the dashboard.
   if (quote.href) widget.url = quote.href;
 
-  // ─── Quote body — takes the top portion ────────────────────────────
+  // Vertically center the whole content block (quote + source row) so
+  // short quotes feel balanced instead of floating at the top. The two
+  // outer spacers expand symmetrically; on long quotes they collapse
+  // to near-zero and the layout matches the prior top-aligned look.
+  widget.addSpacer();
+
+  // ─── Quote body ───────────────────────────────────────────────────
   const quoteText = widget.addText(`“${quote.text}”`);
-  quoteText.font = QUOTE_FONT;
+  quoteText.font = quoteFontFor(quote.text);
   quoteText.textColor = QUOTE_COLOR;
-  // No font scaling — iOS truncates with ellipsis when text overflows
-  // the available space. Server pre-truncates at ~360 chars; long quotes
-  // can still hit the wall if line breaks land awkwardly, so this is the
-  // safety net.
+  // No iOS minimumScaleFactor — let it truncate with an ellipsis if a
+  // run-on Kindle highlight slips past the server's 360-char cap.
   quoteText.lineLimit = 7;
 
-  widget.addSpacer();
+  // Tight gap between the quote and the source row; the visual unit
+  // reads as "quote + attribution" without competing whitespace.
+  widget.addSpacer(10);
 
   // ─── Source row — left: cover or glyph · right: title + author ────
   const sourceRow = widget.addStack();
@@ -125,6 +142,9 @@ async function buildWidget(quote) {
   const dot = footerRow.addText('●');
   dot.font = FOOTER_FONT;
   dot.textColor = ACCENT_COLOR;
+
+  // Pair with the top spacer to vertically center the content block.
+  widget.addSpacer();
 
   return widget;
 }
