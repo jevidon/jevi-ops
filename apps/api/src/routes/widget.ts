@@ -95,15 +95,11 @@ export const widgetRoutes: FastifyPluginAsync = async (app) => {
       }
 
       const bookJoin = Array.isArray(chosen.book) ? chosen.book[0] ?? null : chosen.book ?? null;
-      // Tap-through target. The CORS_ORIGINS env carries the web origin
-      // we trust; first entry wins for the deep link. Falls back to the
-      // public prod URL so the widget keeps working if the env is empty
-      // in some local dev context.
-      const corsFirst = (env.CORS_ORIGINS ?? '').split(',')[0]?.trim();
-      const dashboardOrigin =
-        corsFirst && corsFirst !== '*' && corsFirst.startsWith('http')
-          ? corsFirst
-          : 'https://dashboard.jeradhill.com';
+      // Tap-through target. Prefer WEB_PUBLIC_URL (explicit "the public
+      // origin of the web app") since that's unambiguous. Don't read
+      // CORS_ORIGINS — that often lists localhost first for dev and we
+      // can't tell prod from dev by string-sniffing.
+      const dashboardOrigin = (env.WEB_PUBLIC_URL ?? 'https://dashboard.jeradhill.com').replace(/\/$/, '');
 
       const payload: { item: WidgetQuote } = {
         item: {
@@ -121,7 +117,7 @@ export const widgetRoutes: FastifyPluginAsync = async (app) => {
                 cover_image_url: bookJoin.cover_image_url ?? null,
               }
             : null,
-          href: `${dashboardOrigin.replace(/\/$/, '')}/library/quotes/${chosen.id}`,
+          href: `${dashboardOrigin}/library/quotes/${chosen.id}`,
         },
       };
 

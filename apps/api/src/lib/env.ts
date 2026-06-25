@@ -48,6 +48,13 @@ const EnvSchema = z.object({
   // carry a Supabase session.
   WIDGET_SECRET: z.string().min(20).optional(),
 
+  // Public origin of the web app — used by widget endpoints to build
+  // tap-through deep links. Set this on prod to the dashboard's public
+  // URL. Without it the widget falls back to the hardcoded prod URL
+  // below, which is fine for production but means dev widgets would
+  // also point at prod.
+  WEB_PUBLIC_URL: z.string().url().optional(),
+
   // Anthropic — required once voice capture is wired.
   ANTHROPIC_API_KEY: z.string().optional(),
   // Override the parser model. Default is the current best for structured
