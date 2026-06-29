@@ -471,8 +471,17 @@ export const libraryRoutes: FastifyPluginAsync = async (app) => {
   // Each row carries a resurface_weight column (default 1.0). Items
   // with weight 0 are excluded. Higher weights = proportionally more
   // likely to land. UI for adjusting weights ships later.
-  app.get<{ Querystring: { date?: string } }>('/api/library/resurfacing', async (req) => {
+  app.get<{ Querystring: { date?: string; skip?: string } }>('/api/library/resurfacing', async (req) => {
     const sb = req.supabase!;
+    // Comma-separated IDs to exclude from the pool. The web side passes
+    // these from a "resurfacing_seen" cookie that the "Next" button on
+    // Today bumps every time the user wants to cycle to a different item.
+    const skipIds = new Set(
+      (req.query.skip ?? '')
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean),
+    );
     // Pull only what we need to pick + render. ~thousand rows max for
     // a personal library; full scan is fine.
     const [quotesRes, journalRes] = await Promise.all([
@@ -525,17 +534,31 @@ export const libraryRoutes: FastifyPluginAsync = async (app) => {
       return { item: null };
     }
 
+    // Apply skip filter. We keep `pool.length` (pre-filter) as the
+    // original pool_size so the client can know whether the user has
+    // burned through everything for today vs. a genuinely empty pool.
+    const originalPoolSize = pool.length;
+    const filtered = skipIds.size > 0
+      ? pool.filter((p) => !skipIds.has(p.id))
+      : pool;
+    if (filtered.length === 0) {
+      // The user has cycled past every item. Surface that distinctly so
+      // the UI can render "All seen today — back tomorrow" instead of an
+      // empty card.
+      return { item: null, pool_size: originalPoolSize, exhausted: true };
+    }
+
     // Deterministic seed: hash of today's date (or override via ?date).
     const dateStr = (req.query.date ?? new Date().toISOString().slice(0, 10));
     const seed = simpleHash(dateStr);
 
     // Weighted pick: total weight × normalized seed → index.
-    const totalWeight = pool.reduce((sum, p) => sum + p.weight, 0);
+    const totalWeight = filtered.reduce((sum, p) => sum + p.weight, 0);
     if (totalWeight <= 0) return { item: null };
     const pickAt = (seed % 1_000_000) / 1_000_000 * totalWeight;
     let acc = 0;
-    let chosen: PoolItem = pool[0]!;
-    for (const item of pool) {
+    let chosen: PoolItem = filtered[0]!;
+    for (const item of filtered) {
       acc += item.weight;
       if (acc >= pickAt) {
         chosen = item;
@@ -561,7 +584,8 @@ export const libraryRoutes: FastifyPluginAsync = async (app) => {
         source: chosen.source,
         href: chosen.href,
       },
-      pool_size: pool.length,
+      pool_size: originalPoolSize,
+      skipped: skipIds.size,
       date: dateStr,
     };
   });

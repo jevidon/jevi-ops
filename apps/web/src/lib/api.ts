@@ -569,10 +569,18 @@ export const libraryApi = {
   feed: (limit = 500) =>
     api.get<{ items: FeedItem[] }>(`/api/library/feed?limit=${limit}`),
   tags: () => api.get<{ tags: TagAggregate[] }>('/api/library/tags'),
-  resurfacing: () =>
-    api.get<{ item: ResurfacingItem | null; pool_size?: number; date?: string }>(
-      '/api/library/resurfacing',
-    ),
+  resurfacing: (opts?: { skip?: string[] }) => {
+    const qs = new URLSearchParams();
+    if (opts?.skip && opts.skip.length > 0) qs.set('skip', opts.skip.join(','));
+    const q = qs.toString();
+    return api.get<{
+      item: ResurfacingItem | null;
+      pool_size?: number;
+      skipped?: number;
+      exhausted?: boolean;
+      date?: string;
+    }>(`/api/library/resurfacing${q ? `?${q}` : ''}`);
+  },
   notes: {
     list: (opts?: { source_type?: string; needs_review?: boolean; tag?: string; resurface?: 'boosted' | 'excluded' }) => {
       const qs = new URLSearchParams();

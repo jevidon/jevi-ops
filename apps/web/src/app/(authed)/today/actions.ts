@@ -1,6 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { cookies } from 'next/headers';
 import { z } from 'zod';
 import { tasksApi, observationsApi, ApiError } from '@/lib/api';
 import { todayIsoDate } from '@/lib/today';
@@ -67,4 +68,63 @@ export async function dismissObservationAction(formData: FormData) {
   }
   revalidatePath('/today');
   revalidatePath('/observations');
+}
+
+// ─── Resurfacing cycle ───────────────────────────────────────────────────
+//
+// "Next" button on the Resurfaced card. Stamps the current item's id into
+// a "resurfacing_seen" cookie keyed by today's date so the picker skips
+// it on the next render. New day → cookie auto-resets (we ignore stale
+// dates server-side). The cookie is httpOnly so it never gets read by
+// page JS — only by the next server render via getResurfacingSeen().
+
+const RESURFACING_COOKIE = 'resurfacing_seen';
+
+interface SeenCookie { date: string; ids: string[] }
+
+function parseSeen(raw: string | undefined, todayIso: string): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as SeenCookie;
+    if (parsed?.date !== todayIso) return [];
+    if (!Array.isArray(parsed.ids)) return [];
+    return parsed.ids.filter((s): s is string => typeof s === 'string');
+  } catch {
+    return [];
+  }
+}
+
+export async function getResurfacingSeen(): Promise<string[]> {
+  const jar = await cookies();
+  const raw = jar.get(RESURFACING_COOKIE)?.value;
+  const tz = await getAppTimezone();
+  return parseSeen(raw, todayIsoDate(tz));
+}
+
+export async function skipResurfacingAction(formData: FormData) {
+  const id = String(formData.get('id') ?? '');
+  if (!id) return;
+  const tz = await getAppTimezone();
+  const today = todayIsoDate(tz);
+  const jar = await cookies();
+  const current = parseSeen(jar.get(RESURFACING_COOKIE)?.value, today);
+  if (!current.includes(id)) current.push(id);
+  const value: SeenCookie = { date: today, ids: current };
+  jar.set(RESURFACING_COOKIE, JSON.stringify(value), {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+    path: '/',
+    // 36-hour TTL so a cookie persisted across midnight gets cleared
+    // by the server-side date check anyway. The TTL is just belt +
+    // suspenders against a stale cookie surviving forever.
+    maxAge: 60 * 60 * 36,
+  });
+  revalidatePath('/today');
+}
+
+export async function resetResurfacingAction() {
+  const jar = await cookies();
+  jar.delete(RESURFACING_COOKIE);
+  revalidatePath('/today');
 }

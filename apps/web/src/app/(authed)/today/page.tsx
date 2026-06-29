@@ -16,6 +16,11 @@ import { todayIsoDate } from '@/lib/today';
 import { BriefLineRow } from './brief-line';
 import { RoutinesTodayList } from '@/app/(authed)/routines/routines-today-list';
 import { TaskItem } from '@/components/TaskItem';
+import {
+  getResurfacingSeen,
+  skipResurfacingAction,
+  resetResurfacingAction,
+} from './actions';
 
 // The Briefing — editorial home screen (Jun 2026 redesign).
 //
@@ -66,15 +71,25 @@ export default async function TodayPage() {
   let unreadCount = 0;
   let errorMessage: string | null = null;
 
+  // Read the "skipped today" cookie before kicking off the resurfacing
+  // fetch so the API can filter those IDs from the pool. Awaiting one
+  // small cookie read before the parallel fan-out is cheaper than re-
+  // architecting around a second round trip.
+  const resurfacingSkip = await getResurfacingSeen();
+
   let allTasks: Task[] = [];
+  let resurfaceExhausted = false;
   const [briefingRes, resurfaceRes, countRes, routinesRes, tasksRes] = await Promise.allSettled([
     briefingApi.today(),
-    libraryApi.resurfacing(),
+    libraryApi.resurfacing({ skip: resurfacingSkip }),
     notificationsApi.count(),
     routinesApi.list(),
     tasksApi.list(),
   ]);
   if (tasksRes.status === 'fulfilled') allTasks = tasksRes.value.tasks;
+  if (resurfaceRes.status === 'fulfilled') {
+    resurfaceExhausted = Boolean(resurfaceRes.value.exhausted);
+  }
   if (briefingRes.status === 'fulfilled') {
     briefing = briefingRes.value;
   } else {
@@ -211,26 +226,80 @@ export default async function TodayPage() {
           </section>
 
           {/* Resurfaced */}
-          {resurface && (
+          {(resurface || resurfaceExhausted) && (
             <section className="mt-9 mx-5 lg:mx-0 bg-surface border-y border-line py-6 px-5">
               <div className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3 mb-3">
                 Resurfaced
               </div>
-              <blockquote className="font-serif text-[19px] italic leading-snug text-ink">
-                &ldquo;{resurface.excerpt}&rdquo;
-              </blockquote>
-              {resurface.source && (
-                <div className="mt-3 font-mono text-[11px] uppercase tracking-wider text-ink-3">
-                  — {resurface.source}
-                </div>
-              )}
-              {resurface.href && (
-                <Link
-                  href={resurface.href}
-                  className="mt-3 inline-block font-mono text-[10px] uppercase tracking-wider text-accent hover:text-accent-ink transition-colors"
-                >
-                  Open in {resurface.kind === 'quote' ? 'Quotes' : 'Journal'} →
-                </Link>
+
+              {resurface ? (
+                <>
+                  <blockquote className="font-serif text-[19px] italic leading-snug text-ink">
+                    &ldquo;{resurface.excerpt}&rdquo;
+                  </blockquote>
+                  {resurface.source && (
+                    <div className="mt-3 font-mono text-[11px] uppercase tracking-wider text-ink-3">
+                      — {resurface.source}
+                    </div>
+                  )}
+
+                  {/* Actions row — Open / Next / Reset.
+                      Next stamps the current id into a cookie so the
+                      picker skips it on the next render. Reset clears
+                      the whole "seen today" list — useful if the user
+                      wants to start the rotation over without waiting
+                      for midnight. Reset only renders when at least one
+                      item has been skipped. */}
+                  <div className="mt-3 flex items-center gap-4 flex-wrap">
+                    {resurface.href && (
+                      <Link
+                        href={resurface.href}
+                        className="font-mono text-[10px] uppercase tracking-wider text-accent hover:text-accent-ink transition-colors"
+                      >
+                        Open in {resurface.kind === 'quote' ? 'Quotes' : 'Journal'} →
+                      </Link>
+                    )}
+                    <form action={skipResurfacingAction}>
+                      <input type="hidden" name="id" value={resurface.id} />
+                      <button
+                        type="submit"
+                        className="font-mono text-[10px] uppercase tracking-wider text-ink-3 hover:text-accent transition-colors"
+                      >
+                        Next →
+                      </button>
+                    </form>
+                    {resurfacingSkip.length > 0 && (
+                      <form action={resetResurfacingAction}>
+                        <button
+                          type="submit"
+                          className="font-mono text-[10px] uppercase tracking-wider text-ink-3 hover:text-accent transition-colors"
+                          title={`${resurfacingSkip.length} skipped today`}
+                        >
+                          Reset
+                        </button>
+                      </form>
+                    )}
+                  </div>
+                </>
+              ) : (
+                // Exhausted state — user has cycled past every weighted
+                // item in the pool today. Same card frame so the page
+                // doesn't shift; copy invites either "wait for tomorrow"
+                // or an explicit Reset.
+                <>
+                  <p className="font-serif text-[17px] italic text-ink-2 leading-snug">
+                    You&rsquo;ve seen every item in today&rsquo;s rotation.
+                    Tomorrow&rsquo;s pick will come from the same pool, fresh.
+                  </p>
+                  <form action={resetResurfacingAction} className="mt-3">
+                    <button
+                      type="submit"
+                      className="font-mono text-[10px] uppercase tracking-wider text-accent hover:text-accent-ink transition-colors"
+                    >
+                      Reset rotation now →
+                    </button>
+                  </form>
+                </>
               )}
             </section>
           )}
