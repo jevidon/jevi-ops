@@ -4,15 +4,18 @@ import {
   libraryApi,
   notificationsApi,
   routinesApi,
+  tasksApi,
   ApiError,
   type BriefingPayload,
   type ResurfacingItem,
   type RoutineListItem,
 } from '@/lib/api';
+import type { Task } from '@jerad-ops/shared';
 import { getAppTimezone } from '@/lib/app-settings';
 import { todayIsoDate } from '@/lib/today';
 import { BriefLineRow } from './brief-line';
 import { RoutinesTodayList } from '@/app/(authed)/routines/routines-today-list';
+import { TaskItem } from '@/components/TaskItem';
 
 // The Briefing — editorial home screen (Jun 2026 redesign).
 //
@@ -63,12 +66,15 @@ export default async function TodayPage() {
   let unreadCount = 0;
   let errorMessage: string | null = null;
 
-  const [briefingRes, resurfaceRes, countRes, routinesRes] = await Promise.allSettled([
+  let allTasks: Task[] = [];
+  const [briefingRes, resurfaceRes, countRes, routinesRes, tasksRes] = await Promise.allSettled([
     briefingApi.today(),
     libraryApi.resurfacing(),
     notificationsApi.count(),
     routinesApi.list(),
+    tasksApi.list(),
   ]);
+  if (tasksRes.status === 'fulfilled') allTasks = tasksRes.value.tasks;
   if (briefingRes.status === 'fulfilled') {
     briefing = briefingRes.value;
   } else {
@@ -82,6 +88,31 @@ export default async function TodayPage() {
     // /routines page is the full management view.
     routines = routinesRes.value.routines.filter((r) => r.active && !r.archived_at);
   }
+
+  // Today's actionable tasks for the right rail. Order:
+  //   1. Top-3 starred for today (user's explicit picks come first)
+  //   2. Overdue (oldest first)
+  //   3. Due today (newest created first)
+  // Anything else (no date, future, completed) stays on /tasks — the
+  // rail is "what I'm working on right now," not the full list.
+  const openTasks = allTasks.filter((t) => t.status === 'open');
+  const top3 = openTasks
+    .filter((t) => t.top3_for_date === today)
+    .sort((a, b) => a.created_at.localeCompare(b.created_at));
+  const top3Ids = new Set(top3.map((t) => t.id));
+  const overdue = openTasks
+    .filter((t) => !top3Ids.has(t.id) && t.due_date && t.due_date < today)
+    .sort((a, b) => (a.due_date ?? '').localeCompare(b.due_date ?? ''));
+  const dueToday = openTasks
+    .filter((t) => !top3Ids.has(t.id) && t.due_date === today)
+    .sort((a, b) => b.created_at.localeCompare(a.created_at));
+  // Cap at 10 in the rail so a runaway todo list doesn't dominate the
+  // viewport. Anything past the cap surfaces via the "+ N more" link.
+  const RAIL_CAP = 10;
+  const railTasksAll = [...top3, ...overdue, ...dueToday];
+  const railTasks = railTasksAll.slice(0, RAIL_CAP);
+  const railOverflow = Math.max(0, railTasksAll.length - RAIL_CAP);
+  const emptyTop3Slots = Math.max(0, 3 - top3.length);
 
   const { day, meta } = mastheadDate(tz);
 
@@ -247,31 +278,70 @@ export default async function TodayPage() {
             </section>
           )}
 
-          {/* Doing today strip */}
-          {briefing && briefing.doing_today.open_count > 0 && (
-            <Link
-              href="/tasks"
-              className="px-5 lg:px-0 mt-6 block hover:opacity-80 transition-opacity"
-            >
+          {/* Doing today — real, interactive task rows so the user can
+              check things off and re-pick Top 3 without leaving Today.
+              Rendered as a list of TaskItems (checkbox + Top-3 star +
+              meta). Empty Top-3 slots render as placeholder rows so the
+              user remembers there's room to pin three for the day. */}
+          {(railTasks.length > 0 || briefing?.doing_today.open_count) && (
+            <section className="px-5 lg:px-0 mt-6">
               <div className="flex items-baseline justify-between mb-1">
                 <div className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3">
-                  Doing · {briefing.doing_today.open_count} open
-                  {briefing.doing_today.overdue_count > 0 && (
-                    <span className="text-accent ml-1">
-                      · {briefing.doing_today.overdue_count} overdue
-                    </span>
+                  Doing
+                  {briefing && (
+                    <>
+                      {' · '}
+                      {briefing.doing_today.open_count} open
+                      {briefing.doing_today.overdue_count > 0 && (
+                        <span className="text-accent ml-1">
+                          · {briefing.doing_today.overdue_count} overdue
+                        </span>
+                      )}
+                    </>
                   )}
                 </div>
-                <span className="font-mono text-[10px] uppercase tracking-wider text-ink-3">
-                  Open →
-                </span>
+                <Link
+                  href="/tasks"
+                  className="font-mono text-[10px] uppercase tracking-wider text-ink-3 hover:text-accent transition-colors"
+                >
+                  All tasks →
+                </Link>
               </div>
-              <div className="font-sans text-[13px] text-ink-2 leading-snug">
-                {briefing.doing_today.titles.length > 0
-                  ? briefing.doing_today.titles.join(' · ')
-                  : 'No priorities pinned. Tap to open the task list.'}
+
+              {top3.length === 0 && emptyTop3Slots > 0 && (
+                <div className="mt-1 mb-2 font-mono text-[10px] uppercase tracking-wider text-ink-3">
+                  Top 3 for today
+                </div>
+              )}
+
+              <div className="mt-1">
+                {railTasks.length === 0 ? (
+                  <p className="font-sans text-[13px] text-ink-3 italic py-2">
+                    No tasks overdue or due today. Star one below to pin it
+                    as Top 3.
+                  </p>
+                ) : (
+                  railTasks.map((t) => <TaskItem key={t.id} task={t} />)
+                )}
+                {/* Render empty placeholders so the missing-Top-3 slots
+                    visually invite the user to pick. Only show when
+                    fewer than 3 are pinned AND there are other tasks
+                    on screen — otherwise the list reads as cluttered. */}
+                {top3.length < 3 && railTasks.length > 0 && (
+                  <p className="mt-2 font-mono text-[10px] uppercase tracking-wider text-ink-3">
+                    {3 - top3.length} Top 3 {3 - top3.length === 1 ? 'slot' : 'slots'} open · tap ☆ on a row to pin
+                  </p>
+                )}
+                {railOverflow > 0 && (
+                  <Link
+                    href="/tasks"
+                    className="mt-2 inline-block font-mono text-[10px] uppercase tracking-wider text-ink-3 hover:text-accent transition-colors"
+                  >
+                    + {railOverflow} more →
+                  </Link>
+                )}
               </div>
-            </Link>
+            </section>
           )}
 
           {/* Routines (inline check-off). Header renders even when the
