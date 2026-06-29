@@ -572,11 +572,23 @@ export const libraryRoutes: FastifyPluginAsync = async (app) => {
     // ask for everything is simpler than building an infinite-scroll feed.
     const limit = Math.min(parseInt(req.query.limit ?? '60', 10) || 60, 2000);
     const sb = req.supabase!;
+    // Include title (notes), tags + source_reference (notes + quotes),
+    // and the book join (quotes) so the /library "All" view can render
+    // the same scannable rows that the per-kind sub-pages do — instead
+    // of dumping a wall of body text per item.
     const [notes, quotes, annotations, journal] = await Promise.all([
-      sb.from('notes').select('id, body, source_type, created_at').order('created_at', { ascending: false }).limit(limit),
-      sb.from('quotes').select('id, text, source_author, created_at').order('created_at', { ascending: false }).limit(limit),
-      sb.from('quote_annotations').select('id, body, quote_id, annotated_at, quote:quotes(id, text, source_author)').order('annotated_at', { ascending: false }).limit(limit),
-      sb.from('journal_entries').select('id, transcription_text, entry_date, created_at').order('entry_date', { ascending: false }).limit(limit),
+      sb.from('notes')
+        .select('id, title, body, source_type, source_reference, tags, created_at')
+        .order('created_at', { ascending: false }).limit(limit),
+      sb.from('quotes')
+        .select('id, text, source_author, source_reference, tags, created_at, book:books(id, title, author)')
+        .order('created_at', { ascending: false }).limit(limit),
+      sb.from('quote_annotations')
+        .select('id, body, quote_id, annotated_at, quote:quotes(id, text, source_author)')
+        .order('annotated_at', { ascending: false }).limit(limit),
+      sb.from('journal_entries')
+        .select('id, transcription_text, entry_date, created_at')
+        .order('entry_date', { ascending: false }).limit(limit),
     ]);
 
     type FeedItem = { kind: 'note' | 'quote' | 'annotation' | 'journal'; id: string; at: string; payload: Record<string, unknown> };
