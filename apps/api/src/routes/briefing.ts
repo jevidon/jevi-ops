@@ -38,6 +38,15 @@ interface BriefLine {
   routeTo: { href: string; label: string };
 }
 
+interface LatestQuote {
+  id: string;
+  text: string;
+  source_author: string | null;
+  source_reference: string | null;
+  source_url: string | null;
+  href: string;
+}
+
 interface BriefingPayload {
   inbox_triage_count: number;
   brief_lines: BriefLine[];
@@ -55,6 +64,10 @@ interface BriefingPayload {
     done: number;
     remaining_names: string[];
   };
+  // The single newest quote in the library, regardless of resurface
+  // weight. Stays put on the Today page until a newer quote gets added
+  // — distinct from `Resurfaced` which date-seeded-rotates daily.
+  latest_quote: LatestQuote | null;
 }
 
 function cadenceRowToBriefLine(row: CadenceRow): BriefLine | null {
@@ -104,6 +117,7 @@ export const briefingRoutes: FastifyPluginAsync = async (app) => {
       eventsRes,
       openTasksRes,
       routinesRes,
+      latestQuoteRes,
     ] = await Promise.all([
       computeDomainCadences(sb),
       sb.from('tasks')
@@ -122,6 +136,11 @@ export const briefingRoutes: FastifyPluginAsync = async (app) => {
         .select('id, name, active, archived_at, last_done_date, time_of_day')
         .eq('active', true)
         .is('archived_at', null),
+      sb.from('quotes')
+        .select('id, text, source_author, source_reference, source_url')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle(),
     ]);
 
     // ─── Brief lines — only slipping/stale cadence rows surface here. ──
@@ -170,6 +189,28 @@ export const briefingRoutes: FastifyPluginAsync = async (app) => {
     const doneRoutines = routines.filter((r) => r.last_done_date === today);
     const remainingRoutines = routines.filter((r) => r.last_done_date !== today);
 
+    // ─── Latest quote — newest by created_at, regardless of weight. ────
+    // Stays put on the Today page until the user saves a newer quote;
+    // distinct from Resurfaced (date-seeded daily rotation).
+    type LatestQuoteRow = {
+      id: string;
+      text: string | null;
+      source_author: string | null;
+      source_reference: string | null;
+      source_url: string | null;
+    };
+    const lq = (latestQuoteRes.data ?? null) as LatestQuoteRow | null;
+    const latestQuote: LatestQuote | null = lq
+      ? {
+          id: lq.id,
+          text: lq.text ?? '',
+          source_author: lq.source_author ?? null,
+          source_reference: lq.source_reference ?? null,
+          source_url: lq.source_url ?? null,
+          href: `/library/quotes/${lq.id}`,
+        }
+      : null;
+
     const payload: BriefingPayload = {
       inbox_triage_count: inboxCount,
       brief_lines: briefLines,
@@ -185,6 +226,7 @@ export const briefingRoutes: FastifyPluginAsync = async (app) => {
         done: doneRoutines.length,
         remaining_names: remainingRoutines.slice(0, 3).map((r) => r.name),
       },
+      latest_quote: latestQuote,
     };
 
     return payload;

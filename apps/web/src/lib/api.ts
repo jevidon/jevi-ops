@@ -979,6 +979,15 @@ export interface BriefLine {
   routeTo: { href: string; label: string };
 }
 
+export interface BriefingLatestQuote {
+  id: string;
+  text: string;
+  source_author: string | null;
+  source_reference: string | null;
+  source_url: string | null;
+  href: string;
+}
+
 export interface BriefingPayload {
   inbox_triage_count: number;
   brief_lines: BriefLine[];
@@ -994,6 +1003,7 @@ export interface BriefingPayload {
     done: number;
     remaining_names: string[];
   };
+  latest_quote: BriefingLatestQuote | null;
 }
 
 export interface CadenceRow {

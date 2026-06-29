@@ -234,6 +234,48 @@ export default async function TodayPage() {
               )}
             </section>
           )}
+
+          {/* Latest quote — newest by created_at, sticks until a newer
+              one shows up. Distinct from Resurfaced (which date-seeded-
+              rotates daily). When the two would land on the same item
+              (e.g. you just added the only quote in your library), we
+              hide this section to avoid showing it twice in the same
+              column. */}
+          {briefing?.latest_quote && briefing.latest_quote.id !== resurface?.id && (
+            <section className="mt-6 mx-5 lg:mx-0 border border-line py-5 px-5">
+              <div className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3 mb-3">
+                Latest quote
+              </div>
+              <blockquote className="font-serif text-[17px] italic leading-snug text-ink">
+                &ldquo;{briefing.latest_quote.text}&rdquo;
+              </blockquote>
+              {(briefing.latest_quote.source_author || briefing.latest_quote.source_reference) && (
+                <div className="mt-3 font-mono text-[11px] uppercase tracking-wider text-ink-3">
+                  — {[briefing.latest_quote.source_author, briefing.latest_quote.source_reference]
+                      .filter(Boolean)
+                      .join(' · ')}
+                </div>
+              )}
+              <div className="mt-3 flex items-center gap-4 flex-wrap">
+                <Link
+                  href={briefing.latest_quote.href}
+                  className="font-mono text-[10px] uppercase tracking-wider text-accent hover:text-accent-ink transition-colors"
+                >
+                  Open quote →
+                </Link>
+                {briefing.latest_quote.source_url && (
+                  <a
+                    href={briefing.latest_quote.source_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-mono text-[10px] uppercase tracking-wider text-ink-3 hover:text-accent transition-colors"
+                  >
+                    Open source ↗
+                  </a>
+                )}
+              </div>
+            </section>
+          )}
         </div>
 
         {/* ─── Right: commitments rail ────────────────────────── */}
