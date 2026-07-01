@@ -189,32 +189,99 @@ param, since XCloud's HTTP cron form doesn't currently let you set headers):
 (13 UTC = 7am Mountain during MST; 6am during MDT — close enough for a morning
 ping. The overdue band `13-3` wraps midnight UTC to cover 7am–9pm Mountain.)
 
-## Phase 1 build checklist
+## Build status
 
-Tracked against spec §12. ✅ shipped · 🟡 in progress · ⬜ pending.
+Tracked against spec §12 plus subsequent addenda. ✅ shipped · 🟡 partial · ⬜ pending · ↷ superseded.
 
+**Foundation**
 - ✅ Monorepo, env loader, design tokens, 6-tab shell, floating mic FAB
-- ✅ Full Postgres schema (tasks, projects, domains, content, people, journal, quotes, books, inventory, notifications, observations, action_log, captured_data)
-- ✅ Seeded the six functional domains
-- ✅ Generic `POST /api/ingest` endpoint
-- ✅ Task + project CRUD stubs (admin-key; RLS pending)
-- ✅ Voice capture stub route (parser pending)
-- ⬜ Supabase Auth wiring (web + api JWT middleware)
-- ⬜ Drizzle schema mirror + `pnpm db:push`
-- ⬜ Web → API client (typed fetch wrapper using `@jerad-ops/shared` Zod schemas)
-- ⬜ Voice parser using Anthropic API (spec §14 prompt)
-- ⬜ Two-way Google Calendar sync (read + write, Calendly-aware)
-- ⬜ Notifications feed
-- ⬜ Checklist templates + instances UI
-- ⬜ Top-3-for-today setter
-- ⬜ Nightly backup cron → Drive + NAS
+- ✅ Full Postgres schema (30 migrations, 20+ tables — new deploys can run the consolidated `infrastructure/schema.sql` instead of stepping through each migration)
+- ✅ Seeded stewardship domains (six original + three YouTube channels added later; see migrations 0002, 0007)
+- ✅ Supabase Auth wiring — cookie sessions via `@supabase/ssr` on the web, Bearer JWT middleware on the API, service-role bypass reserved for cron/ingest paths
+- ✅ Web → API client — typed fetch wrapper at `apps/web/src/lib/api.ts`, one namespace per surface (`tasksApi`, `libraryApi`, `briefingApi`, etc.)
+- ↷ ~~Drizzle schema mirror~~ — went with raw SQL migrations instead. `apps/api/drizzle.config.ts` exists but is unused; safe to delete on a cleanup pass
 
-## Next steps
+**Capture pipeline**
+- ✅ Generic `POST /api/ingest` webhook + `POST /api/ingest/capture` for external voice sources (Apple Watch, Android HTTP Shortcuts)
+- ✅ Voice parser (Anthropic Claude) — 15 action types: task/project/note/quote/annotation/journal/calendar_event/person_fact/inventory/content_item/set_resurface_weight
+- ✅ Executor — routes parsed actions into their DB tables, handles fuzzy matching against project/person/quote/note/journal/book names
+- ✅ Server-side voice capture (`POST /api/capture/voice-audio`) — MediaRecorder → OpenAI Whisper → parser
 
-1. Create the hosted Supabase project + paste creds into `.env`.
-2. Run the two SQL migrations in the Supabase SQL editor.
-3. `pnpm install && pnpm dev:api && pnpm dev:web` in two shells, confirm `/healthz` returns `supabase_configured: true` and `/today` renders.
-4. Pick the next item from Phase 1 — recommend **Supabase Auth wiring** so subsequent routes are RLS-correct from the start.
+**Today / Briefing (June 2026 redesign)**
+- ✅ Editorial masthead → "In brief" cadence lines → resurfaced pull-quote → latest quote → today's events → interactive task list → routines check-off → capture chips
+- ✅ Domain cadence engine — `days_since_journal`, `days_since_publish`, `no_activity_days` rules computed against journal_entries / content_items / activity_log + a manual "Mark shipped" for off-dashboard channels (Substack, etc.)
+- ✅ Top-3-for-today setter — star on every task row toggles the pin
+- ✅ Inbox triage — tasks captured without explicit domain routing land in the `Inbox` system domain; one-tap triage from Today
+- ✅ Resurfacing — daily rotating pick weighted by `resurface_weight` per row, manual "Next →" to cycle within a day
+
+**Library**
+- ✅ Notes, quotes, quote annotations, journal entries — full CRUD (manual forms + voice)
+- ✅ Books — manual entry + Readwise/Kindle import script + Open Library cover backfill script
+- ✅ Unified feed at `/library` (clamped rows) + per-kind sub-pages with tag chips, source filters, resurface-weight controls
+- ✅ Per-item weight cycle on quote/note/journal detail pages
+- ✅ Voice intent `set_resurface_weight` — "boost the Cal Newport quote about focus"
+
+**Content pipeline** (`/content`)
+- ✅ Content items with 7-stage pipeline (idea → outline → filming → editing → published → derivatives_pending → done)
+- ✅ Domain assignment + type (video/article/podcast/etc.) + derivative chains via `parent_id`
+- ✅ Active vs Done split; auto-stamped `published_at` when status crosses a shipped state
+- 🟡 Per-item checklist items exist (`content_checklist_items`), but reusable **templates** aren't wired — projects and content just get bespoke checklists. Tables `checklist_templates`/`checklist_instances` exist unused; either build the templating flow or drop the tables
+
+**Google + calendar**
+- ✅ Two-way Google Calendar sync — pulls ±7 days, upserts local events, deletes cancellations, pushes locally-created orphans back
+- ✅ Cron-driven every 15 minutes via `/api/cron/calendar-sync`
+- ✅ Manual "Sync now" affordance on `/settings`
+
+**Notifications + observations**
+- ✅ Notifications feed at `/notifications` with unread badge and drill-through URLs per action type
+- ✅ Observations cron (`/api/cron/observations`, hourly) — evaluates `failure_patterns` per domain, writes rows to `observations`
+- ✅ Reminder cron (`/api/cron/reminders`, every minute) — task + routine reminders + routine "missed" sweep
+
+**Domains + projects**
+- ✅ Retire `kind='area'` projects, tasks attach directly to domains (Addendum 03)
+- ✅ Domain cadence rule editor + Mark-shipped button + is_system protection for the Inbox row
+- ✅ Project status chips — one-tap Active/Paused/Done/Archived
+- ✅ Milestones with weighted progress, activity log, checklists
+- ✅ Retainers (monthly-cap tracking distinct from finite projects)
+
+**Routines**
+- ✅ Daily habit tracker with buckets, specific-time reminders, goal_days, streak stats + heatmap
+- ✅ Inline check-off on the Briefing's right rail
+- ✅ Missed-routine cron sweep + Pushover ping
+
+**Health**
+- ✅ Personal health record area — visits, vitals, labs, wellbeing check-ins, medications, workouts, medical history
+- ✅ Source tracking on metrics (manual/garmin/apple_health/etc.)
+- 🟡 Trend line charts + document upload via Supabase Storage — deferred to Health Session 2
+
+**People (CRM)**
+- ✅ People + facts + interactions tables
+- 🟡 Full CRM UI (person detail pages, timeline, upcoming birthdays surface) — foundation is there, deeper flows deferred
+
+**External surfaces**
+- ✅ Apple Watch → `/api/ingest/capture` webhook
+- ✅ Android via HTTP Shortcuts app
+- ✅ iOS Scriptable home-screen widget — pulls a weighted-random quote from `/api/widget/quote` every ~3 hours
+- ✅ PWA install (Add to Home Screen) — respects the iOS home indicator via `viewport-fit=cover` + safe-area insets
+
+**Not built / deferred**
+- ⬜ Nightly backup cron → Drive + NAS. Supabase's automated daily backups + PITR cover the platform-level risk. Would matter for account-level independence.
+- ⬜ Reusable checklist templates (see Content row above)
+- ⬜ Health Session 2/3 — trend charts, document upload, Garmin CSV import, running/cycling trainer area
+- ⬜ Reflection prompts + weekly review flow (spec §12)
+
+## Getting started from scratch
+
+1. Create a Supabase project. Paste `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, and `DATABASE_URL` into `.env` at the repo root (see `.env.example`).
+2. Open the Supabase SQL editor and run `infrastructure/schema.sql` — one file, safe to re-run, sets up the whole schema + RLS + seed domains. (Historical migrations `0001` through `0030` in the same folder are how the existing prod deploy got here; you don't need them for a fresh install.)
+3. Fill in the remaining `.env` values: Anthropic + OpenAI keys for capture + parser, Google OAuth for calendar sync, Bunny for image hosting, Pushover for notifications, plus four generated secrets:
+   ```
+   openssl rand -hex 32  # INGEST_WEBHOOK_SECRET
+   openssl rand -hex 32  # CRON_SECRET
+   openssl rand -hex 32  # OAUTH_BRIDGE_SECRET
+   openssl rand -hex 32  # WIDGET_SECRET
+   ```
+4. `pnpm install && pnpm dev:api && pnpm dev:web` — two shells. `/healthz` should return `supabase_configured: true`; `/today` should render (once you've signed in).
 
 ## Conventions
 
