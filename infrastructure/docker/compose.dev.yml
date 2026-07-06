@@ -1,0 +1,29 @@
+# Local development database for jevi-ops (Mac / workstation).
+#
+#   docker compose -f infrastructure/docker/compose.dev.yml up -d
+#   psql postgresql://jevi:jevi@localhost:54329/jeviops -f infrastructure/schema-selfhost.sql
+#   psql postgresql://jevi:jevi@localhost:54329/jeviops -f infrastructure/seed.sql
+#
+# Port 54329 avoids colliding with any system Postgres on 5432.
+# Same pgvector-enabled image as production so dev/prod stay identical.
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    container_name: jevi-ops-dev-pg
+    environment:
+      POSTGRES_USER: jevi
+      POSTGRES_PASSWORD: jevi
+      POSTGRES_DB: jeviops
+    ports:
+      - "127.0.0.1:54329:5432"
+    volumes:
+      - jevi_ops_dev_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U jevi -d jeviops"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  jevi_ops_dev_pgdata:
