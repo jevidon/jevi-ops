@@ -5,6 +5,7 @@ import helmet from '@fastify/helmet';
 import multipart from '@fastify/multipart';
 import sensible from '@fastify/sensible';
 import { env, corsOrigins, isDev } from './lib/env.js';
+import { startScheduler } from './lib/scheduler.js';
 import authPlugin from './plugins/auth.js';
 import { healthzRoutes } from './routes/healthz.js';
 import { authRoutes } from './routes/auth.js';
@@ -102,6 +103,11 @@ export async function buildServer() {
     version: '0.1.0',
     docs: 'See README.md',
   }));
+
+  if (env.CRON_ENABLED) {
+    const stopScheduler = await startScheduler(app.log);
+    app.addHook('onClose', async () => stopScheduler());
+  }
 
   return app;
 }

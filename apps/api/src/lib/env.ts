@@ -41,6 +41,14 @@ const EnvSchema = z.object({
   // X-Ingest-Secret header.
   INGEST_WEBHOOK_SECRET: z.string().min(20).optional(),
 
+  // In-process scheduler (lib/scheduler.ts). Default false so tsx watch
+  // restarts in dev don't double-fire; set true on the single prod api
+  // container. The /api/cron/* endpoints work either way (manual runs).
+  CRON_ENABLED: z
+    .string()
+    .optional()
+    .transform((v) => v === 'true' || v === '1'),
+
   // Cron secret for /api/cron/* endpoints. External cron service (Supabase
   // pg_cron, system cron, etc.) passes this in the X-Cron-Secret header.
   CRON_SECRET: z.string().min(20).optional(),
