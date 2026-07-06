@@ -666,6 +666,14 @@ export const captured_data = pgTable("captured_data", {
 export const app_settings = pgTable("app_settings", {
 	id: boolean().default(true).primaryKey().notNull(),
 	timezone: text().default('America/Denver').notNull(),
+	llm_provider: text(),
+	llm_base_url: text(),
+	llm_model: text(),
+	llm_api_key: text(),
+	stt_base_url: text(),
+	stt_model: text(),
+	immich_base_url: text(),
+	immich_api_key: text(),
 	updated_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [
 	check("app_settings_id_check", sql`id`),

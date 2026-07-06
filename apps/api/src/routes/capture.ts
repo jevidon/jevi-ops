@@ -5,8 +5,8 @@ import {
 } from '@jevi-ops/shared/schemas';
 import { parseTranscript } from '../lib/parser.js';
 import { executeActions } from '../lib/executor.js';
-import { isAnthropicConfigured } from '../lib/anthropic.js';
-import { transcribeAudio, isWhisperConfigured } from '../lib/whisper.js';
+import { isLlmConfigured } from '../lib/llm.js';
+import { transcribeAudio, isSttConfigured } from '../lib/stt.js';
 import { getDb } from '../lib/db.js';
 
 // POST /api/capture/voice         — pre-transcribed text path (Web Speech API)
@@ -77,8 +77,8 @@ export const captureRoutes: FastifyPluginAsync = async (app) => {
         details: parsed.error.flatten().fieldErrors,
       });
     }
-    if (!isAnthropicConfigured()) {
-      return reply.code(503).send({ error: 'anthropic_not_configured' });
+    if (!(await isLlmConfigured())) {
+      return reply.code(503).send({ error: 'llm_not_configured' });
     }
     // Default to 'voice' for back-compat — the Web Speech / audio-fallback
     // path doesn't send `source` and should keep behaving the way it has.
@@ -93,13 +93,13 @@ export const captureRoutes: FastifyPluginAsync = async (app) => {
 
   // ─── Audio path (MediaRecorder → multipart → Whisper → parser) ───────
   app.post('/api/capture/voice-audio', async (req, reply) => {
-    if (!isAnthropicConfigured()) {
-      return reply.code(503).send({ error: 'anthropic_not_configured' });
+    if (!(await isLlmConfigured())) {
+      return reply.code(503).send({ error: 'llm_not_configured' });
     }
-    if (!isWhisperConfigured()) {
+    if (!(await isSttConfigured())) {
       return reply.code(503).send({
-        error: 'whisper_not_configured',
-        reason: 'Set OPENAI_API_KEY in .env to enable audio capture.',
+        error: 'stt_not_configured',
+        reason: 'Point STT at a transcription server (Settings → AI, or STT_BASE_URL / STT_API_KEY).',
       });
     }
     if (!req.isMultipart()) {
@@ -134,10 +134,10 @@ export const captureRoutes: FastifyPluginAsync = async (app) => {
     try {
       transcript = await transcribeAudio(buffer, filename, mimeType);
     } catch (err) {
-      req.log.error({ err }, 'whisper transcription failed');
+      req.log.error({ err }, 'stt transcription failed');
       return reply.code(502).send({
-        error: 'whisper_failed',
-        message: err instanceof Error ? err.message : 'unknown_whisper_error',
+        error: 'stt_failed',
+        message: err instanceof Error ? err.message : 'unknown_stt_error',
       });
     }
 
@@ -151,7 +151,7 @@ export const captureRoutes: FastifyPluginAsync = async (app) => {
 
     req.log.info(
       { transcript_chars: transcript.length, transcript_preview: transcript.slice(0, 200) },
-      'whisper transcript',
+      'stt transcript',
     );
     return runPipeline(req, reply, transcript);
   });
@@ -160,8 +160,8 @@ export const captureRoutes: FastifyPluginAsync = async (app) => {
   // chat page so voice input fills the question field for the user to
   // review before sending.
   app.post('/api/capture/transcribe', async (req, reply) => {
-    if (!isWhisperConfigured()) {
-      return reply.code(503).send({ error: 'whisper_not_configured' });
+    if (!(await isSttConfigured())) {
+      return reply.code(503).send({ error: 'stt_not_configured' });
     }
     if (!req.isMultipart()) {
       return reply.code(400).send({ error: 'expected_multipart' });
@@ -182,10 +182,10 @@ export const captureRoutes: FastifyPluginAsync = async (app) => {
       );
       return reply.code(200).send({ transcript });
     } catch (err) {
-      req.log.error({ err }, 'whisper transcription failed');
+      req.log.error({ err }, 'stt transcription failed');
       return reply.code(502).send({
-        error: 'whisper_failed',
-        message: err instanceof Error ? err.message : 'unknown_whisper_error',
+        error: 'stt_failed',
+        message: err instanceof Error ? err.message : 'unknown_stt_error',
       });
     }
   });

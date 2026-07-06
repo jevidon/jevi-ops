@@ -1,8 +1,8 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { getDb, isDatabaseConfigured, sqlClient } from '../lib/db.js';
 import { isAuthConfigured } from '../lib/jwt.js';
-import { isAnthropicConfigured } from '../lib/anthropic.js';
-import { isWhisperConfigured } from '../lib/whisper.js';
+import { isLlmConfigured } from '../lib/llm.js';
+import { isSttConfigured } from '../lib/stt.js';
 
 // /healthz + /readyz — infrastructure health endpoints. Named with the
 // trailing 'z' so they don't collide with the new /api/health/* personal
@@ -15,8 +15,8 @@ export const healthzRoutes: FastifyPluginAsync = async (app) => {
       time: new Date().toISOString(),
       database_configured: isDatabaseConfigured(),
       auth_configured: isAuthConfigured(),
-      anthropic_configured: isAnthropicConfigured(),
-      whisper_configured: isWhisperConfigured(),
+      llm_configured: await isLlmConfigured(),
+      stt_configured: await isSttConfigured(),
     };
   });
 

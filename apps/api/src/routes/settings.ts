@@ -3,6 +3,8 @@ import { eq } from 'drizzle-orm';
 import { env } from '../lib/env.js';
 import { isDatabaseConfigured } from '../lib/db.js';
 import { isAuthConfigured } from '../lib/jwt.js';
+import { isLlmConfigured, llmDescription } from '../lib/llm.js';
+import { isSttConfigured, sttDescription } from '../lib/stt.js';
 import { getDb } from '../lib/db.js';
 import { app_settings } from '../db/schema.js';
 import { getAppSettings, invalidateAppSettings } from '../lib/app-settings.js';
@@ -116,26 +118,22 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
         purpose: 'Signs short-lived tokens for the OAuth begin handshake.',
       },
       {
-        key: 'anthropic',
-        label: 'Anthropic (Claude)',
+        key: 'llm',
+        label: 'LLM',
         category: 'ai',
-        status: env.ANTHROPIC_API_KEY ? 'configured' : 'missing',
-        detail: env.ANTHROPIC_API_KEY
-          ? `Configured · model: ${env.ANTHROPIC_MODEL}`
-          : 'ANTHROPIC_API_KEY missing — voice parsing + chat disabled.',
+        status: (await isLlmConfigured()) ? 'configured' : 'missing',
+        detail: await llmDescription(),
         required: false,
-        purpose: 'Voice capture parser + /chat tool-use loop.',
+        purpose: 'Voice capture parser + /chat tool-use loop. Local OpenAI-compatible server or Anthropic fallback.',
       },
       {
-        key: 'openai',
-        label: 'OpenAI (Whisper)',
+        key: 'stt',
+        label: 'Speech-to-text',
         category: 'ai',
-        status: env.OPENAI_API_KEY ? 'configured' : 'missing',
-        detail: env.OPENAI_API_KEY
-          ? `Configured · model: ${env.OPENAI_WHISPER_MODEL}`
-          : 'OPENAI_API_KEY missing — audio transcription disabled (text capture still works).',
+        status: (await isSttConfigured()) ? 'configured' : 'missing',
+        detail: await sttDescription(),
         required: false,
-        purpose: 'Whisper transcription for voice memos.',
+        purpose: 'Audio transcription for voice memos (OpenAI-compatible server).',
       },
       {
         key: 'google_oauth',

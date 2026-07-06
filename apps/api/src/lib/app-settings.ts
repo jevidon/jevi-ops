@@ -10,9 +10,29 @@ import { app_settings } from '../db/schema.js';
 
 const DEFAULT_TIMEZONE = 'America/Denver';
 
-interface AppSettings {
+export interface AppSettings {
   timezone: string;
+  llm_provider: 'openai_compatible' | 'anthropic' | null;
+  llm_base_url: string | null;
+  llm_model: string | null;
+  llm_api_key: string | null;
+  stt_base_url: string | null;
+  stt_model: string | null;
+  immich_base_url: string | null;
+  immich_api_key: string | null;
 }
+
+const DEFAULTS: AppSettings = {
+  timezone: DEFAULT_TIMEZONE,
+  llm_provider: null,
+  llm_base_url: null,
+  llm_model: null,
+  llm_api_key: null,
+  stt_base_url: null,
+  stt_model: null,
+  immich_base_url: null,
+  immich_api_key: null,
+};
 
 // In-memory cache. Reset by invalidateAppSettings() when /api/settings/app
 // PATCH succeeds. This is the single API process, so drift isn't a concern.
@@ -22,14 +42,24 @@ let inflight: Promise<AppSettings> | null = null;
 async function load(): Promise<AppSettings> {
   try {
     const row = await getDb().query.app_settings.findFirst({
-      columns: { timezone: true },
       where: eq(app_settings.id, true),
     });
-    return { timezone: row?.timezone ?? DEFAULT_TIMEZONE };
+    if (!row) return { ...DEFAULTS };
+    return {
+      timezone: row.timezone ?? DEFAULT_TIMEZONE,
+      llm_provider: (row.llm_provider as AppSettings['llm_provider']) ?? null,
+      llm_base_url: row.llm_base_url ?? null,
+      llm_model: row.llm_model ?? null,
+      llm_api_key: row.llm_api_key ?? null,
+      stt_base_url: row.stt_base_url ?? null,
+      stt_model: row.stt_model ?? null,
+      immich_base_url: row.immich_base_url ?? null,
+      immich_api_key: row.immich_api_key ?? null,
+    };
   } catch {
     // Pre-migration or transient DB error — keep the app running with
-    // the default. Callers don't need to handle this case.
-    return { timezone: DEFAULT_TIMEZONE };
+    // the defaults. Callers don't need to handle this case.
+    return { ...DEFAULTS };
   }
 }
 

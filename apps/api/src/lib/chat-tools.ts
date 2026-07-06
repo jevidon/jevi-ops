@@ -1,5 +1,5 @@
-import type Anthropic from '@anthropic-ai/sdk';
 import { and, asc, count, desc, eq, gte, ilike, inArray, lte, sql, type SQL } from 'drizzle-orm';
+import type { LlmToolDef } from './llm.js';
 import { arrayContains } from 'drizzle-orm';
 import { getAppTz } from './app-settings.js';
 import type { Db } from './db.js';
@@ -522,11 +522,11 @@ export const CHAT_TOOLS: ChatTool[] = [
   searchRoutines,
 ];
 
-export function toolDefsForAnthropic(): Anthropic.Tool[] {
+export function toolDefs(): LlmToolDef[] {
   return CHAT_TOOLS.map((t) => ({
     name: t.name,
     description: t.description,
-    input_schema: t.input_schema as Anthropic.Tool['input_schema'],
+    parameters: t.input_schema,
   }));
 }
 

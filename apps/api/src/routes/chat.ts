@@ -1,17 +1,17 @@
 import type { FastifyPluginAsync } from 'fastify';
-import type Anthropic from '@anthropic-ai/sdk';
 import { z } from 'zod';
-import { anthropic, anthropicModel, isAnthropicConfigured } from '../lib/anthropic.js';
-import { toolDefsForAnthropic, runTool } from '../lib/chat-tools.js';
+import { chatComplete, isLlmConfigured, type LlmMessage } from '../lib/llm.js';
+import { toolDefs, runTool } from '../lib/chat-tools.js';
 import { getDb } from '../lib/db.js';
 
 // POST /api/chat — natural-language query against the DB (spec §11).
 //
-// Claude is given the user's question and a tool surface (search_tasks,
+// The model is given the user's question and a tool surface (search_tasks,
 // search_notes, etc.). It picks which tools to call, we run them against
-// the user's Supabase client (RLS applies), feed results back, and Claude
-// composes a final natural-language answer. We cap the loop at 8 turns to
-// prevent runaway agentic behavior.
+// the database, feed results back, and the model composes a final
+// natural-language answer. We cap the loop at 8 turns to prevent runaway
+// agentic behavior. Provider-neutral — runs on the local OpenAI-compatible
+// server or the Anthropic fallback identically (lib/llm.ts).
 
 // Two accepted shapes:
 //   { question: "..." }                       — single-turn (back-compat)
@@ -32,7 +32,7 @@ const ChatRequestSchema = z.union([SingleTurnSchema, MultiTurnSchema]);
 
 const MAX_HISTORY = 20;
 
-const SYSTEM_PROMPT = `You are Jerad's personal-operations assistant. You answer questions about \
+const SYSTEM_PROMPT = `You are Jevidon's personal-operations assistant. You answer questions about \
 his work, projects, tasks, notes, quotes, annotations, and calendar by querying the database \
 via the tools provided.
 
@@ -55,10 +55,6 @@ Behavior rules:
 9. Don't return raw JSON. Summarize the data in plain English.
 10. If you can't answer with the available tools, say what's missing.`;
 
-type ContentBlock = Anthropic.ContentBlock;
-type ToolUseBlock = Anthropic.ToolUseBlock;
-type MessageParam = Anthropic.MessageParam;
-
 interface ToolTrace {
   name: string;
   input: Record<string, unknown>;
@@ -71,8 +67,8 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', app.requireAuth);
 
   app.post('/api/chat', async (req, reply) => {
-    if (!isAnthropicConfigured()) {
-      return reply.code(503).send({ error: 'anthropic_not_configured' });
+    if (!(await isLlmConfigured())) {
+      return reply.code(503).send({ error: 'llm_not_configured' });
     }
     const parsed = ChatRequestSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -83,13 +79,13 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const db = getDb();
-    const tools = toolDefsForAnthropic();
+    const tools = toolDefs();
     const trace: ToolTrace[] = [];
 
-    // Normalize either shape into the same MessageParam[] starting point.
+    // Normalize either shape into the same message list starting point.
     // For multi-turn we trim oldest messages first but always keep the
-    // most recent user message (the one Claude is meant to answer).
-    let messages: MessageParam[];
+    // most recent user message (the one the model is meant to answer).
+    let messages: LlmMessage[];
     let question: string;
     if ('question' in parsed.data) {
       messages = [{ role: 'user', content: parsed.data.question }];
@@ -115,62 +111,40 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
     while (turns < MAX_TURNS) {
       turns += 1;
 
-      const response: Anthropic.Message = await anthropic().messages.create({
-        model: anthropicModel(),
-        max_tokens: 2048,
-        thinking: { type: 'adaptive' },
-        output_config: { effort: 'medium' },
-        system: [
-          { type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } },
-        ],
-        tools,
+      const response = await chatComplete({
+        system: SYSTEM_PROMPT,
         messages,
-      } as Anthropic.MessageCreateParamsNonStreaming);
+        tools,
+        maxTokens: 2048,
+        effort: 'medium',
+      });
 
-      // Echo the assistant turn back into the history.
-      messages.push({ role: 'assistant', content: response.content });
-
-      const toolUses = response.content.filter(
-        (b): b is ToolUseBlock => b.type === 'tool_use',
-      );
-
-      if (response.stop_reason === 'end_turn' || toolUses.length === 0) {
-        // Final answer — collect text blocks.
-        finalAnswer = response.content
-          .filter((b): b is Anthropic.TextBlock => b.type === 'text')
-          .map((b) => b.text)
-          .join('\n')
-          .trim();
+      if (response.toolCalls.length === 0) {
+        finalAnswer = response.text;
         break;
       }
 
-      // Run each tool and feed results back as a user turn.
-      const toolResults: Anthropic.ToolResultBlockParam[] = [];
-      for (const use of toolUses) {
+      // Echo the assistant turn (with its tool calls) back into history,
+      // run each tool, and append the results.
+      messages.push({ role: 'assistant', content: response.text || null, toolCalls: response.toolCalls });
+
+      for (const call of response.toolCalls) {
         let result: unknown;
-        let isError = false;
         try {
-          result = await runTool(use.name, (use.input ?? {}) as Record<string, unknown>, db);
+          result = await runTool(call.name, call.args, db);
         } catch (err) {
-          isError = true;
           result = { error: err instanceof Error ? err.message : 'unknown_error' };
         }
-        // Compress the result into a string Claude can consume.
+        // Compress the result into a string the model can consume.
         const resultStr = JSON.stringify(result);
         trace.push({
-          name: use.name,
-          input: (use.input ?? {}) as Record<string, unknown>,
+          name: call.name,
+          input: call.args,
           result_summary:
             resultStr.length > 200 ? resultStr.slice(0, 200) + '… (truncated)' : resultStr,
         });
-        toolResults.push({
-          type: 'tool_result',
-          tool_use_id: use.id,
-          content: resultStr,
-          is_error: isError,
-        });
+        messages.push({ role: 'tool', toolCallId: call.id, content: resultStr });
       }
-      messages.push({ role: 'user', content: toolResults });
     }
 
     if (!finalAnswer) {

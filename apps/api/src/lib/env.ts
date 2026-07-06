@@ -57,17 +57,26 @@ const EnvSchema = z.object({
   // also point at prod.
   WEB_PUBLIC_URL: z.string().url().optional(),
 
-  // Anthropic — required once voice capture is wired.
-  ANTHROPIC_API_KEY: z.string().optional(),
-  // Override the parser model. Default is the current best for structured
-  // parsing accuracy (claude-opus-4-7). Swap to a smaller model for cost.
-  ANTHROPIC_MODEL: z.string().default('claude-opus-4-7'),
+  // ── LLM (voice parser + chat) ──────────────────────────────────────────
+  // Primary: any OpenAI-compatible server (llama.cpp `llama-server --jinja`,
+  // MLX, Ollama, vLLM…) reached by base URL. Dashboard settings override
+  // these env values at runtime (app_settings.llm_*).
+  LLM_PROVIDER: z.enum(['openai_compatible', 'anthropic']).default('openai_compatible'),
+  LLM_BASE_URL: z.string().url().optional(),
+  LLM_MODEL: z.string().optional(),
+  LLM_API_KEY: z.string().optional(),
 
-  // OpenAI Whisper for audio transcription (browser MediaRecorder → server).
-  // Web Speech API is blocked on some networks; Whisper bypasses Google entirely.
-  OPENAI_API_KEY: z.string().optional(),
-  // Default Whisper model. whisper-1 is fine; reserved for future override.
-  OPENAI_WHISPER_MODEL: z.string().default('whisper-1'),
+  // Anthropic — the cloud fallback provider (LLM_PROVIDER=anthropic).
+  ANTHROPIC_API_KEY: z.string().optional(),
+  ANTHROPIC_MODEL: z.string().default('claude-opus-4-8'),
+
+  // ── STT (audio transcription) ──────────────────────────────────────────
+  // Any OpenAI-compatible /v1/audio/transcriptions server (speaches,
+  // faster-whisper-server, whisper.cpp server) — or OpenAI cloud by default,
+  // which then requires STT_API_KEY.
+  STT_BASE_URL: z.string().url().optional(),
+  STT_API_KEY: z.string().optional(),
+  STT_MODEL: z.string().default('whisper-1'),
 
   // Google OAuth — Phase 1 (Calendar) + Phase 2 (Gmail, Drive). Optional at
   // boot; runtime checks enforce presence when the user tries to connect.

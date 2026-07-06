@@ -1,6 +1,5 @@
-import type Anthropic from '@anthropic-ai/sdk';
 import { eq, gte, not, inArray } from 'drizzle-orm';
-import { anthropic, anthropicModel } from './anthropic.js';
+import { chatComplete } from './llm.js';
 import { getAppTz } from './app-settings.js';
 import type { Db } from './db.js';
 import { content_items, person_interactions, projects, stewardship_domains } from '../db/schema.js';
@@ -222,53 +221,36 @@ export async function parseTranscript(
 ): Promise<ParseResult> {
   const context = await gatherContext(db);
 
-  // Request body. Adaptive thinking + low effort: parsing is well-scoped,
-  // doesn't need deep reasoning. System prompt is static (cached); per-request
-  // context goes in the user message so it doesn't break the cached prefix.
-  const requestBody: Anthropic.MessageCreateParamsNonStreaming = {
-    model: anthropicModel(),
-    max_tokens: 2048,
-    thinking: { type: 'adaptive' },
-    output_config: { effort: 'low' },
-    system: [
-      {
-        type: 'text',
-        text: SYSTEM_PROMPT,
-        cache_control: { type: 'ephemeral' },
-      },
-    ],
+  // Low effort + JSON mode: parsing is well-scoped, doesn't need deep
+  // reasoning. The system prompt is static (providers with prompt caching
+  // cache it); per-request context rides in the user message.
+  const response = await chatComplete({
+    system: SYSTEM_PROMPT,
     messages: [
       {
         role: 'user',
         content: [
-          {
-            type: 'text',
-            text: [
-              '<context>',
-              JSON.stringify(context, null, 2),
-              '</context>',
-              '',
-              '<transcript>',
-              transcript,
-              '</transcript>',
-            ].join('\n'),
-          },
-        ],
+          '<context>',
+          JSON.stringify(context, null, 2),
+          '</context>',
+          '',
+          '<transcript>',
+          transcript,
+          '</transcript>',
+        ].join('\n'),
       },
     ],
-  } as Anthropic.MessageCreateParamsNonStreaming;
+    jsonMode: true,
+    maxTokens: 2048,
+    effort: 'low',
+  });
 
-  const response: Anthropic.Message = await anthropic().messages.create(requestBody);
-
-  // The structured-output guarantee means the first text block is valid JSON
-  // matching our schema. Find it and parse.
-  const textBlock = response.content.find((b): b is Anthropic.TextBlock => b.type === 'text');
-  if (!textBlock) {
+  if (!response.text) {
     return { kind: 'error', error: 'no_text_in_response', transcript };
   }
 
   // Strip accidental markdown fences if the model regresses (`​`​`​json ... `​`​`).
-  let raw = textBlock.text.trim();
+  let raw = response.text.trim();
   if (raw.startsWith('```')) {
     raw = raw.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim();
   }

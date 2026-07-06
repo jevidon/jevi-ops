@@ -7,7 +7,7 @@ import { getDb, isDatabaseConfigured } from '../lib/db.js';
 import { captured_data } from '../db/schema.js';
 import { parseTranscript } from '../lib/parser.js';
 import { executeActions } from '../lib/executor.js';
-import { isAnthropicConfigured } from '../lib/anthropic.js';
+import { isLlmConfigured } from '../lib/llm.js';
 
 // POST /api/ingest — generic capture endpoint (spec §3, §7).
 //
@@ -107,8 +107,8 @@ export const ingestRoutes: FastifyPluginAsync = async (app) => {
     if (!checkSecret(single)) {
       return reply.code(401).send({ error: 'unauthorized' });
     }
-    if (!isAnthropicConfigured()) {
-      return reply.code(503).send({ error: 'anthropic_not_configured' });
+    if (!(await isLlmConfigured())) {
+      return reply.code(503).send({ error: 'llm_not_configured' });
     }
     if (!isDatabaseConfigured()) {
       return reply.code(503).send({ error: 'database_not_configured' });

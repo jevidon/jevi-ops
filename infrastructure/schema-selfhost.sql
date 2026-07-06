@@ -664,6 +664,16 @@ create trigger trg_google_oauth_tokens_updated_at
 create table if not exists app_settings (
   id boolean primary key default true check (id),
   timezone text not null default 'America/Denver',
+  -- Dashboard-editable integration config (env vars act as fallback):
+  -- LLM (OpenAI-compatible endpoint or 'anthropic'), STT, Immich.
+  llm_provider text check (llm_provider in ('openai_compatible', 'anthropic')),
+  llm_base_url text,
+  llm_model text,
+  llm_api_key text,
+  stt_base_url text,
+  stt_model text,
+  immich_base_url text,
+  immich_api_key text,
   updated_at timestamptz not null default now()
 );
 
