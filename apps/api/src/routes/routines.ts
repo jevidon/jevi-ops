@@ -1,8 +1,8 @@
 import type { FastifyPluginAsync } from 'fastify';
 import {
   CreateRoutineSchema, UpdateRoutineSchema, ToggleCompletionSchema,
-} from '@jerad-ops/shared/schemas';
-import { computeRoutineStats } from '@jerad-ops/shared';
+} from '@jevi-ops/shared/schemas';
+import { computeRoutineStats } from '@jevi-ops/shared';
 import { getAppTz } from '../lib/app-settings.js';
 
 // Routines + completions. Daily habits (read Bible, take meds…) live

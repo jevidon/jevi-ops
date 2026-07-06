@@ -2,13 +2,13 @@ import type { FastifyPluginAsync } from 'fastify';
 import {
   CreateContentItemSchema, UpdateContentItemSchema,
   CreateContentChecklistItemSchema, UpdateContentChecklistItemSchema,
-} from '@jerad-ops/shared/schemas';
+} from '@jevi-ops/shared/schemas';
 import {
   defaultChecklistItemsFor,
   targetStatusForTitle,
   maxStatus,
 } from '../lib/content-checklist-templates.js';
-import type { ContentItemType, ContentItemStatus } from '@jerad-ops/shared';
+import type { ContentItemType, ContentItemStatus } from '@jevi-ops/shared';
 
 // Content items CRUD — videos, articles, podcasts, etc. Joins domain on
 // fetch so the UI can show the channel name + color without a second

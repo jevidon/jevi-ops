@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { domainsApi, tasksApi, ApiError } from '@/lib/api';
-import type { Domain, Task } from '@jerad-ops/shared';
+import type { Domain, Task } from '@jevi-ops/shared';
 import { EditDomainForm } from './edit-domain-form';
 import { CadenceEditor } from './cadence-editor';
 import { MarkShipped } from './mark-shipped';

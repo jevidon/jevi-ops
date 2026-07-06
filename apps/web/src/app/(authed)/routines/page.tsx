@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { routinesApi, ApiError, type RoutineListItem } from '@/lib/api';
-import { recentDaysGrid } from '@jerad-ops/shared';
+import { recentDaysGrid } from '@jevi-ops/shared';
 import { RoutinesTodayList } from './routines-today-list';
 import { reactivateRoutineAction } from './actions';
 import { RoutineHeatmap } from '@/components/RoutineHeatmap';

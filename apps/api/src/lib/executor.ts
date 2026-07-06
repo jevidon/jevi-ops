@@ -1,7 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { ParsedAction } from './parser.js';
-import type { CaptureSource } from '@jerad-ops/shared/schemas';
-import { INBOX_DOMAIN_ID } from '@jerad-ops/shared';
+import type { CaptureSource } from '@jevi-ops/shared/schemas';
+import { INBOX_DOMAIN_ID } from '@jevi-ops/shared';
 import {
   matchProject, matchDomain, matchPerson, matchTask,
   matchBook, matchContentItem, matchMilestone, matchQuote,

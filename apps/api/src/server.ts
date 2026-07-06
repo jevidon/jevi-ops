@@ -78,7 +78,7 @@ export async function buildServer() {
   await app.register(widgetRoutes);
 
   app.get('/', async () => ({
-    name: 'jerad-ops/api',
+    name: 'jevi-ops/api',
     version: '0.1.0',
     docs: 'See README.md',
   }));

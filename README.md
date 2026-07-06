@@ -1,4 +1,4 @@
-# jerad-ops
+# jevi-ops
 
 Jerad's Personal Operations Dashboard. Voice-first capture, six-tab PWA, one pane of glass.
 
@@ -7,7 +7,7 @@ Spec source of truth: `~/Documents/Jerad Dashboard/personal-ops-dashboard-spec.m
 ## Layout
 
 ```
-jerad-ops/
+jevi-ops/
 ├── apps/
 │   ├── api/              Fastify + TypeScript backend
 │   └── web/              Next.js 15 PWA (App Router)
@@ -28,7 +28,7 @@ jerad-ops/
 ## First-time setup
 
 ```bash
-cd ~/Documents/jerad-ops
+cd ~/Documents/jevi-ops
 pnpm install
 cp .env.example .env
 

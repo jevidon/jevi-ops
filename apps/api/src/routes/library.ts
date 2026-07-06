@@ -4,7 +4,7 @@ import {
   CreateQuoteAnnotationSchema, UpdateQuoteAnnotationSchema,
   CreateBookSchema, UpdateBookSchema,
   CreateQuoteSchema, UpdateQuoteSchema,
-} from '@jerad-ops/shared/schemas';
+} from '@jevi-ops/shared/schemas';
 
 // Library CRUD — notes, quotes, quote_annotations, journal_entries, books.
 // Auth-gated; uses the request-scoped Supabase client so RLS applies.

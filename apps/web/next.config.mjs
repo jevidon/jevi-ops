@@ -6,7 +6,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  transpilePackages: ['@jerad-ops/shared'],
+  transpilePackages: ['@jevi-ops/shared'],
   // typedRoutes is incompatible with dynamic `redirect(target)` calls from
   // server actions where the path comes from a request param.
 

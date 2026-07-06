@@ -2,7 +2,7 @@ import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import {
   VoiceCaptureRequestSchema,
   type CaptureSource,
-} from '@jerad-ops/shared/schemas';
+} from '@jevi-ops/shared/schemas';
 import { parseTranscript } from '../lib/parser.js';
 import { executeActions } from '../lib/executor.js';
 import { isAnthropicConfigured } from '../lib/anthropic.js';

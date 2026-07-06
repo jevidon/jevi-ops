@@ -60,7 +60,7 @@ export const api = {
 export { ApiError };
 
 // Typed helpers — one per known route. Add as new routes ship.
-import type { Task, Project, Domain, RecurrencePattern } from '@jerad-ops/shared';
+import type { Task, Project, Domain, RecurrencePattern } from '@jevi-ops/shared';
 
 // Project list/detail include relations the bare Project type doesn't.
 export interface Milestone {

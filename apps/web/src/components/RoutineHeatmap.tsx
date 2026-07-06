@@ -1,7 +1,7 @@
 // GitHub-contributions-style heatmap for routine completions.
 //
 // Takes a flat oldest-first array of day cells (the shape that
-// recentDaysGrid returns from @jerad-ops/shared) and arranges them
+// recentDaysGrid returns from @jevi-ops/shared) and arranges them
 // into week columns × weekday rows. The first cell aligns to its
 // own weekday — empty cells pad the top of the first column.
 //

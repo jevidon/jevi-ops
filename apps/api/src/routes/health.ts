@@ -6,7 +6,7 @@ import {
   CreateWellbeingCheckInSchema,
   CreateMedicationSchema, UpdateMedicationSchema,
   UpdateHealthHistorySchema,
-} from '@jerad-ops/shared/schemas';
+} from '@jevi-ops/shared/schemas';
 
 // /api/health/* — CRUD for the personal health record (see migration 0024).
 //

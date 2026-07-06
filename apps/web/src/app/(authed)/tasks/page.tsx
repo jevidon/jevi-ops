@@ -2,8 +2,8 @@ import Link from 'next/link';
 import { tasksApi, ApiError } from '@/lib/api';
 import { todayIsoDate, isToday } from '@/lib/today';
 import { getAppTimezone } from '@/lib/app-settings';
-import type { Task } from '@jerad-ops/shared';
-import { isRecurrencePattern } from '@jerad-ops/shared';
+import type { Task } from '@jevi-ops/shared';
+import { isRecurrencePattern } from '@jevi-ops/shared';
 import { toggleTaskDoneAction } from '../today/actions';
 
 // /tasks — full task list, reached from the Briefing's "Doing today"

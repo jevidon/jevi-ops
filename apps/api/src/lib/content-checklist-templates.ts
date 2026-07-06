@@ -1,4 +1,4 @@
-import type { ContentItemType, ContentItemStatus } from '@jerad-ops/shared';
+import type { ContentItemType, ContentItemStatus } from '@jevi-ops/shared';
 
 // Default checklist items per content type. Inserted alongside a fresh
 // content_items row so the user lands on a populated workflow. Items are

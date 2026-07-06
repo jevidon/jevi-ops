@@ -10,7 +10,7 @@ import {
   type ResurfacingItem,
   type RoutineListItem,
 } from '@/lib/api';
-import type { Task } from '@jerad-ops/shared';
+import type { Task } from '@jevi-ops/shared';
 import { getAppTimezone } from '@/lib/app-settings';
 import { todayIsoDate } from '@/lib/today';
 import { BriefLineRow } from './brief-line';

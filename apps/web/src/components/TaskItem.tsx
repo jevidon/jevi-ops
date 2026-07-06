@@ -1,10 +1,10 @@
 import Link from 'next/link';
-import type { Task } from '@jerad-ops/shared';
+import type { Task } from '@jevi-ops/shared';
 import {
   RECURRENCE_GLYPH,
   RECURRENCE_LABELS,
   isRecurrencePattern,
-} from '@jerad-ops/shared';
+} from '@jevi-ops/shared';
 import { toggleTaskDoneAction, toggleTop3Action } from '@/app/(authed)/today/actions';
 import { getAppTimezone } from '@/lib/app-settings';
 import { todayIsoDate } from '@/lib/today';

@@ -6,7 +6,7 @@ import {
   UpdateMilestoneSchema,
   CreateProjectChecklistItemSchema,
   UpdateProjectChecklistItemSchema,
-} from '@jerad-ops/shared/schemas';
+} from '@jevi-ops/shared/schemas';
 import { getAppTz } from '../lib/app-settings.js';
 
 export const projectRoutes: FastifyPluginAsync = async (app) => {

@@ -237,7 +237,7 @@ async function reverseGeocode(lat: number, lon: number): Promise<string | null> 
   const res = await fetch(url.toString(), {
     headers: {
       // Nominatim TOS asks for an identifying User-Agent.
-      'User-Agent': 'jerad-ops/1.0 (https://dashboard.jeradhill.com)',
+      'User-Agent': 'jevi-ops/1.0 (https://dashboard.jeradhill.com)',
       Accept: 'application/json',
     },
     // Short timeout — if Nominatim is slow, drop the location rather

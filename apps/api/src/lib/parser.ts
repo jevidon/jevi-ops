@@ -198,7 +198,7 @@ Rules:
 // ─── Parse result type — discriminated union ─────────────────────────────
 
 // Loose action type for the parser — full validation happens via the
-// VoiceActionSchema in @jerad-ops/shared at the executor boundary.
+// VoiceActionSchema in @jevi-ops/shared at the executor boundary.
 export type ParsedAction = { action: string } & Record<string, unknown>;
 
 export type ParseResult =

@@ -1,5 +1,5 @@
 {
-  "name": "@jerad-ops/web",
+  "name": "@jevi-ops/web",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -12,7 +12,7 @@
     "icons": "node scripts/generate-icons.mjs"
   },
   "dependencies": {
-    "@jerad-ops/shared": "workspace:*",
+    "@jevi-ops/shared": "workspace:*",
     "@next/env": "^15.1.0",
     "@supabase/ssr": "^0.5.2",
     "@supabase/supabase-js": "^2.45.0",

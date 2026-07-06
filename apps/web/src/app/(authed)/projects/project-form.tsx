@@ -3,7 +3,7 @@
 import { useActionState, useState } from 'react';
 import { useFormStatus } from 'react-dom';
 import { createProjectAction, updateProjectAction, deleteProjectAction, type SaveResult } from './actions';
-import { PROJECT_COLOR_PALETTE } from '@jerad-ops/shared';
+import { PROJECT_COLOR_PALETTE } from '@jevi-ops/shared';
 import { useTransientSaveResult } from '@/lib/use-transient-save-result';
 import { DateInput } from '@/components/DateInput';
 

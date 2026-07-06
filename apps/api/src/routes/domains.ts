@@ -1,5 +1,5 @@
 import type { FastifyPluginAsync } from 'fastify';
-import { UpdateDomainSchema } from '@jerad-ops/shared/schemas';
+import { UpdateDomainSchema } from '@jevi-ops/shared/schemas';
 
 // Domain CRUD. Single-user system, so we surface every active domain on
 // list. Editing happens via the /domains/[id] detail page on the web side.

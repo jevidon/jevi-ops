@@ -1,5 +1,5 @@
 {
-  "name": "@jerad-ops/api",
+  "name": "@jevi-ops/api",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -19,7 +19,7 @@
     "@fastify/helmet": "^12.0.1",
     "@fastify/multipart": "^9.0.1",
     "@fastify/sensible": "^6.0.1",
-    "@jerad-ops/shared": "workspace:*",
+    "@jevi-ops/shared": "workspace:*",
     "@supabase/supabase-js": "^2.45.0",
     "@types/js-yaml": "^4.0.9",
     "dotenv": "^16.4.5",

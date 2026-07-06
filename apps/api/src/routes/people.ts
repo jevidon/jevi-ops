@@ -3,7 +3,7 @@ import {
   CreatePersonSchema, UpdatePersonSchema,
   CreatePersonFactSchema, UpdatePersonFactSchema,
   CreatePersonInteractionSchema, UpdatePersonInteractionSchema,
-} from '@jerad-ops/shared/schemas';
+} from '@jevi-ops/shared/schemas';
 
 // People CRM. Three tables share the same auth scope:
 //   people, person_facts, person_interactions.

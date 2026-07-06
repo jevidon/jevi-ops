@@ -3,8 +3,8 @@ import { notFound } from 'next/navigation';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { tasksApi, projectsApi, contentApi, domainsApi, ApiError } from '@/lib/api';
 import { getAppTimezone } from '@/lib/app-settings';
-import type { Task } from '@jerad-ops/shared';
-import { INBOX_DOMAIN_ID } from '@jerad-ops/shared';
+import type { Task } from '@jevi-ops/shared';
+import { INBOX_DOMAIN_ID } from '@jevi-ops/shared';
 import { TaskForm } from '../task-form';
 
 // /tasks/[id] — task detail + edit. Lets you change everything voice would

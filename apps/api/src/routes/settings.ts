@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { env } from '../lib/env.js';
 import { getAppSettings, invalidateAppSettings } from '../lib/app-settings.js';
-import { UpdateAppSettingsSchema } from '@jerad-ops/shared/schemas';
+import { UpdateAppSettingsSchema } from '@jevi-ops/shared/schemas';
 
 // /api/settings/integrations-status — read-only inventory of which env-var
 // backed integrations are configured. Never returns the actual values —

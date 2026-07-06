@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
-import { IngestRequestSchema, CaptureTranscriptSourceSchema } from '@jerad-ops/shared/schemas';
+import { IngestRequestSchema, CaptureTranscriptSourceSchema } from '@jevi-ops/shared/schemas';
 import { env } from '../lib/env.js';
 import { supabaseAdmin, isSupabaseConfigured } from '../lib/supabase.js';
 import { parseTranscript } from '../lib/parser.js';

@@ -1,7 +1,7 @@
 'use client';
 
 import { useTransition } from 'react';
-import { PROJECT_COLOR_PALETTE } from '@jerad-ops/shared';
+import { PROJECT_COLOR_PALETTE } from '@jevi-ops/shared';
 import { setProjectColorAction } from './actions';
 
 export function ProjectColorPicker({

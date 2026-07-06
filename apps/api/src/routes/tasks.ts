@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { CreateTaskSchema, UpdateTaskSchema } from '@jerad-ops/shared/schemas';
-import { INBOX_DOMAIN_ID, isRecurrencePattern, nextDueDate } from '@jerad-ops/shared';
+import { CreateTaskSchema, UpdateTaskSchema } from '@jevi-ops/shared/schemas';
+import { INBOX_DOMAIN_ID, isRecurrencePattern, nextDueDate } from '@jevi-ops/shared';
 
 // Tasks CRUD. Auth-gated; uses request-scoped Supabase client so RLS applies.
 
