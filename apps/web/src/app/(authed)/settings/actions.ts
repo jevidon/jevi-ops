@@ -1,9 +1,9 @@
-import { apiPublicUrl } from '@/lib/server-env';
 'use server';
 
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
-import { calendarApi, googleApi, settingsApi, ApiError } from '@/lib/api';
+import { apiPublicUrl } from '@/lib/server-env';
+import { authApi, calendarApi, googleApi, settingsApi, ApiError, type UpdateAppSettingsBody } from '@/lib/api';
 import { requireUser } from '@/lib/auth';
 import { signOAuthBridgeToken } from '@/lib/oauth-bridge';
 
@@ -100,5 +100,71 @@ export async function disconnectGoogleAction(): Promise<SyncResult> {
       return { ok: false, message: `HTTP ${err.status}` };
     }
     return { ok: false, message: (err as Error).message };
+  }
+}
+
+
+// ─── AI / Immich integration settings ────────────────────────────────────
+
+function errMessage(err: unknown): string {
+  if (err instanceof ApiError) {
+    const body = err.body as { error?: string; message?: string } | null;
+    return body?.message ?? body?.error ?? `HTTP ${err.status}`;
+  }
+  return (err as Error).message;
+}
+
+export async function updateIntegrationSettingsAction(
+  body: UpdateAppSettingsBody,
+): Promise<SyncResult> {
+  try {
+    await settingsApi.updateApp(body);
+  } catch (err) {
+    return { ok: false, message: errMessage(err) };
+  }
+  revalidatePath('/settings');
+  return { ok: true, message: 'Saved.' };
+}
+
+export async function testLlmAction(): Promise<SyncResult> {
+  try {
+    const res = await settingsApi.testLlm();
+    return { ok: true, message: `OK · ${res.detail} · ${res.latency_ms}ms` };
+  } catch (err) {
+    return { ok: false, message: errMessage(err) };
+  }
+}
+
+export async function testSttAction(): Promise<SyncResult> {
+  try {
+    const res = await settingsApi.testStt();
+    return { ok: true, message: `OK · ${res.detail} · ${res.latency_ms}ms` };
+  } catch (err) {
+    return { ok: false, message: errMessage(err) };
+  }
+}
+
+// ─── API tokens (agents / devices) ───────────────────────────────────────
+
+export async function createApiTokenAction(formData: FormData): Promise<SyncResult & { token?: string }> {
+  const name = String(formData.get('name') ?? '').trim();
+  const kind = String(formData.get('kind') ?? 'agent') === 'device' ? 'device' : 'agent';
+  if (!name) return { ok: false, message: 'Name is required.' };
+  try {
+    const res = await authApi.createToken({ name, kind });
+    revalidatePath('/settings');
+    return { ok: true, message: `Token "${name}" created — copy it now, it won't be shown again.`, token: res.token };
+  } catch (err) {
+    return { ok: false, message: errMessage(err) };
+  }
+}
+
+export async function revokeApiTokenAction(id: string): Promise<SyncResult> {
+  try {
+    await authApi.revokeToken(id);
+    revalidatePath('/settings');
+    return { ok: true, message: 'Token revoked.' };
+  } catch (err) {
+    return { ok: false, message: errMessage(err) };
   }
 }

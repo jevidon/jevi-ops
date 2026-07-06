@@ -58,12 +58,13 @@ const EnvSchema = z.object({
   // carry a Supabase session.
   WIDGET_SECRET: z.string().min(20).optional(),
 
-  // Public origin of the web app — used by widget endpoints to build
-  // tap-through deep links. Set this on prod to the dashboard's public
-  // URL. Without it the widget falls back to the hardcoded prod URL
-  // below, which is fine for production but means dev widgets would
-  // also point at prod.
-  WEB_PUBLIC_URL: z.string().url().optional(),
+  // Public origin of the API itself (the ts.net URL in prod). Used to
+  // build absolute URLs for stored attachments served at /uploads/*.
+  API_PUBLIC_URL: z.string().url().optional(),
+
+  // Directory for image attachments (a mounted NAS volume in prod).
+  // Unset → uploads disabled (route 503s, UI hides the affordance).
+  UPLOADS_DIR: z.string().optional(),
 
   // ── LLM (voice parser + chat) ──────────────────────────────────────────
   // Primary: any OpenAI-compatible server (llama.cpp `llama-server --jinja`,
@@ -109,21 +110,6 @@ const EnvSchema = z.object({
   PUSHOVER_USER_KEY: z.string().optional(),
   PUSHOVER_API_TOKEN: z.string().optional(),
 
-  // Bunny.net Storage Zone + CDN Pull Zone for image attachments on
-  // notes + journal entries. All four required for /api/uploads/image
-  // to function; missing any → the route returns 503 and the UI hides
-  // the "add image" affordance.
-  //
-  // BUNNY_STORAGE_ZONE   = the storage zone name from Bunny dashboard
-  // BUNNY_STORAGE_REGION = optional region prefix (e.g., "ny", "la");
-  //                        blank uses the default (Frankfurt) endpoint
-  // BUNNY_STORAGE_ACCESS_KEY = the storage zone's password / API key
-  // BUNNY_CDN_HOST       = the Pull Zone hostname (e.g., jevi-ops.b-cdn.net)
-  //                        — what we put in the URL of stored files
-  BUNNY_STORAGE_ZONE: z.string().optional(),
-  BUNNY_STORAGE_REGION: z.string().optional(),
-  BUNNY_STORAGE_ACCESS_KEY: z.string().optional(),
-  BUNNY_CDN_HOST: z.string().optional(),
 });
 
 const parsed = EnvSchema.safeParse(process.env);

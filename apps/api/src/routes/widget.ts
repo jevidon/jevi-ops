@@ -1,4 +1,5 @@
 import type { FastifyPluginAsync } from 'fastify';
+import { timingSafeEqual } from 'node:crypto';
 import { gt } from 'drizzle-orm';
 import { env } from '../lib/env.js';
 import { getDb } from '../lib/db.js';
@@ -45,8 +46,9 @@ export const widgetRoutes: FastifyPluginAsync = async (app) => {
       if (!env.WIDGET_SECRET) {
         return reply.code(503).send({ error: 'widget_disabled', reason: 'WIDGET_SECRET not set' });
       }
-      const provided = req.query.secret ?? '';
-      if (provided !== env.WIDGET_SECRET) {
+      const provided = Buffer.from(req.query.secret ?? '');
+      const expected = Buffer.from(env.WIDGET_SECRET);
+      if (provided.length !== expected.length || !timingSafeEqual(provided, expected)) {
         return reply.code(401).send({ error: 'unauthorized' });
       }
 
@@ -81,11 +83,9 @@ export const widgetRoutes: FastifyPluginAsync = async (app) => {
         }
       }
 
-      // Tap-through target. WEB_PUBLIC_URL is the explicit "public origin
-      // of the web app". Don't read CORS_ORIGINS — that often lists
-      // localhost first for dev and we can't tell prod from dev by
-      // string-sniffing.
-      const dashboardOrigin = (env.WEB_PUBLIC_URL ?? env.WEB_APP_URL).replace(/\/$/, '');
+      // Tap-through target: WEB_APP_URL is the public origin of the web
+      // app (the ts.net URL in prod).
+      const dashboardOrigin = env.WEB_APP_URL.replace(/\/$/, '');
 
       const payload: { item: WidgetQuote } = {
         item: {

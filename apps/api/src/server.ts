@@ -3,6 +3,7 @@ import cookie from '@fastify/cookie';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import multipart from '@fastify/multipart';
+import fastifyStatic from '@fastify/static';
 import sensible from '@fastify/sensible';
 import { env, corsOrigins, isDev } from './lib/env.js';
 import { startScheduler } from './lib/scheduler.js';
@@ -55,6 +56,16 @@ export async function buildServer() {
     limits: { fileSize: 25 * 1024 * 1024 },
   });
   await app.register(authPlugin);
+
+  // Serve stored image attachments. Files are written by lib/storage.ts
+  // under UPLOADS_DIR; URLs on attachment records point here.
+  if (env.UPLOADS_DIR) {
+    await app.register(fastifyStatic, {
+      root: env.UPLOADS_DIR,
+      prefix: '/uploads/',
+      decorateReply: false,
+    });
+  }
 
   // Global error handler. Route handlers use plain awaits — thrown errors
   // land here. @fastify/sensible httpErrors carry statusCode and pass

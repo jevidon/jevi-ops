@@ -1,19 +1,19 @@
 #!/usr/bin/env node
-// Post-deploy smoke test for the prod stack. Runs a handful of cheap
-// HTTP checks against api.dashboard.jeradhill.com and
-// dashboard.jeradhill.com to catch the kind of regressions that only
-// show up in prod (missing env var, bad PM2 restart, expired SSL,
-// Supabase connection broken, cron secret rotated but not propagated).
+// Post-deploy smoke test for the jevi-ops stack. Runs a handful of cheap
+// HTTP checks to catch the kind of regressions that only show up after a
+// deploy (missing env var, dead container, broken DB connection, cron
+// secret rotated but not propagated).
 //
-// Usage:
+// Usage (against the NAS over the tailnet):
+//   API_URL=https://<nas>.<tailnet>.ts.net:8443 \
+//   WEB_URL=https://<nas>.<tailnet>.ts.net \
 //   CRON_SECRET=… node scripts/smoke-prod.mjs
 //
-//   # Override the targets for staging or local:
+//   # Local dev:
 //   API_URL=http://localhost:3001 WEB_URL=http://localhost:3000 \
 //     CRON_SECRET=… node scripts/smoke-prod.mjs
 //
-// Exits 1 if any check fails. Designed to run after `git push` →
-// XCloud deploy completes (give the deploy ~30s before running this).
+// Exits 1 if any check fails.
 //
 // All checks are READ-only or hit endpoints whose only side effect is
 // the same work the regular cron already does (observations is
@@ -21,8 +21,8 @@
 // are NOT exercised here — those have user-visible side effects
 // (Pushover pushes) we don't want fake-firing on every smoke run.
 
-const API_URL = (process.env.API_URL || 'https://api.dashboard.jeradhill.com').replace(/\/$/, '');
-const WEB_URL = (process.env.WEB_URL || 'https://dashboard.jeradhill.com').replace(/\/$/, '');
+const API_URL = (process.env.API_URL || 'http://localhost:3001').replace(/\/$/, '');
+const WEB_URL = (process.env.WEB_URL || 'http://localhost:3000').replace(/\/$/, '');
 const CRON_SECRET = process.env.CRON_SECRET || '';
 
 // ─── ANSI helpers ────────────────────────────────────────────────────────
@@ -94,9 +94,10 @@ check('api /healthz returns 200 with all services configured', async () => {
   const j = parseJson(res.body);
   if (!j) return { ok: false, message: 'healthz: non-JSON body' };
   const missing = [];
-  if (!j.supabase_configured) missing.push('supabase');
-  if (!j.anthropic_configured) missing.push('anthropic');
-  if (!j.whisper_configured) missing.push('whisper');
+  if (!j.database_configured) missing.push('database');
+  if (!j.auth_configured) missing.push('auth');
+  if (!j.llm_configured) missing.push('llm');
+  if (!j.stt_configured) missing.push('stt');
   if (missing.length) return { ok: false, message: `unconfigured: ${missing.join(', ')}` };
   return { ok: true, message: 'all services configured' };
 });

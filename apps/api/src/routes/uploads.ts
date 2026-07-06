@@ -1,15 +1,13 @@
 import type { FastifyPluginAsync } from 'fastify';
-import { uploadImage, isBunnyConfigured, extensionForImage } from '../lib/bunny.js';
+import { uploadImage, isStorageConfigured, extensionForImage } from '../lib/storage.js';
 
-// POST /api/uploads/image — multipart image upload, server-proxied to
-// Bunny Storage. Returns the StoredAttachment record the client then
+// POST /api/uploads/image — multipart image upload written to local
+// storage (UPLOADS_DIR, a NAS volume in prod) and served back at
+// /uploads/*. Returns the StoredAttachment record the client then
 // appends to a note/journal's attachments array via the regular PATCH.
 //
-// Why server-proxied (vs. browser-direct upload):
-//   - The Bunny access key never touches the browser.
-//   - File-type + size validation happens server-side (can't be bypassed
-//     by a malicious client).
-//   - One auth check (requireAuth) covers it.
+// Server-proxied so file-type + size validation can't be bypassed and one
+// auth check (requireAuth) covers it.
 //
 // Size cap: the multipart plugin is already configured for 25 MB
 // (matches Whisper's audio limit). Mobile photos clear that comfortably
@@ -17,7 +15,7 @@ import { uploadImage, isBunnyConfigured, extensionForImage } from '../lib/bunny.
 
 // Allowed MIME types. We trust the browser-reported value; the
 // extension is derived from it. Anything outside this whitelist gets
-// rejected before hitting Bunny.
+// rejected before hitting disk.
 const ALLOWED_MIME = new Set([
   'image/jpeg', 'image/jpg', 'image/png', 'image/webp',
   'image/gif', 'image/heic', 'image/heif',
@@ -31,10 +29,10 @@ export const uploadRoutes: FastifyPluginAsync = async (app) => {
   app.post<{ Querystring: { prefix?: string; alt?: string; title_hint?: string } }>(
     '/api/uploads/image',
     async (req, reply) => {
-      if (!isBunnyConfigured()) {
+      if (!isStorageConfigured()) {
         return reply.code(503).send({
-          error: 'bunny_not_configured',
-          reason: 'Set BUNNY_STORAGE_ZONE, BUNNY_STORAGE_ACCESS_KEY, and BUNNY_CDN_HOST in API .env.',
+          error: 'storage_not_configured',
+          reason: 'Set UPLOADS_DIR in the API env to enable image attachments.',
         });
       }
       if (!req.isMultipart()) {
@@ -100,11 +98,11 @@ export const uploadRoutes: FastifyPluginAsync = async (app) => {
         });
         req.log.info(
           { user_id: req.user!.id, storage_path: stored.storage_path, bytes: buffer.length },
-          'image uploaded to bunny',
+          'image stored',
         );
         return reply.code(201).send(stored);
       } catch (err) {
-        req.log.error({ err }, 'bunny upload failed');
+        req.log.error({ err }, 'image store failed');
         return reply.code(502).send({
           error: 'upload_failed',
           message: err instanceof Error ? err.message : 'unknown',

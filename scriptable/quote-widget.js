@@ -20,7 +20,7 @@
 
 // ─── CONFIG ─────────────────────────────────────────────────────────────
 // Edit these two values. Don't commit them anywhere.
-const API_BASE = 'https://api.dashboard.jeradhill.com';
+const API_BASE = 'https://YOUR-NAS.YOUR-TAILNET.ts.net:8443';
 const WIDGET_SECRET = 'PASTE_YOUR_WIDGET_SECRET_HERE';
 // ────────────────────────────────────────────────────────────────────────
 

@@ -1079,15 +1079,52 @@ export interface IntegrationItem {
 
 export interface AppSettings {
   timezone: string;
+  llm_provider?: 'openai_compatible' | 'anthropic' | null;
+  llm_base_url?: string | null;
+  llm_model?: string | null;
+  llm_api_key?: string | null;
+  stt_base_url?: string | null;
+  stt_model?: string | null;
+  immich_base_url?: string | null;
+  immich_api_key?: string | null;
   updated_at?: string;
+}
+
+export type UpdateAppSettingsBody = Partial<Omit<AppSettings, 'updated_at'>>;
+
+export interface ConnectionTestResult {
+  ok: boolean;
+  latency_ms: number;
+  detail: string;
+  sample?: string;
 }
 
 export const settingsApi = {
   integrationsStatus: () =>
     api.get<{ items: IntegrationItem[] }>('/api/settings/integrations-status'),
   getApp: () => api.get<AppSettings>('/api/settings/app'),
-  updateApp: (body: { timezone?: string }) =>
+  updateApp: (body: UpdateAppSettingsBody) =>
     api.patch<AppSettings>('/api/settings/app', body),
+  testLlm: () => api.post<ConnectionTestResult>('/api/settings/test-llm'),
+  testStt: () => api.post<ConnectionTestResult>('/api/settings/test-stt'),
+};
+
+// ─── Auth (API tokens for agents/devices) ────────────────────────────────
+
+export interface ApiTokenRow {
+  id: string;
+  name: string;
+  kind: 'agent' | 'device';
+  created_at: string;
+  last_used_at: string | null;
+  revoked_at: string | null;
+}
+
+export const authApi = {
+  listTokens: () => api.get<{ tokens: ApiTokenRow[] }>('/api/auth/tokens'),
+  createToken: (body: { name: string; kind: 'agent' | 'device' }) =>
+    api.post<ApiTokenRow & { token: string }>('/api/auth/tokens', body),
+  revokeToken: (id: string) => api.delete<{ revoked: string }>(`/api/auth/tokens/${id}`),
 };
 
 // ─── Health (personal health record) ─────────────────────────────────────

@@ -3,8 +3,9 @@ import { eq } from 'drizzle-orm';
 import { env } from '../lib/env.js';
 import { isDatabaseConfigured } from '../lib/db.js';
 import { isAuthConfigured } from '../lib/jwt.js';
-import { isLlmConfigured, llmDescription } from '../lib/llm.js';
+import { chatComplete, isLlmConfigured, llmDescription } from '../lib/llm.js';
 import { isSttConfigured, sttDescription } from '../lib/stt.js';
+import { isStorageConfigured } from '../lib/storage.js';
 import { getDb } from '../lib/db.js';
 import { app_settings } from '../db/schema.js';
 import { getAppSettings, invalidateAppSettings } from '../lib/app-settings.js';
@@ -34,11 +35,68 @@ function statusForAll(present: boolean[]): 'configured' | 'partial' | 'missing' 
 export const settingsRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', app.requireAuth);
 
-  // App-wide settings (timezone, etc.) — single-row table. GET reads
-  // the cached value; PATCH writes through and invalidates the cache.
+  // App-wide settings (timezone + integration config) — single-row table.
+  // GET reads the cached value; PATCH writes through and invalidates the
+  // cache. API keys are returned as-is: single-user system, auth-gated,
+  // and the settings form needs to show what's set.
   app.get('/api/settings/app', async () => {
     const settings = await getAppSettings();
     return settings;
+  });
+
+  // Connection tests for the AI section — cheap round-trips so the
+  // dashboard "Test" buttons give a real signal, not just presence checks.
+  app.post('/api/settings/test-llm', async (_req, reply) => {
+    if (!(await isLlmConfigured())) {
+      return reply.code(503).send({ ok: false, error: 'llm_not_configured' });
+    }
+    const started = Date.now();
+    try {
+      const res = await chatComplete({
+        system: 'You are a connectivity check. Reply with the single word: ok',
+        messages: [{ role: 'user', content: 'ping' }],
+        maxTokens: 8,
+        effort: 'low',
+      });
+      return {
+        ok: true,
+        latency_ms: Date.now() - started,
+        detail: await llmDescription(),
+        sample: res.text.slice(0, 40),
+      };
+    } catch (err) {
+      return reply.code(502).send({
+        ok: false,
+        error: 'llm_unreachable',
+        message: err instanceof Error ? err.message : 'unknown',
+        detail: await llmDescription(),
+      });
+    }
+  });
+
+  app.post('/api/settings/test-stt', async (_req, reply) => {
+    if (!(await isSttConfigured())) {
+      return reply.code(503).send({ ok: false, error: 'stt_not_configured' });
+    }
+    const started = Date.now();
+    try {
+      const detail = await sttDescription();
+      // Probe the server's models listing — supported by OpenAI cloud,
+      // speaches, and faster-whisper-server. Proves reachability + auth
+      // without shipping an audio sample.
+      const base = detail.split(' · ')[0]!;
+      const res = await fetch(`${base}/models`, { signal: AbortSignal.timeout(5000) });
+      if (!res.ok && res.status !== 401 && res.status !== 403) {
+        return reply.code(502).send({ ok: false, error: `stt_probe_http_${res.status}`, detail });
+      }
+      return { ok: true, latency_ms: Date.now() - started, detail };
+    } catch (err) {
+      return reply.code(502).send({
+        ok: false,
+        error: 'stt_unreachable',
+        message: err instanceof Error ? err.message : 'unknown',
+      });
+    }
   });
 
   app.patch('/api/settings/app', async (req, reply) => {
@@ -56,7 +114,7 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
       .update(app_settings)
       .set(parsed.data)
       .where(eq(app_settings.id, true))
-      .returning({ timezone: app_settings.timezone, updated_at: app_settings.updated_at });
+      .returning();
     if (!row) throw app.httpErrors.internalServerError('settings_row_missing');
     invalidateAppSettings();
     return row;
@@ -158,17 +216,15 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
         purpose: 'Task reminders, overdue alerts, daily summary, routine reminders.',
       },
       {
-        key: 'bunny',
-        label: 'Bunny CDN',
+        key: 'storage',
+        label: 'Image storage',
         category: 'integrations',
-        status: statusForAll([
-          !!env.BUNNY_STORAGE_ZONE,
-          !!env.BUNNY_STORAGE_ACCESS_KEY,
-          !!env.BUNNY_CDN_HOST,
-        ]),
-        detail: detailForBunny(),
+        status: isStorageConfigured() ? 'configured' : 'missing',
+        detail: env.UPLOADS_DIR
+          ? `Local volume: ${env.UPLOADS_DIR}`
+          : 'UPLOADS_DIR missing — image attachments disabled.',
         required: false,
-        purpose: 'Image attachments on notes + journal entries.',
+        purpose: 'Image attachments on notes + journal entries (local volume).',
       },
     ];
     return { items };
@@ -206,13 +262,4 @@ function detailForPushover(): string {
   return parts.join(' · ');
 }
 
-function detailForBunny(): string {
-  const parts: string[] = [];
-  if (env.BUNNY_STORAGE_ZONE) parts.push(`storage zone: ${env.BUNNY_STORAGE_ZONE}`);
-  else parts.push('BUNNY_STORAGE_ZONE missing');
-  if (env.BUNNY_STORAGE_REGION) parts.push(`region: ${env.BUNNY_STORAGE_REGION}`);
-  parts.push(env.BUNNY_STORAGE_ACCESS_KEY ? 'access key set' : 'BUNNY_STORAGE_ACCESS_KEY missing');
-  if (env.BUNNY_CDN_HOST) parts.push(`pull zone: ${env.BUNNY_CDN_HOST}`);
-  else parts.push('BUNNY_CDN_HOST missing');
-  return parts.join(' · ');
-}
+

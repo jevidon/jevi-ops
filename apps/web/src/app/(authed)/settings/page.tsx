@@ -1,9 +1,14 @@
 import Link from 'next/link';
 import { ScreenHeader } from '@/components/ScreenHeader';
-import { googleApi, ApiError, type GoogleStatus } from '@/lib/api';
+import {
+  authApi, googleApi, settingsApi, ApiError,
+  type ApiTokenRow, type AppSettings, type GoogleStatus,
+} from '@/lib/api';
 import { getAppTimezone } from '@/lib/app-settings';
 import { SettingsSection } from './settings-section';
 import { TimezoneForm } from './timezone-form';
+import { AiSettingsForm } from './ai-settings-form';
+import { ApiTokensPanel } from './api-tokens-panel';
 import { beginGoogleOAuthAction } from './actions';
 
 // /settings — integrations and account controls. Lives outside the six-tab
@@ -16,6 +21,19 @@ export default async function SettingsPage({
 }) {
   const { google: googleParam, reason } = await searchParams;
   const tz = await getAppTimezone();
+
+  let appSettings: AppSettings = { timezone: tz };
+  try {
+    appSettings = await settingsApi.getApp();
+  } catch {
+    /* section renders with env-only defaults */
+  }
+  let tokens: ApiTokenRow[] = [];
+  try {
+    tokens = (await authApi.listTokens()).tokens;
+  } catch {
+    /* token panel renders empty */
+  }
 
   let status: GoogleStatus = {
     configured: false,
@@ -56,6 +74,14 @@ export default async function SettingsPage({
 
       <SettingsSection title="Timezone">
         <TimezoneForm current={tz} />
+      </SettingsSection>
+
+      <SettingsSection title="AI · language model, transcription, photos">
+        <AiSettingsForm current={appSettings} />
+      </SettingsSection>
+
+      <SettingsSection title="API tokens · agents & devices">
+        <ApiTokensPanel tokens={tokens} />
       </SettingsSection>
 
       <SettingsSection title="Integration status">
