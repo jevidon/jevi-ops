@@ -1,9 +1,19 @@
 import type { FastifyPluginAsync } from 'fastify';
-import type { SupabaseClient } from '@supabase/supabase-js';
+import { and, desc, eq, type SQL } from 'drizzle-orm';
 import { CreateTaskSchema, UpdateTaskSchema } from '@jevi-ops/shared/schemas';
 import { INBOX_DOMAIN_ID, isRecurrencePattern, nextDueDate } from '@jevi-ops/shared';
+import { getDb, type Db } from '../lib/db.js';
+import { projects, tasks } from '../db/schema.js';
 
-// Tasks CRUD. Auth-gated; uses request-scoped Supabase client so RLS applies.
+// Tasks CRUD. Auth-gated.
+
+// Shared embed shape for list + detail — linked project + content_item +
+// domain metadata so views can render context without an N+1 lookup.
+const TASK_EMBEDS = {
+  project: { columns: { id: true, name: true, color: true } },
+  content_item: { columns: { id: true, title: true, type: true, status: true } },
+  domain: { columns: { id: true, name: true, is_system: true } },
+} as const;
 
 // ─── Domain routing helper (Addendum 03) ───────────────────────────────
 //
@@ -17,19 +27,17 @@ import { INBOX_DOMAIN_ID, isRecurrencePattern, nextDueDate } from '@jevi-ops/sha
 // project.domain_id wins on conflict-with-mismatch (returned as an error,
 // not silently corrected, so a buggy client surfaces immediately).
 async function resolveTaskDomain(
-  sb: SupabaseClient,
+  db: Db,
   body: { project_id?: string | null; domain_id?: string | null },
 ): Promise<{ ok: true; domain_id: string } | { ok: false; error: string }> {
   let projectDomainId: string | null = null;
   if (body.project_id) {
-    const { data, error } = await sb
-      .from('projects')
-      .select('domain_id')
-      .eq('id', body.project_id)
-      .maybeSingle();
-    if (error) return { ok: false, error: `project_lookup_failed:${error.message}` };
-    if (!data) return { ok: false, error: 'project_not_found' };
-    projectDomainId = (data.domain_id as string | null) ?? null;
+    const project = await db.query.projects.findFirst({
+      columns: { domain_id: true },
+      where: eq(projects.id, body.project_id),
+    });
+    if (!project) return { ok: false, error: 'project_not_found' };
+    projectDomainId = project.domain_id ?? null;
   }
 
   if (body.project_id && body.domain_id) {
@@ -63,33 +71,29 @@ export const taskRoutes: FastifyPluginAsync = async (app) => {
   app.get<{ Querystring: { content_item_id?: string; project_id?: string; status?: string; domain_id?: string } }>(
     '/api/tasks',
     async (req) => {
-      const sb = req.supabase!;
-      // Include linked project + content_item + domain metadata so list
-      // views can render context without an N+1 lookup.
-      let q = sb
-        .from('tasks')
-        .select('*, project:projects(id, name, color), content_item:content_items(id, title, type, status), domain:stewardship_domains(id, name, is_system)')
-        .order('created_at', { ascending: false })
-        .limit(500);
-      if (req.query.content_item_id) q = q.eq('content_item_id', req.query.content_item_id);
-      if (req.query.project_id) q = q.eq('project_id', req.query.project_id);
-      if (req.query.status) q = q.eq('status', req.query.status);
-      if (req.query.domain_id) q = q.eq('domain_id', req.query.domain_id);
-      const { data, error } = await q;
-      if (error) throw app.httpErrors.internalServerError(error.message);
-      return { tasks: data ?? [] };
+      const db = getDb();
+      const conds: SQL[] = [];
+      if (req.query.content_item_id) conds.push(eq(tasks.content_item_id, req.query.content_item_id));
+      if (req.query.project_id) conds.push(eq(tasks.project_id, req.query.project_id));
+      if (req.query.status) conds.push(eq(tasks.status, req.query.status));
+      if (req.query.domain_id) conds.push(eq(tasks.domain_id, req.query.domain_id));
+      const rows = await db.query.tasks.findMany({
+        with: TASK_EMBEDS,
+        where: conds.length ? and(...conds) : undefined,
+        orderBy: desc(tasks.created_at),
+        limit: 500,
+      });
+      return { tasks: rows };
     },
   );
 
   app.get<{ Params: { id: string } }>('/api/tasks/:id', async (req, reply) => {
-    const { data, error } = await req.supabase!
-      .from('tasks')
-      .select('*, project:projects(id, name, color), content_item:content_items(id, title, type, status), domain:stewardship_domains(id, name, is_system)')
-      .eq('id', req.params.id)
-      .maybeSingle();
-    if (error) throw app.httpErrors.internalServerError(error.message);
-    if (!data) return reply.code(404).send({ error: 'not_found' });
-    return data;
+    const row = await getDb().query.tasks.findFirst({
+      with: TASK_EMBEDS,
+      where: eq(tasks.id, req.params.id),
+    });
+    if (!row) return reply.code(404).send({ error: 'not_found' });
+    return row;
   });
 
   app.post('/api/tasks', async (req, reply) => {
@@ -100,7 +104,8 @@ export const taskRoutes: FastifyPluginAsync = async (app) => {
         details: parsed.error.flatten().fieldErrors,
       });
     }
-    const resolved = await resolveTaskDomain(req.supabase!, {
+    const db = getDb();
+    const resolved = await resolveTaskDomain(db, {
       project_id: parsed.data.project_id ?? null,
       domain_id: parsed.data.domain_id ?? null,
     });
@@ -108,13 +113,9 @@ export const taskRoutes: FastifyPluginAsync = async (app) => {
       return reply.code(400).send({ error: resolved.error });
     }
     const insert = { ...parsed.data, domain_id: resolved.domain_id };
-    const { data, error } = await req.supabase!
-      .from('tasks')
-      .insert(insert)
-      .select('*')
-      .single();
-    if (error) throw app.httpErrors.internalServerError(error.message);
-    return reply.code(201).send(data);
+    const [row] = await db.insert(tasks).values(insert).returning();
+    if (!row) throw app.httpErrors.internalServerError('insert_returned_no_row');
+    return reply.code(201).send(row);
   });
 
   app.patch<{ Params: { id: string } }>('/api/tasks/:id', async (req, reply) => {
@@ -125,7 +126,12 @@ export const taskRoutes: FastifyPluginAsync = async (app) => {
         details: parsed.error.flatten().fieldErrors,
       });
     }
-    const update: Record<string, unknown> = { ...parsed.data };
+    const db = getDb();
+    // domain_id is excluded from the spread: the Zod schema allows null (as
+    // "recompute for me") but the column is NOT NULL — the resolver below
+    // sets the definitive value whenever the patch touches routing.
+    const { domain_id: _ignoredDomainId, ...patchRest } = parsed.data;
+    const update: Partial<typeof tasks.$inferInsert> = { ...patchRest };
     let rolledOver = false;
 
     // Re-resolve domain routing when project_id or domain_id is being
@@ -136,21 +142,19 @@ export const taskRoutes: FastifyPluginAsync = async (app) => {
     if ('project_id' in parsed.data || 'domain_id' in parsed.data) {
       // Pull the existing row so we know the current project/domain when
       // the patch only changes one of them.
-      const { data: existing, error: readErr } = await req.supabase!
-        .from('tasks')
-        .select('project_id, domain_id')
-        .eq('id', req.params.id)
-        .maybeSingle();
-      if (readErr) throw app.httpErrors.internalServerError(readErr.message);
+      const existing = await db.query.tasks.findFirst({
+        columns: { project_id: true, domain_id: true },
+        where: eq(tasks.id, req.params.id),
+      });
       if (!existing) return reply.code(404).send({ error: 'not_found' });
 
       const nextProjectId = 'project_id' in parsed.data
         ? (parsed.data.project_id ?? null)
-        : (existing.project_id as string | null);
+        : existing.project_id;
       const nextDomainId = 'domain_id' in parsed.data
         ? (parsed.data.domain_id ?? null)
         : null; // explicit override only — don't keep the old domain when the project is changing
-      const resolved = await resolveTaskDomain(req.supabase!, {
+      const resolved = await resolveTaskDomain(db, {
         project_id: nextProjectId,
         domain_id: nextDomainId,
       });
@@ -167,25 +171,23 @@ export const taskRoutes: FastifyPluginAsync = async (app) => {
       // know how to advance, swap the done → open and bump due_date.
       // Reminders dedup (reminders_sent) clears so the next occurrence
       // can fire reminders again.
-      const { data: existing, error: readErr } = await req.supabase!
-        .from('tasks')
-        .select('recurrence_rule, due_date')
-        .eq('id', req.params.id)
-        .maybeSingle();
-      if (readErr) throw app.httpErrors.internalServerError(readErr.message);
+      const existing = await db.query.tasks.findFirst({
+        columns: { recurrence_rule: true, due_date: true },
+        where: eq(tasks.id, req.params.id),
+      });
 
-      const ruleRaw = existing?.recurrence_rule as string | null | undefined;
+      const ruleRaw = existing?.recurrence_rule;
       if (ruleRaw && isRecurrencePattern(ruleRaw)) {
         const todayIso = new Date().toISOString().slice(0, 10);
         const next = nextDueDate({
-          currentDue: (existing?.due_date as string | null) ?? null,
+          currentDue: existing?.due_date ?? null,
           rule: ruleRaw,
           todayIso,
         });
         update.status = 'open';
         update.completed_at = null;
         update.due_date = next;
-        update.reminders_sent = [];
+        update.reminders_sent = {};
         // top3_for_date is intentionally cleared too — today's instance
         // is "done", so it shouldn't keep starring tomorrow's spawn.
         update.top3_for_date = null;
@@ -198,21 +200,15 @@ export const taskRoutes: FastifyPluginAsync = async (app) => {
       // stale "completed at" on a row that's actually open.
       update.completed_at = null;
     }
-    const { data, error } = await req.supabase!
-      .from('tasks')
-      .update(update)
-      .eq('id', req.params.id)
-      .select('*')
-      .single();
-    if (error) throw app.httpErrors.internalServerError(error.message);
+    const [row] = await db.update(tasks).set(update).where(eq(tasks.id, req.params.id)).returning();
+    if (!row) return reply.code(404).send({ error: 'not_found' });
     // Surface the rollover so the client can show a "Next: <date>" hint
     // if it wants to. Adds one field; existing consumers ignore it.
-    return { ...data, recurred: rolledOver };
+    return { ...row, recurred: rolledOver };
   });
 
   app.delete<{ Params: { id: string } }>('/api/tasks/:id', async (req, reply) => {
-    const { error } = await req.supabase!.from('tasks').delete().eq('id', req.params.id);
-    if (error) throw app.httpErrors.internalServerError(error.message);
+    await getDb().delete(tasks).where(eq(tasks.id, req.params.id));
     return reply.code(204).send();
   });
 };

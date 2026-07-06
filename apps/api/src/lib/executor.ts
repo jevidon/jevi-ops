@@ -1,7 +1,23 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
+import { eq } from 'drizzle-orm';
 import type { ParsedAction } from './parser.js';
 import type { CaptureSource } from '@jevi-ops/shared/schemas';
 import { INBOX_DOMAIN_ID } from '@jevi-ops/shared';
+import type { Db } from './db.js';
+import {
+  activity_log,
+  calendar_events,
+  content_items,
+  inventory_items,
+  journal_entries,
+  milestones,
+  notes,
+  notifications,
+  person_facts,
+  projects,
+  quote_annotations,
+  quotes,
+  tasks,
+} from '../db/schema.js';
 import {
   matchProject, matchDomain, matchPerson, matchTask,
   matchBook, matchContentItem, matchMilestone, matchQuote,
@@ -57,37 +73,36 @@ const num = (a: ParsedAction, k: string): number | undefined => {
 // ─── One handler per action type ─────────────────────────────────────────
 
 async function createTask(
-  sb: SupabaseClient,
+  db: Db,
   a: ParsedAction,
   opts: ExecuteOptions = {},
 ): Promise<ActionResult> {
   const title = str(a, 'title');
   if (!title) return { action: a.action, status: 'failed', message: 'missing_title' };
 
-  const project_id = await matchProject(sb, str(a, 'project_match'));
-  const parent_task_id = await matchTask(sb, str(a, 'parent_task_match'));
+  const project_id = await matchProject(db, str(a, 'project_match'));
+  const parent_task_id = await matchTask(db, str(a, 'parent_task_match'));
 
   // Domain routing (Addendum 03). Three cases:
   //   1. project_match resolved → use the project's domain
   //   2. project_match unresolved but domain_match given → use that domain
   //   3. Neither → fall through to Inbox
   // We resolve domain_id here rather than letting the API endpoint do it
-  // because voice flows insert directly via the service-role client, not
-  // through /api/tasks. Keep the routing logic in one place: this function.
+  // because voice flows insert directly, not through /api/tasks. Keep the
+  // routing logic in one place: this function.
   let domain_id: string;
   if (project_id) {
-    const { data: project } = await sb
-      .from('projects')
-      .select('domain_id')
-      .eq('id', project_id)
-      .maybeSingle();
-    domain_id = (project?.domain_id as string | null) ?? INBOX_DOMAIN_ID;
+    const project = await db.query.projects.findFirst({
+      columns: { domain_id: true },
+      where: eq(projects.id, project_id),
+    });
+    domain_id = project?.domain_id ?? INBOX_DOMAIN_ID;
   } else {
-    const matchedDomain = await matchDomain(sb, str(a, 'domain_match'));
+    const matchedDomain = await matchDomain(db, str(a, 'domain_match'));
     domain_id = matchedDomain ?? INBOX_DOMAIN_ID;
   }
 
-  const insert: Record<string, unknown> = {
+  const insert: typeof tasks.$inferInsert = {
     title,
     priority: num(a, 'priority') ?? 4,
     source: sourceFor('tasks', opts.captureSource),
@@ -97,10 +112,10 @@ async function createTask(
   if (str(a, 'due_time')) insert.due_time = str(a, 'due_time');
   if (project_id) insert.project_id = project_id;
   if (parent_task_id) insert.parent_task_id = parent_task_id;
-  if (Array.isArray(a.reminder_offsets)) insert.reminder_offsets = a.reminder_offsets;
+  if (Array.isArray(a.reminder_offsets)) insert.reminder_offsets = a.reminder_offsets as number[];
 
-  const { data, error } = await sb.from('tasks').insert(insert).select('id').single();
-  if (error) return { action: a.action, status: 'failed', message: error.message };
+  const [row] = await db.insert(tasks).values(insert).returning({ id: tasks.id });
+  if (!row) return { action: a.action, status: 'failed', message: 'insert_returned_no_row' };
 
   // Surface the routing decision in the user-facing message so the Today
   // notification chip tells the user "landed in Inbox" vs "landed in Life"
@@ -114,19 +129,18 @@ async function createTask(
     action: a.action,
     status: 'success',
     message,
-    entity_id: data.id,
+    entity_id: row.id,
     entity_kind: 'tasks',
   };
 }
 
-async function completeTask(sb: SupabaseClient, a: ParsedAction): Promise<ActionResult> {
-  const taskId = await matchTask(sb, str(a, 'task_match'));
+async function completeTask(db: Db, a: ParsedAction): Promise<ActionResult> {
+  const taskId = await matchTask(db, str(a, 'task_match'));
   if (!taskId) return { action: a.action, status: 'skipped', message: 'task_not_found' };
-  const { error } = await sb
-    .from('tasks')
-    .update({ status: 'done', completed_at: new Date().toISOString() })
-    .eq('id', taskId);
-  if (error) return { action: a.action, status: 'failed', message: error.message };
+  await db
+    .update(tasks)
+    .set({ status: 'done', completed_at: new Date().toISOString() })
+    .where(eq(tasks.id, taskId));
   return {
     action: a.action,
     status: 'success',
@@ -136,105 +150,99 @@ async function completeTask(sb: SupabaseClient, a: ParsedAction): Promise<Action
   };
 }
 
-async function createProject(sb: SupabaseClient, a: ParsedAction): Promise<ActionResult> {
+async function createProject(db: Db, a: ParsedAction): Promise<ActionResult> {
   const name = str(a, 'name');
   if (!name) return { action: a.action, status: 'failed', message: 'missing_name' };
-  const domain_id = await matchDomain(sb, str(a, 'domain_match'));
-  const insert: Record<string, unknown> = { name };
+  const domain_id = await matchDomain(db, str(a, 'domain_match'));
+  const insert: typeof projects.$inferInsert = { name };
   if (domain_id) insert.domain_id = domain_id;
   if (str(a, 'target_date')) insert.target_date = str(a, 'target_date');
-  const { data, error } = await sb.from('projects').insert(insert).select('id').single();
-  if (error) return { action: a.action, status: 'failed', message: error.message };
-  return { action: a.action, status: 'success', message: `Project created: ${name}`, entity_id: data.id, entity_kind: 'projects' };
+  const [row] = await db.insert(projects).values(insert).returning({ id: projects.id });
+  if (!row) return { action: a.action, status: 'failed', message: 'insert_returned_no_row' };
+  return { action: a.action, status: 'success', message: `Project created: ${name}`, entity_id: row.id, entity_kind: 'projects' };
 }
 
-async function updateProjectStatus(sb: SupabaseClient, a: ParsedAction): Promise<ActionResult> {
-  const id = await matchProject(sb, str(a, 'project_match'));
+async function updateProjectStatus(db: Db, a: ParsedAction): Promise<ActionResult> {
+  const id = await matchProject(db, str(a, 'project_match'));
   if (!id) return { action: a.action, status: 'skipped', message: 'project_not_found' };
   const newStatus = str(a, 'status');
   if (!newStatus) return { action: a.action, status: 'failed', message: 'missing_status' };
-  const update: Record<string, unknown> = { status: newStatus };
+  const update: Partial<typeof projects.$inferInsert> = { status: newStatus };
   if (newStatus === 'done') update.completed_at = new Date().toISOString();
-  const { error } = await sb.from('projects').update(update).eq('id', id);
-  if (error) return { action: a.action, status: 'failed', message: error.message };
+  await db.update(projects).set(update).where(eq(projects.id, id));
   return { action: a.action, status: 'success', message: `Project status → ${newStatus}`, entity_id: id, entity_kind: 'projects' };
 }
 
 async function logActivity(
-  sb: SupabaseClient,
+  db: Db,
   a: ParsedAction,
   opts: ExecuteOptions = {},
 ): Promise<ActionResult> {
   const entry = str(a, 'entry');
   if (!entry) return { action: a.action, status: 'failed', message: 'missing_entry' };
-  const project_id = await matchProject(sb, str(a, 'project_match'));
+  const project_id = await matchProject(db, str(a, 'project_match'));
   const hours = num(a, 'hours_logged');
 
-  const insert: Record<string, unknown> = { entry, source: sourceFor('activity_log', opts.captureSource) };
+  const insert: typeof activity_log.$inferInsert = { entry, source: sourceFor('activity_log', opts.captureSource) };
   if (project_id) insert.project_id = project_id;
   if (hours !== undefined) insert.hours_logged = hours;
 
-  const { data, error } = await sb.from('activity_log').insert(insert).select('id').single();
-  if (error) return { action: a.action, status: 'failed', message: error.message };
+  const [row] = await db.insert(activity_log).values(insert).returning({ id: activity_log.id });
+  if (!row) return { action: a.action, status: 'failed', message: 'insert_returned_no_row' };
 
   // Bump projects.hours_logged so the list view and project detail header
-  // reflect the new total. Read-then-update — there's no atomic increment
-  // RPC defined yet, and this user is the only writer so the race is
+  // reflect the new total. Read-then-update — single writer, so the race is
   // effectively impossible.
   if (project_id && hours !== undefined && hours > 0) {
-    const { data: row, error: readErr } = await sb
-      .from('projects')
-      .select('hours_logged')
-      .eq('id', project_id)
-      .single();
-    if (!readErr) {
-      const current = Number(row?.hours_logged ?? 0);
-      const { error: updateErr } = await sb
-        .from('projects')
-        .update({ hours_logged: current + hours })
-        .eq('id', project_id);
-      if (updateErr) {
-        // Activity row landed; project total didn't. Surface so the user
-        // knows the project widget will be off until next correction.
-        return {
-          action: a.action,
-          status: 'success',
-          message: `Activity logged (project hours update failed: ${updateErr.message})`,
-          entity_id: data.id,
-          entity_kind: 'activity_log',
-        };
-      }
+    try {
+      const project = await db.query.projects.findFirst({
+        columns: { hours_logged: true },
+        where: eq(projects.id, project_id),
+      });
+      const current = Number(project?.hours_logged ?? 0);
+      await db.update(projects).set({ hours_logged: current + hours }).where(eq(projects.id, project_id));
+    } catch (err) {
+      // Activity row landed; project total didn't. Surface so the user
+      // knows the project widget will be off until next correction.
+      return {
+        action: a.action,
+        status: 'success',
+        message: `Activity logged (project hours update failed: ${err instanceof Error ? err.message : 'unknown'})`,
+        entity_id: row.id,
+        entity_kind: 'activity_log',
+      };
     }
   }
 
-  return { action: a.action, status: 'success', message: 'Activity logged', entity_id: data.id, entity_kind: 'activity_log' };
+  return { action: a.action, status: 'success', message: 'Activity logged', entity_id: row.id, entity_kind: 'activity_log' };
 }
 
-async function updateMilestone(sb: SupabaseClient, a: ParsedAction): Promise<ActionResult> {
-  const projectId = await matchProject(sb, str(a, 'project_match'));
+async function updateMilestone(db: Db, a: ParsedAction): Promise<ActionResult> {
+  const projectId = await matchProject(db, str(a, 'project_match'));
   if (!projectId) return { action: a.action, status: 'skipped', message: 'project_not_found' };
-  const milestoneId = await matchMilestone(sb, projectId, str(a, 'milestone_match'));
+  const milestoneId = await matchMilestone(db, projectId, str(a, 'milestone_match'));
   if (!milestoneId) return { action: a.action, status: 'skipped', message: 'milestone_not_found' };
-  const update: Record<string, unknown> = {};
+  const update: Partial<typeof milestones.$inferInsert> = {};
   if (str(a, 'status')) update.status = str(a, 'status');
   if (str(a, 'status') === 'done') update.completed_at = new Date().toISOString();
-  const { error } = await sb.from('milestones').update(update).eq('id', milestoneId);
-  if (error) return { action: a.action, status: 'failed', message: error.message };
+  await db.update(milestones).set(update).where(eq(milestones.id, milestoneId));
   return { action: a.action, status: 'success', message: 'Milestone updated', entity_id: milestoneId, entity_kind: 'milestones' };
 }
 
-async function createCalendarEvent(sb: SupabaseClient, a: ParsedAction): Promise<ActionResult> {
+async function createCalendarEvent(db: Db, a: ParsedAction): Promise<ActionResult> {
   const title = str(a, 'title');
   const start = str(a, 'start');
   const end = str(a, 'end');
   if (!title || !start || !end) return { action: a.action, status: 'failed', message: 'missing_required_fields' };
 
-  const insert: Record<string, unknown> = {
+  const insert: typeof calendar_events.$inferInsert = {
     title, start_at: start, end_at: end,
     source: 'created_here',
   };
   if (str(a, 'location')) insert.location = str(a, 'location');
-  if (Array.isArray(a.attendees)) insert.attendees = a.attendees;
+  if (Array.isArray(a.attendees)) {
+    insert.attendees = (a.attendees as unknown[]).filter((x): x is string => typeof x === 'string');
+  }
 
   // Push to Google Calendar first when connected, then mirror locally with
   // the returned google_event_id so future pulls update (not duplicate) it.
@@ -267,41 +275,41 @@ async function createCalendarEvent(sb: SupabaseClient, a: ParsedAction): Promise
     }
   }
 
-  const { data, error } = await sb.from('calendar_events').insert(insert).select('id').single();
-  if (error) return { action: a.action, status: 'failed', message: error.message };
+  const [row] = await db.insert(calendar_events).values(insert).returning({ id: calendar_events.id });
+  if (!row) return { action: a.action, status: 'failed', message: 'insert_returned_no_row' };
   return {
     action: a.action,
     status: 'success',
     message: `Calendar event created: ${title}${pushedNote}`,
-    entity_id: data.id,
+    entity_id: row.id,
     entity_kind: 'calendar_events',
   };
 }
 
-async function createNote(sb: SupabaseClient, a: ParsedAction): Promise<ActionResult> {
+async function createNote(db: Db, a: ParsedAction): Promise<ActionResult> {
   const body = str(a, 'body');
   if (!body) return { action: a.action, status: 'failed', message: 'missing_body' };
 
   // Resolve fuzzy references in parallel.
   const [project_id, person_id, quote_id] = await Promise.all([
-    matchProject(sb, str(a, 'project_match')),
-    matchPerson(sb, str(a, 'person_match')),
-    matchQuote(sb, str(a, 'quote_match')),
+    matchProject(db, str(a, 'project_match')),
+    matchPerson(db, str(a, 'person_match')),
+    matchQuote(db, str(a, 'quote_match')),
   ]);
 
-  const insert: Record<string, unknown> = {
+  const insert: typeof notes.$inferInsert = {
     body,
     source_type: str(a, 'source_type') ?? 'own_thought',
     needs_review: a.needs_review === true,
   };
   if (str(a, 'source_reference')) insert.source_reference = str(a, 'source_reference');
-  if (Array.isArray(a.tags)) insert.tags = a.tags;
+  if (Array.isArray(a.tags)) insert.tags = a.tags as string[];
   if (project_id) insert.related_project_id = project_id;
   if (person_id) insert.related_person_id = person_id;
   if (quote_id) insert.related_quote_id = quote_id;
 
-  const { data, error } = await sb.from('notes').insert(insert).select('id').single();
-  if (error) return { action: a.action, status: 'failed', message: error.message };
+  const [row] = await db.insert(notes).values(insert).returning({ id: notes.id });
+  if (!row) return { action: a.action, status: 'failed', message: 'insert_returned_no_row' };
 
   // Short success message — reflects the resolved source_type so the
   // notification feed is informative ("Reading response saved" vs just
@@ -321,17 +329,17 @@ async function createNote(sb: SupabaseClient, a: ParsedAction): Promise<ActionRe
     action: a.action,
     status: 'success',
     message: `${label}${reviewSuffix}`,
-    entity_id: data.id,
+    entity_id: row.id,
     entity_kind: 'notes',
   };
 }
 
-async function createQuote(sb: SupabaseClient, a: ParsedAction): Promise<ActionResult> {
+async function createQuote(db: Db, a: ParsedAction): Promise<ActionResult> {
   const text = str(a, 'text');
   if (!text) return { action: a.action, status: 'failed', message: 'missing_text' };
 
-  const book_id = await matchBook(sb, str(a, 'book_match'));
-  const insert: Record<string, unknown> = { text, added_via: 'voice' };
+  const book_id = await matchBook(db, str(a, 'book_match'));
+  const insert: typeof quotes.$inferInsert = { text, added_via: 'voice' };
   if (book_id) insert.book_id = book_id;
   if (num(a, 'page_number')) insert.page_number = num(a, 'page_number');
   if (str(a, 'chapter')) insert.chapter = str(a, 'chapter');
@@ -339,109 +347,105 @@ async function createQuote(sb: SupabaseClient, a: ParsedAction): Promise<ActionR
   if (str(a, 'source_reference')) insert.source_reference = str(a, 'source_reference');
   if (str(a, 'source_url')) insert.source_url = str(a, 'source_url');
   if (str(a, 'source_author')) insert.source_author = str(a, 'source_author');
-  if (Array.isArray(a.tags)) insert.tags = a.tags;
-
-  const { data, error } = await sb.from('quotes').insert(insert).select('id').single();
-  if (error) return { action: a.action, status: 'failed', message: error.message };
+  if (Array.isArray(a.tags)) insert.tags = a.tags as string[];
 
   // Addendum 02 §4 — if the user bundled a thought with the quote in the
-  // same utterance, the parser includes `annotation_body`. Write the
-  // annotation alongside the quote with context='on_capture'.
+  // same utterance, the parser includes `annotation_body`. Quote +
+  // annotation land together or not at all.
   const annotationBody = str(a, 'annotation_body');
-  let annotationNote = '';
-  if (annotationBody) {
-    const { error: annoErr } = await sb.from('quote_annotations').insert({
-      quote_id: data.id,
-      body: annotationBody,
-      context: 'on_capture',
-    });
-    if (annoErr) {
-      annotationNote = ` (annotation failed: ${annoErr.message})`;
-    } else {
-      annotationNote = ' with your thought';
+
+  const quoteId = await db.transaction(async (tx) => {
+    const [q] = await tx.insert(quotes).values(insert).returning({ id: quotes.id });
+    if (!q) throw new Error('insert_returned_no_row');
+    if (annotationBody) {
+      await tx.insert(quote_annotations).values({
+        quote_id: q.id,
+        body: annotationBody,
+        context: 'on_capture',
+      });
     }
-  }
+    return q.id;
+  });
 
   return {
     action: a.action,
     status: 'success',
-    message: `Quote saved${annotationNote}`,
-    entity_id: data.id,
+    message: `Quote saved${annotationBody ? ' with your thought' : ''}`,
+    entity_id: quoteId,
     entity_kind: 'quotes',
   };
 }
 
-async function createQuoteAnnotation(sb: SupabaseClient, a: ParsedAction): Promise<ActionResult> {
+async function createQuoteAnnotation(db: Db, a: ParsedAction): Promise<ActionResult> {
   const body = str(a, 'body');
   if (!body) return { action: a.action, status: 'failed', message: 'missing_body' };
-  const quote_id = await matchQuote(sb, str(a, 'quote_match'));
+  const quote_id = await matchQuote(db, str(a, 'quote_match'));
   if (!quote_id) return { action: a.action, status: 'skipped', message: 'quote_not_found' };
 
-  const insert: Record<string, unknown> = {
+  const insert: typeof quote_annotations.$inferInsert = {
     quote_id,
     body,
     context: str(a, 'context') ?? 'on_revisit',
   };
-  if (Array.isArray(a.tags)) insert.tags = a.tags;
+  if (Array.isArray(a.tags)) insert.tags = a.tags as string[];
 
-  const { data, error } = await sb.from('quote_annotations').insert(insert).select('id').single();
-  if (error) return { action: a.action, status: 'failed', message: error.message };
+  const [row] = await db.insert(quote_annotations).values(insert).returning({ id: quote_annotations.id });
+  if (!row) return { action: a.action, status: 'failed', message: 'insert_returned_no_row' };
   return {
     action: a.action,
     status: 'success',
     message: 'Annotation added to quote',
-    entity_id: data.id,
+    entity_id: row.id,
     entity_kind: 'quote_annotations',
   };
 }
 
 async function createJournalEntry(
-  sb: SupabaseClient,
+  db: Db,
   a: ParsedAction,
   opts: ExecuteOptions = {},
 ): Promise<ActionResult> {
   const text = str(a, 'text');
   if (!text) return { action: a.action, status: 'failed', message: 'missing_text' };
-  const insert: Record<string, unknown> = {
+  const insert: typeof journal_entries.$inferInsert = {
     transcription_text: text,
     source: sourceFor('journal_entries', opts.captureSource),
     entry_date: str(a, 'date') ?? new Intl.DateTimeFormat('en-CA', {
       timeZone: await getAppTz(), year: 'numeric', month: '2-digit', day: '2-digit',
     }).format(new Date()),
   };
-  const { data, error } = await sb.from('journal_entries').insert(insert).select('id').single();
-  if (error) return { action: a.action, status: 'failed', message: error.message };
-  return { action: a.action, status: 'success', message: 'Journal entry saved', entity_id: data.id, entity_kind: 'journal_entries' };
+  const [row] = await db.insert(journal_entries).values(insert).returning({ id: journal_entries.id });
+  if (!row) return { action: a.action, status: 'failed', message: 'insert_returned_no_row' };
+  return { action: a.action, status: 'success', message: 'Journal entry saved', entity_id: row.id, entity_kind: 'journal_entries' };
 }
 
-async function createPersonFact(sb: SupabaseClient, a: ParsedAction): Promise<ActionResult> {
-  const person_id = await matchPerson(sb, str(a, 'person_match'));
+async function createPersonFact(db: Db, a: ParsedAction): Promise<ActionResult> {
+  const person_id = await matchPerson(db, str(a, 'person_match'));
   if (!person_id) return { action: a.action, status: 'skipped', message: 'person_not_found' };
   const fact_value = str(a, 'fact_value');
   if (!fact_value) return { action: a.action, status: 'failed', message: 'missing_fact_value' };
-  const insert: Record<string, unknown> = {
+  const insert: typeof person_facts.$inferInsert = {
     person_id, fact_value,
     fact_type: str(a, 'fact_type') ?? 'other',
     recurring: a.recurring === true,
   };
   if (str(a, 'date_relevant')) insert.date_relevant = str(a, 'date_relevant');
-  const { data, error } = await sb.from('person_facts').insert(insert).select('id').single();
-  if (error) return { action: a.action, status: 'failed', message: error.message };
-  return { action: a.action, status: 'success', message: 'Person fact saved', entity_id: data.id, entity_kind: 'person_facts' };
+  const [row] = await db.insert(person_facts).values(insert).returning({ id: person_facts.id });
+  if (!row) return { action: a.action, status: 'failed', message: 'insert_returned_no_row' };
+  return { action: a.action, status: 'success', message: 'Person fact saved', entity_id: row.id, entity_kind: 'person_facts' };
 }
 
-async function updateContentItem(sb: SupabaseClient, a: ParsedAction): Promise<ActionResult> {
-  const id = await matchContentItem(sb, str(a, 'item_match'));
+async function updateContentItem(db: Db, a: ParsedAction): Promise<ActionResult> {
+  const id = await matchContentItem(db, str(a, 'item_match'));
   if (!id) return { action: a.action, status: 'skipped', message: 'item_not_found' };
-  const update: Record<string, unknown> = {};
+  const update: Partial<typeof content_items.$inferInsert> = {};
   if (str(a, 'status')) update.status = str(a, 'status');
   if (str(a, 'video_url')) update.video_url = str(a, 'video_url');
   if (str(a, 'outline_md')) update.outline_md = str(a, 'outline_md');
   if (Object.keys(update).length === 0) {
     return { action: a.action, status: 'skipped', message: 'nothing_to_update' };
   }
-  const { error } = await sb.from('content_items').update(update).eq('id', id);
-  if (error) return { action: a.action, status: 'failed', message: error.message };
+  await db.update(content_items).set(update).where(eq(content_items.id, id));
   return { action: a.action, status: 'success', message: 'Content item updated', entity_id: id, entity_kind: 'content_items' };
 }
 
@@ -450,7 +454,7 @@ async function updateContentItem(sb: SupabaseClient, a: ParsedAction): Promise<A
 // parser emits the canonical numeric weight; we just route by kind and
 // fuzzy-match the target. Anything other than the four supported weights
 // (0 / 1 / 2 / 5) is treated as a request for the nearest one.
-async function setResurfaceWeight(sb: SupabaseClient, a: ParsedAction): Promise<ActionResult> {
+async function setResurfaceWeight(db: Db, a: ParsedAction): Promise<ActionResult> {
   const kind = str(a, 'target_kind');
   const matchPhrase = str(a, 'target_match');
   const rawWeight = num(a, 'weight');
@@ -469,16 +473,16 @@ async function setResurfaceWeight(sb: SupabaseClient, a: ParsedAction): Promise<
   const weight = [0, 1, 2, 5].reduce((closest, w) =>
     Math.abs(w - rawWeight) < Math.abs(closest - rawWeight) ? w : closest, 1);
 
-  const table = kind === 'quote' ? 'quotes' : kind === 'note' ? 'notes' : 'journal_entries';
   const matcher =
     kind === 'quote' ? matchQuote :
     kind === 'note' ? matchNote :
     matchJournalEntry;
-  const id = await matcher(sb, matchPhrase);
+  const id = await matcher(db, matchPhrase);
   if (!id) return { action: a.action, status: 'skipped', message: `${kind}_not_found` };
 
-  const { error } = await sb.from(table).update({ resurface_weight: weight }).eq('id', id);
-  if (error) return { action: a.action, status: 'failed', message: error.message };
+  const table = kind === 'quote' ? quotes : kind === 'note' ? notes : journal_entries;
+  const tableName = kind === 'quote' ? 'quotes' : kind === 'note' ? 'notes' : 'journal_entries';
+  await db.update(table).set({ resurface_weight: weight }).where(eq(table.id, id));
 
   const label =
     weight === 0 ? 'excluded from resurfacing' :
@@ -489,22 +493,22 @@ async function setResurfaceWeight(sb: SupabaseClient, a: ParsedAction): Promise<
     status: 'success',
     message: `${kind[0]!.toUpperCase() + kind.slice(1)} ${label}`,
     entity_id: id,
-    entity_kind: table,
+    entity_kind: tableName,
   };
 }
 
-async function addInventoryItem(sb: SupabaseClient, a: ParsedAction): Promise<ActionResult> {
+async function addInventoryItem(db: Db, a: ParsedAction): Promise<ActionResult> {
   const category = str(a, 'category');
   if (!category) return { action: a.action, status: 'failed', message: 'missing_category' };
-  const insert: Record<string, unknown> = { category };
+  const insert: typeof inventory_items.$inferInsert = { category };
   if (str(a, 'brand')) insert.brand = str(a, 'brand');
   if (str(a, 'model')) insert.model = str(a, 'model');
   if (str(a, 'serial')) insert.serial_number = str(a, 'serial');
   if (str(a, 'purchase_date')) insert.purchase_date = str(a, 'purchase_date');
   if (num(a, 'purchase_price') !== undefined) insert.purchase_price = num(a, 'purchase_price');
-  const { data, error } = await sb.from('inventory_items').insert(insert).select('id').single();
-  if (error) return { action: a.action, status: 'failed', message: error.message };
-  return { action: a.action, status: 'success', message: 'Inventory item added', entity_id: data.id, entity_kind: 'inventory_items' };
+  const [row] = await db.insert(inventory_items).values(insert).returning({ id: inventory_items.id });
+  if (!row) return { action: a.action, status: 'failed', message: 'insert_returned_no_row' };
+  return { action: a.action, status: 'success', message: 'Inventory item added', entity_id: row.id, entity_kind: 'inventory_items' };
 }
 
 // ─── Dispatcher ──────────────────────────────────────────────────────────
@@ -512,7 +516,7 @@ async function addInventoryItem(sb: SupabaseClient, a: ParsedAction): Promise<Ac
 // Handlers may optionally accept ExecuteOptions for per-invocation
 // metadata (currently just captureSource). Handlers that don't care
 // can ignore the third arg.
-type Handler = (sb: SupabaseClient, a: ParsedAction, opts?: ExecuteOptions) => Promise<ActionResult>;
+type Handler = (db: Db, a: ParsedAction, opts?: ExecuteOptions) => Promise<ActionResult>;
 type HandlerMap = Record<string, Handler>;
 
 const handlers: HandlerMap = {
@@ -571,7 +575,7 @@ const ACTION_TITLE: Record<string, string> = {
 };
 
 async function recordNotification(
-  sb: SupabaseClient,
+  db: Db,
   action: ParsedAction,
   result: ActionResult,
 ): Promise<void> {
@@ -596,7 +600,7 @@ async function recordNotification(
     }
   }
 
-  await sb.from('notifications').insert({
+  await db.insert(notifications).values({
     type,
     title,
     body: result.message,
@@ -609,7 +613,7 @@ async function recordNotification(
 // ─── Executor ───────────────────────────────────────────────────────────
 
 export async function executeActions(
-  sb: SupabaseClient,
+  db: Db,
   actions: ParsedAction[],
   opts: ExecuteOptions = {},
 ): Promise<ActionResult[]> {
@@ -621,7 +625,7 @@ export async function executeActions(
       result = { action: a.action, status: 'failed', message: 'unknown_action_type' };
     } else {
       try {
-        result = await handler(sb, a, opts);
+        result = await handler(db, a, opts);
       } catch (err) {
         result = {
           action: a.action,
@@ -634,7 +638,7 @@ export async function executeActions(
 
     // Notification write is best-effort — never block the action result.
     try {
-      await recordNotification(sb, a, result);
+      await recordNotification(db, a, result);
     } catch {
       /* swallow — observability matters less than the action itself */
     }

@@ -1,4 +1,6 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
+import { and, desc, eq, isNotNull } from 'drizzle-orm';
+import type { Db } from './db.js';
+import { activity_log, content_items, journal_entries, stewardship_domains } from '../db/schema.js';
 
 // Per-domain cadence computation. Source of truth for the Briefing's
 // "X days since Y" facts and the Domains pulse board's worst-first sort.
@@ -91,7 +93,7 @@ function nextActionFor(rule: Rule, domainName: string): { next: string; routeTo:
   }
 }
 
-export async function computeDomainCadences(sb: SupabaseClient): Promise<CadenceRow[]> {
+export async function computeDomainCadences(db: Db): Promise<CadenceRow[]> {
   const nowIso = new Date().toISOString();
 
   // Pull active, non-system domains + the three rollups in parallel.
@@ -102,48 +104,42 @@ export async function computeDomainCadences(sb: SupabaseClient): Promise<Cadence
   // latest content_items.published_at and this column, so domains whose
   // work happens off-dashboard (Substack essays, etc.) can still keep
   // a real cadence by tapping the "Mark shipped" button.
-  const [domainsRes, lastJournalRes, publishesRes, activitiesRes] = await Promise.all([
-    sb.from('stewardship_domains')
-      .select('id, name, failure_patterns, last_shipped_at')
-      .eq('active', true)
-      .eq('is_system', false),
-    sb.from('journal_entries')
-      .select('entry_date')
-      .order('entry_date', { ascending: false })
-      .limit(1),
-    sb.from('content_items')
-      .select('domain_id, published_at')
-      .eq('status', 'published')
-      .not('published_at', 'is', null)
-      .order('published_at', { ascending: false }),
-    sb.from('activity_log')
-      .select('logged_at, project:projects(domain_id)')
-      .order('logged_at', { ascending: false })
-      .limit(500),
+  const [domains, lastJournalRows, publishes, activities] = await Promise.all([
+    db.query.stewardship_domains.findMany({
+      columns: { id: true, name: true, failure_patterns: true, last_shipped_at: true },
+      where: and(eq(stewardship_domains.active, true), eq(stewardship_domains.is_system, false)),
+    }),
+    db.query.journal_entries.findMany({
+      columns: { entry_date: true },
+      orderBy: desc(journal_entries.entry_date),
+      limit: 1,
+    }),
+    db.query.content_items.findMany({
+      columns: { domain_id: true, published_at: true },
+      where: and(eq(content_items.status, 'published'), isNotNull(content_items.published_at)),
+      orderBy: desc(content_items.published_at),
+    }),
+    db.query.activity_log.findMany({
+      columns: { logged_at: true },
+      with: { project: { columns: { domain_id: true } } },
+      orderBy: desc(activity_log.logged_at),
+      limit: 500,
+    }),
   ]);
 
-  const domains = (domainsRes.data ?? []) as Array<{
-    id: string;
-    name: string;
-    failure_patterns: unknown;
-    last_shipped_at: string | null;
-  }>;
-  const lastJournalDate = (lastJournalRes.data?.[0]?.entry_date as string | undefined) ?? null;
+  const lastJournalDate = lastJournalRows[0]?.entry_date ?? null;
 
-  type PubRow = { domain_id: string | null; published_at: string };
   const latestPublishByDomain = new Map<string, string>();
-  for (const r of (publishesRes.data ?? []) as PubRow[]) {
+  for (const r of publishes) {
     if (!r.domain_id || !r.published_at) continue;
     if (!latestPublishByDomain.has(r.domain_id)) {
       latestPublishByDomain.set(r.domain_id, r.published_at);
     }
   }
 
-  type ActRow = { logged_at: string; project: { domain_id: string | null } | { domain_id: string | null }[] | null };
   const latestActivityByDomain = new Map<string, string>();
-  for (const r of (activitiesRes.data ?? []) as ActRow[]) {
-    const proj = Array.isArray(r.project) ? r.project[0] : r.project;
-    const did = proj?.domain_id;
+  for (const r of activities) {
+    const did = r.project?.domain_id;
     if (!did) continue;
     if (!latestActivityByDomain.has(did)) {
       latestActivityByDomain.set(did, r.logged_at);

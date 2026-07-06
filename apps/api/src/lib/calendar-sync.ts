@@ -1,5 +1,7 @@
+import { and, eq, gte, inArray, isNull, lte, sql } from 'drizzle-orm';
 import { listEvents, insertEvent, markSynced, loadTokens } from './google.js';
-import { supabaseAdmin } from './supabase.js';
+import { getDb } from './db.js';
+import { calendar_events } from '../db/schema.js';
 
 // Calendar sync — pulls ±7 days from Google, upserts local events,
 // deletes cancellations, and pushes any locally-created orphans
@@ -77,30 +79,46 @@ export async function runCalendarSync(logger: Logger = {}): Promise<CalendarSync
     })
     .filter((r): r is NonNullable<typeof r> => r !== null);
 
-  const sb = supabaseAdmin();
+  const db = getDb();
 
   let upsertedCount = 0;
   if (rows.length > 0) {
-    const { error, count } = await sb
-      .from('calendar_events')
-      .upsert(rows, { onConflict: 'google_event_id', count: 'exact' });
-    if (error) {
-      logger.error?.({ error }, 'calendar upsert failed');
-      return { ok: false, status: 'upsert_failed', message: error.message };
+    try {
+      const upserted = await db
+        .insert(calendar_events)
+        .values(rows)
+        .onConflictDoUpdate({
+          target: calendar_events.google_event_id,
+          set: {
+            title: sql`excluded.title`,
+            description: sql`excluded.description`,
+            start_at: sql`excluded.start_at`,
+            end_at: sql`excluded.end_at`,
+            all_day: sql`excluded.all_day`,
+            location: sql`excluded.location`,
+            attendees: sql`excluded.attendees`,
+            source: sql`excluded.source`,
+            synced_at: sql`excluded.synced_at`,
+          },
+        })
+        .returning({ id: calendar_events.id });
+      upsertedCount = upserted.length;
+    } catch (err) {
+      logger.error?.({ err }, 'calendar upsert failed');
+      return { ok: false, status: 'upsert_failed', message: err instanceof Error ? err.message : 'unknown' };
     }
-    upsertedCount = count ?? rows.length;
   }
 
   let deletedCount = 0;
   if (cancelledIds.length > 0) {
-    const { error, count } = await sb
-      .from('calendar_events')
-      .delete({ count: 'exact' })
-      .in('google_event_id', cancelledIds);
-    if (error) {
-      logger.warn?.({ error }, 'cancellation delete failed (non-fatal)');
-    } else {
-      deletedCount = count ?? 0;
+    try {
+      const deleted = await db
+        .delete(calendar_events)
+        .where(inArray(calendar_events.google_event_id, cancelledIds))
+        .returning({ id: calendar_events.id });
+      deletedCount = deleted.length;
+    } catch (err) {
+      logger.warn?.({ err }, 'cancellation delete failed (non-fatal)');
     }
   }
 
@@ -109,21 +127,30 @@ export async function runCalendarSync(logger: Logger = {}): Promise<CalendarSync
   const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
   const thirtyDaysAhead = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
 
-  const { data: orphans, error: orphanErr } = await sb
-    .from('calendar_events')
-    .select('id, title, description, start_at, end_at, location, attendees')
-    .eq('source', 'created_here')
-    .is('google_event_id', null)
-    .gte('start_at', thirtyDaysAgo.toISOString())
-    .lte('start_at', thirtyDaysAhead.toISOString());
-
-  if (orphanErr) {
-    logger.warn?.({ orphanErr }, 'failed to query orphan events');
+  let orphans: Array<{
+    id: string; title: string; description: string | null; start_at: string;
+    end_at: string; location: string | null; attendees: unknown;
+  }> = [];
+  try {
+    orphans = await db.query.calendar_events.findMany({
+      columns: {
+        id: true, title: true, description: true, start_at: true,
+        end_at: true, location: true, attendees: true,
+      },
+      where: and(
+        eq(calendar_events.source, 'created_here'),
+        isNull(calendar_events.google_event_id),
+        gte(calendar_events.start_at, thirtyDaysAgo.toISOString()),
+        lte(calendar_events.start_at, thirtyDaysAhead.toISOString()),
+      ),
+    });
+  } catch (err) {
+    logger.warn?.({ err }, 'failed to query orphan events');
   }
 
   let pushedCount = 0;
   let pushFailures = 0;
-  for (const orphan of orphans ?? []) {
+  for (const orphan of orphans) {
     try {
       const attendees = Array.isArray(orphan.attendees)
         ? (orphan.attendees as Array<unknown>)
@@ -146,10 +173,10 @@ export async function runCalendarSync(logger: Logger = {}): Promise<CalendarSync
         attendees,
       });
       if (pushed?.id) {
-        await sb
-          .from('calendar_events')
-          .update({ google_event_id: pushed.id, synced_at: new Date().toISOString() })
-          .eq('id', orphan.id);
+        await db
+          .update(calendar_events)
+          .set({ google_event_id: pushed.id, synced_at: new Date().toISOString() })
+          .where(eq(calendar_events.id, orphan.id));
         pushedCount += 1;
       } else {
         pushFailures += 1;

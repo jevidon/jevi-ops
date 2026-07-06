@@ -1,4 +1,5 @@
 import type { FastifyPluginAsync } from 'fastify';
+import { and, asc, count, desc, eq } from 'drizzle-orm';
 import {
   CreateProjectSchema,
   UpdateProjectSchema,
@@ -8,54 +9,66 @@ import {
   UpdateProjectChecklistItemSchema,
 } from '@jevi-ops/shared/schemas';
 import { getAppTz } from '../lib/app-settings.js';
+import { getDb } from '../lib/db.js';
+import {
+  activity_log,
+  milestones,
+  project_checklist_items,
+  projects,
+  tasks,
+} from '../db/schema.js';
 
 export const projectRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', app.requireAuth);
 
-  app.get('/api/projects', async (req) => {
-    // Eager-load milestones and the most-recent-activity timestamp per
-    // project so the list page can sort by recency without a second query.
-    const { data, error } = await req.supabase!
-      .from('projects')
-      .select('*, milestones(*), domain:stewardship_domains(id, name)')
-      .order('created_at', { ascending: false });
-    if (error) throw app.httpErrors.internalServerError(error.message);
-    return { projects: data ?? [] };
+  app.get('/api/projects', async () => {
+    // Eager-load milestones + domain so the list page can render without a
+    // second query.
+    const rows = await getDb().query.projects.findMany({
+      with: {
+        milestones: true,
+        domain: { columns: { id: true, name: true } },
+      },
+      orderBy: desc(projects.created_at),
+    });
+    return { projects: rows };
   });
 
   // Project detail — used by /projects/[id] page.
   app.get<{ Params: { id: string } }>('/api/projects/:id', async (req, reply) => {
     const id = req.params.id;
-    const sb = req.supabase!;
+    const db = getDb();
 
-    const [projectRes, milestonesRes, tasksRes, activityRes, checklistRes] = await Promise.all([
-      sb
-        .from('projects')
-        .select('*, domain:stewardship_domains(id, name)')
-        .eq('id', id)
-        .maybeSingle(),
-      sb.from('milestones').select('*').eq('project_id', id).order('position', { ascending: true }),
-      sb.from('tasks').select('*').eq('project_id', id).order('created_at', { ascending: false }).limit(500),
-      sb.from('activity_log').select('*').eq('project_id', id).order('logged_at', { ascending: false }).limit(200),
-      sb.from('project_checklist_items').select('*').eq('project_id', id).order('position', { ascending: true }),
+    const [project, projectMilestones, projectTasks, activity, checklist] = await Promise.all([
+      db.query.projects.findFirst({
+        with: { domain: { columns: { id: true, name: true } } },
+        where: eq(projects.id, id),
+      }),
+      db.query.milestones.findMany({
+        where: eq(milestones.project_id, id),
+        orderBy: asc(milestones.position),
+      }),
+      db.query.tasks.findMany({
+        where: eq(tasks.project_id, id),
+        orderBy: desc(tasks.created_at),
+        limit: 500,
+      }),
+      db.query.activity_log.findMany({
+        where: eq(activity_log.project_id, id),
+        orderBy: desc(activity_log.logged_at),
+        limit: 200,
+      }),
+      db.query.project_checklist_items.findMany({
+        where: eq(project_checklist_items.project_id, id),
+        orderBy: asc(project_checklist_items.position),
+      }),
     ]);
 
-    if (projectRes.error) throw app.httpErrors.internalServerError(projectRes.error.message);
-    if (!projectRes.data) return reply.code(404).send({ error: 'not_found' });
-    if (milestonesRes.error) throw app.httpErrors.internalServerError(milestonesRes.error.message);
-    if (tasksRes.error) throw app.httpErrors.internalServerError(tasksRes.error.message);
-    if (activityRes.error) throw app.httpErrors.internalServerError(activityRes.error.message);
-    if (checklistRes.error) throw app.httpErrors.internalServerError(checklistRes.error.message);
+    if (!project) return reply.code(404).send({ error: 'not_found' });
 
     // Roll up this-month / last-month hours from activity_log. Calendar
-    // months in America/Denver; cheap to compute client-side from the
-    // already-fetched activity rows so we don't issue a second query.
-    type ActivityRow = {
-      hours_logged: number | string | null;
-      logged_at: string;
-      kind?: string | null;
-    };
-    const activity = (activityRes.data ?? []) as ActivityRow[];
+    // months in the app TZ; cheap to compute from the already-fetched
+    // activity rows so we don't issue a second query.
     const tz = await getAppTz();
     const todayParts = new Intl.DateTimeFormat('en-CA', {
       timeZone: tz,
@@ -84,11 +97,11 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
     }
 
     return {
-      project: projectRes.data,
-      milestones: milestonesRes.data ?? [],
-      tasks: tasksRes.data ?? [],
-      activity: activityRes.data ?? [],
-      checklist: checklistRes.data ?? [],
+      project,
+      milestones: projectMilestones,
+      tasks: projectTasks,
+      activity,
+      checklist,
       hours_this_month: Number(hoursThisMonth.toFixed(2)),
       hours_last_month: Number(hoursLastMonth.toFixed(2)),
     };
@@ -102,13 +115,9 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
         details: parsed.error.flatten().fieldErrors,
       });
     }
-    const { data, error } = await req.supabase!
-      .from('projects')
-      .insert(parsed.data)
-      .select('*')
-      .single();
-    if (error) throw app.httpErrors.internalServerError(error.message);
-    return reply.code(201).send(data);
+    const [row] = await getDb().insert(projects).values(parsed.data).returning();
+    if (!row) throw app.httpErrors.internalServerError('insert_returned_no_row');
+    return reply.code(201).send(row);
   });
 
   app.patch<{ Params: { id: string } }>('/api/projects/:id', async (req, reply) => {
@@ -119,7 +128,7 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
         details: parsed.error.flatten().fieldErrors,
       });
     }
-    const update: Record<string, unknown> = { ...parsed.data };
+    const update: Partial<typeof projects.$inferInsert> = { ...parsed.data };
     // Status flips stamp / clear completed_at so analytics never see a
     // stale finish on a project that's back in flight. Mirrors the
     // tasks PATCH handler. Archived keeps completed_at if it was set
@@ -129,25 +138,20 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
     } else if (parsed.data.status === 'active' || parsed.data.status === 'paused') {
       update.completed_at = null;
     }
-    const { data, error } = await req.supabase!
-      .from('projects')
-      .update(update)
-      .eq('id', req.params.id)
-      .select('*')
-      .single();
-    if (error) throw app.httpErrors.internalServerError(error.message);
-    return data;
+    const [row] = await getDb()
+      .update(projects)
+      .set(update)
+      .where(eq(projects.id, req.params.id))
+      .returning();
+    if (!row) return reply.code(404).send({ error: 'not_found' });
+    return row;
   });
 
   app.delete<{ Params: { id: string } }>('/api/projects/:id', async (req, reply) => {
     // tasks.project_id has ON DELETE SET NULL so child tasks are preserved
     // and just unlinked. Milestones cascade-delete via their FK. Activity
     // log entries lose their project_id but rows stick around.
-    const { error } = await req.supabase!
-      .from('projects')
-      .delete()
-      .eq('id', req.params.id);
-    if (error) throw app.httpErrors.internalServerError(error.message);
+    await getDb().delete(projects).where(eq(projects.id, req.params.id));
     return reply.code(204).send();
   });
 
@@ -165,27 +169,27 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
       if (!parsed.success) {
         return reply.code(400).send({ error: 'invalid_payload', details: parsed.error.flatten().fieldErrors });
       }
+      const db = getDb();
       // Default position = current count, i.e. append at end.
       let position = parsed.data.position;
       if (position == null) {
-        const { count } = await req.supabase!
-          .from('milestones')
-          .select('id', { count: 'exact', head: true })
-          .eq('project_id', req.params.id);
-        position = count ?? 0;
+        const [row] = await db
+          .select({ n: count() })
+          .from(milestones)
+          .where(eq(milestones.project_id, req.params.id));
+        position = row?.n ?? 0;
       }
-      const { data, error } = await req.supabase!
-        .from('milestones')
-        .insert({
+      const [row] = await db
+        .insert(milestones)
+        .values({
           project_id: req.params.id,
           title: parsed.data.title,
           weight: parsed.data.weight ?? 1,
           position,
         })
-        .select('*')
-        .single();
-      if (error) throw app.httpErrors.internalServerError(error.message);
-      return reply.code(201).send(data);
+        .returning();
+      if (!row) throw app.httpErrors.internalServerError('insert_returned_no_row');
+      return reply.code(201).send(row);
     },
   );
 
@@ -199,32 +203,27 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
       if (Object.keys(parsed.data).length === 0) {
         return reply.code(400).send({ error: 'empty_payload' });
       }
-      const update: Record<string, unknown> = { ...parsed.data };
+      const update: Partial<typeof milestones.$inferInsert> = { ...parsed.data };
       // Stamp/clear completed_at when the status flips, so the UI never
       // has to manage that field directly.
       if (parsed.data.status === 'done') update.completed_at = new Date().toISOString();
       if (parsed.data.status === 'open') update.completed_at = null;
-      const { data, error } = await req.supabase!
-        .from('milestones')
-        .update(update)
-        .eq('id', req.params.milestoneId)
-        .eq('project_id', req.params.id)
-        .select('*')
-        .single();
-      if (error) throw app.httpErrors.internalServerError(error.message);
-      return data;
+      const [row] = await getDb()
+        .update(milestones)
+        .set(update)
+        .where(and(eq(milestones.id, req.params.milestoneId), eq(milestones.project_id, req.params.id)))
+        .returning();
+      if (!row) return reply.code(404).send({ error: 'not_found' });
+      return row;
     },
   );
 
   app.delete<{ Params: { id: string; milestoneId: string } }>(
     '/api/projects/:id/milestones/:milestoneId',
     async (req, reply) => {
-      const { error } = await req.supabase!
-        .from('milestones')
-        .delete()
-        .eq('id', req.params.milestoneId)
-        .eq('project_id', req.params.id);
-      if (error) throw app.httpErrors.internalServerError(error.message);
+      await getDb()
+        .delete(milestones)
+        .where(and(eq(milestones.id, req.params.milestoneId), eq(milestones.project_id, req.params.id)));
       return reply.code(204).send();
     },
   );
@@ -243,26 +242,26 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
       if (!parsed.success) {
         return reply.code(400).send({ error: 'invalid_payload', details: parsed.error.flatten().fieldErrors });
       }
+      const db = getDb();
       let position = parsed.data.position;
       if (position == null) {
-        const { count } = await req.supabase!
-          .from('project_checklist_items')
-          .select('id', { count: 'exact', head: true })
-          .eq('project_id', req.params.id);
-        position = count ?? 0;
+        const [row] = await db
+          .select({ n: count() })
+          .from(project_checklist_items)
+          .where(eq(project_checklist_items.project_id, req.params.id));
+        position = row?.n ?? 0;
       }
-      const { data, error } = await req.supabase!
-        .from('project_checklist_items')
-        .insert({
+      const [row] = await db
+        .insert(project_checklist_items)
+        .values({
           project_id: req.params.id,
           title: parsed.data.title,
           position,
           recurrence_rule: parsed.data.recurrence_rule ?? null,
         })
-        .select('*')
-        .single();
-      if (error) throw app.httpErrors.internalServerError(error.message);
-      return reply.code(201).send(data);
+        .returning();
+      if (!row) throw app.httpErrors.internalServerError('insert_returned_no_row');
+      return reply.code(201).send(row);
     },
   );
 
@@ -273,30 +272,31 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
       if (!parsed.success) {
         return reply.code(400).send({ error: 'invalid_payload', details: parsed.error.flatten().fieldErrors });
       }
-      const update: Record<string, unknown> = { ...parsed.data };
+      const update: Partial<typeof project_checklist_items.$inferInsert> = { ...parsed.data };
       if (parsed.data.done === true) update.done_at = new Date().toISOString();
       if (parsed.data.done === false) update.done_at = null;
-      const { data, error } = await req.supabase!
-        .from('project_checklist_items')
-        .update(update)
-        .eq('id', req.params.itemId)
-        .eq('project_id', req.params.id)
-        .select('*')
-        .single();
-      if (error) throw app.httpErrors.internalServerError(error.message);
-      return data;
+      const [row] = await getDb()
+        .update(project_checklist_items)
+        .set(update)
+        .where(and(
+          eq(project_checklist_items.id, req.params.itemId),
+          eq(project_checklist_items.project_id, req.params.id),
+        ))
+        .returning();
+      if (!row) return reply.code(404).send({ error: 'not_found' });
+      return row;
     },
   );
 
   app.delete<{ Params: { id: string; itemId: string } }>(
     '/api/projects/:id/checklist/:itemId',
     async (req, reply) => {
-      const { error } = await req.supabase!
-        .from('project_checklist_items')
-        .delete()
-        .eq('id', req.params.itemId)
-        .eq('project_id', req.params.id);
-      if (error) throw app.httpErrors.internalServerError(error.message);
+      await getDb()
+        .delete(project_checklist_items)
+        .where(and(
+          eq(project_checklist_items.id, req.params.itemId),
+          eq(project_checklist_items.project_id, req.params.id),
+        ));
       return reply.code(204).send();
     },
   );
@@ -310,7 +310,7 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
   //
   // Race note: read-then-update on projects.hours_logged is fine because
   // this is a single-user system. If it ever becomes multi-writer, swap
-  // for an atomic RPC.
+  // for an atomic UPDATE ... SET x = x + delta.
 
   app.post<{ Params: { id: string }; Body: { entry?: string; hours?: number; logged_at?: string; kind?: string } }>(
     '/api/projects/:id/activity',
@@ -329,7 +329,8 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
           ? rawHours
           : null;
 
-      const insert: Record<string, unknown> = {
+      const db = getDb();
+      const insert: typeof activity_log.$inferInsert = {
         project_id: req.params.id,
         entry,
         source: 'manual',
@@ -338,35 +339,26 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
       if (hours !== null) insert.hours_logged = hours;
       if (req.body?.logged_at) insert.logged_at = req.body.logged_at;
 
-      const { data, error } = await req.supabase!
-        .from('activity_log')
-        .insert(insert)
-        .select('*')
-        .single();
-      if (error) throw app.httpErrors.internalServerError(error.message);
+      const [row] = await db.insert(activity_log).values(insert).returning();
+      if (!row) throw app.httpErrors.internalServerError('insert_returned_no_row');
 
       if (hours !== null && hours > 0) {
-        const { data: row, error: readErr } = await req.supabase!
-          .from('projects')
-          .select('hours_logged')
-          .eq('id', req.params.id)
-          .single();
-        if (!readErr) {
-          const current = Number(row?.hours_logged ?? 0);
-          const { error: updateErr } = await req.supabase!
-            .from('projects')
-            .update({ hours_logged: current + hours })
-            .eq('id', req.params.id);
-          if (updateErr) {
-            req.log.warn(
-              { err: updateErr.message, projectId: req.params.id, hours },
-              'activity log row landed but project hours_logged bump failed',
-            );
-          }
+        try {
+          const project = await db.query.projects.findFirst({
+            columns: { hours_logged: true },
+            where: eq(projects.id, req.params.id),
+          });
+          const current = Number(project?.hours_logged ?? 0);
+          await db.update(projects).set({ hours_logged: current + hours }).where(eq(projects.id, req.params.id));
+        } catch (err) {
+          req.log.warn(
+            { err: err instanceof Error ? err.message : String(err), projectId: req.params.id, hours },
+            'activity log row landed but project hours_logged bump failed',
+          );
         }
       }
 
-      return reply.code(201).send(data);
+      return reply.code(201).send(row);
     },
   );
 
@@ -376,19 +368,17 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
   }>(
     '/api/projects/:id/activity/:entryId',
     async (req, reply) => {
+      const db = getDb();
       // Read the existing row to compute the hours delta. If the user
       // changes 1.5h → 2.0h, projects.hours_logged must move +0.5; if
       // they clear hours entirely, it must roll back the old amount.
-      const { data: existing, error: readErr } = await req.supabase!
-        .from('activity_log')
-        .select('hours_logged')
-        .eq('id', req.params.entryId)
-        .eq('project_id', req.params.id)
-        .maybeSingle();
-      if (readErr) throw app.httpErrors.internalServerError(readErr.message);
+      const existing = await db.query.activity_log.findFirst({
+        columns: { hours_logged: true },
+        where: and(eq(activity_log.id, req.params.entryId), eq(activity_log.project_id, req.params.id)),
+      });
       if (!existing) return reply.code(404).send({ error: 'not_found' });
 
-      const update: Record<string, unknown> = {};
+      const update: Partial<typeof activity_log.$inferInsert> = {};
       if (typeof req.body?.entry === 'string') {
         const trimmed = req.body.entry.trim();
         if (!trimmed) {
@@ -427,14 +417,12 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
         return reply.code(400).send({ error: 'empty_payload' });
       }
 
-      const { data, error } = await req.supabase!
-        .from('activity_log')
-        .update(update)
-        .eq('id', req.params.entryId)
-        .eq('project_id', req.params.id)
-        .select('*')
-        .single();
-      if (error) throw app.httpErrors.internalServerError(error.message);
+      const [row] = await db
+        .update(activity_log)
+        .set(update)
+        .where(and(eq(activity_log.id, req.params.entryId), eq(activity_log.project_id, req.params.id)))
+        .returning();
+      if (!row) return reply.code(404).send({ error: 'not_found' });
 
       // Apply the hours delta to projects.hours_logged. Only runs when
       // the user actually touched the hours field (newHours !== undefined).
@@ -443,62 +431,53 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
         const effectiveNew = newHours ?? 0;
         const delta = effectiveNew - oldHours;
         if (delta !== 0) {
-          const { data: row } = await req.supabase!
-            .from('projects')
-            .select('hours_logged')
-            .eq('id', req.params.id)
-            .single();
-          const current = Number(row?.hours_logged ?? 0);
-          const next = Math.max(0, current + delta);
-          const { error: bumpErr } = await req.supabase!
-            .from('projects')
-            .update({ hours_logged: next })
-            .eq('id', req.params.id);
-          if (bumpErr) {
+          try {
+            const project = await db.query.projects.findFirst({
+              columns: { hours_logged: true },
+              where: eq(projects.id, req.params.id),
+            });
+            const current = Number(project?.hours_logged ?? 0);
+            const next = Math.max(0, current + delta);
+            await db.update(projects).set({ hours_logged: next }).where(eq(projects.id, req.params.id));
+          } catch (err) {
             req.log.warn(
-              { err: bumpErr.message, projectId: req.params.id, delta },
+              { err: err instanceof Error ? err.message : String(err), projectId: req.params.id, delta },
               'activity row updated but project hours_logged bump failed',
             );
           }
         }
       }
 
-      return data;
+      return row;
     },
   );
 
   app.delete<{ Params: { id: string; entryId: string } }>(
     '/api/projects/:id/activity/:entryId',
     async (req, reply) => {
+      const db = getDb();
       // Roll back the hours_logged contribution when an entry is deleted
       // so the rollup stays honest. Read the entry first, decrement only
       // if it had hours.
-      const { data: existing, error: readErr } = await req.supabase!
-        .from('activity_log')
-        .select('hours_logged')
-        .eq('id', req.params.entryId)
-        .eq('project_id', req.params.id)
-        .maybeSingle();
-      if (readErr) throw app.httpErrors.internalServerError(readErr.message);
+      const existing = await db.query.activity_log.findFirst({
+        columns: { hours_logged: true },
+        where: and(eq(activity_log.id, req.params.entryId), eq(activity_log.project_id, req.params.id)),
+      });
       if (!existing) return reply.code(404).send({ error: 'not_found' });
 
       const hours = Number(existing.hours_logged ?? 0);
-      const { error } = await req.supabase!
-        .from('activity_log')
-        .delete()
-        .eq('id', req.params.entryId)
-        .eq('project_id', req.params.id);
-      if (error) throw app.httpErrors.internalServerError(error.message);
+      await db
+        .delete(activity_log)
+        .where(and(eq(activity_log.id, req.params.entryId), eq(activity_log.project_id, req.params.id)));
 
       if (hours > 0) {
-        const { data: row } = await req.supabase!
-          .from('projects')
-          .select('hours_logged')
-          .eq('id', req.params.id)
-          .single();
-        const current = Number(row?.hours_logged ?? 0);
+        const project = await db.query.projects.findFirst({
+          columns: { hours_logged: true },
+          where: eq(projects.id, req.params.id),
+        });
+        const current = Number(project?.hours_logged ?? 0);
         const next = Math.max(0, current - hours);
-        await req.supabase!.from('projects').update({ hours_logged: next }).eq('id', req.params.id);
+        await db.update(projects).set({ hours_logged: next }).where(eq(projects.id, req.params.id));
       }
 
       return reply.code(204).send();

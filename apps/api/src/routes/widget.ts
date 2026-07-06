@@ -1,11 +1,12 @@
 import type { FastifyPluginAsync } from 'fastify';
+import { gt } from 'drizzle-orm';
 import { env } from '../lib/env.js';
-import { supabaseAdmin } from '../lib/supabase.js';
+import { getDb } from '../lib/db.js';
+import { quotes } from '../db/schema.js';
 
 // /api/widget/* — secret-gated read endpoints for external surfaces
 // (iOS Scriptable widgets, Android HTTP Shortcuts, etc.) that can't
-// carry a Supabase session. Service-role queries; the secret is the
-// only access control.
+// carry a session. The secret is the only access control.
 
 // Quote text gets truncated to this many chars before being returned so
 // long highlights don't blow out the widget card. Truncated at a word
@@ -49,32 +50,18 @@ export const widgetRoutes: FastifyPluginAsync = async (app) => {
         return reply.code(401).send({ error: 'unauthorized' });
       }
 
-      const sb = supabaseAdmin();
-
       // Pull every quote with resurface_weight > 0 plus its book join.
       // Personal library scale (~thousands at most); full scan is fine,
       // and it keeps the weighted pick logic in one place.
-      const { data, error } = await sb
-        .from('quotes')
-        .select('id, text, source_type, source_author, source_reference, source_url, resurface_weight, book:books(id, title, author, cover_image_url)')
-        .gt('resurface_weight', 0);
+      const rows = await getDb().query.quotes.findMany({
+        columns: {
+          id: true, text: true, source_type: true, source_author: true,
+          source_reference: true, source_url: true, resurface_weight: true,
+        },
+        with: { book: { columns: { id: true, title: true, author: true, cover_image_url: true } } },
+        where: gt(quotes.resurface_weight, 0),
+      });
 
-      if (error) {
-        req.log.error({ err: error }, 'widget quote query failed');
-        return reply.code(500).send({ error: 'query_failed', message: error.message });
-      }
-
-      type Row = {
-        id: string;
-        text: string;
-        source_type: string | null;
-        source_author: string | null;
-        source_reference: string | null;
-        source_url: string | null;
-        resurface_weight: number | string;
-        book: BookInfo | BookInfo[] | null;
-      };
-      const rows = (data ?? []) as Row[];
       if (rows.length === 0) {
         return reply.code(200).send({ item: null });
       }
@@ -85,7 +72,7 @@ export const widgetRoutes: FastifyPluginAsync = async (app) => {
       if (totalWeight <= 0) return reply.code(200).send({ item: null });
       const pickAt = Math.random() * totalWeight;
       let acc = 0;
-      let chosen: Row = rows[0]!;
+      let chosen = rows[0]!;
       for (const r of rows) {
         acc += Number(r.resurface_weight ?? 1);
         if (acc >= pickAt) {
@@ -94,12 +81,11 @@ export const widgetRoutes: FastifyPluginAsync = async (app) => {
         }
       }
 
-      const bookJoin = Array.isArray(chosen.book) ? chosen.book[0] ?? null : chosen.book ?? null;
-      // Tap-through target. Prefer WEB_PUBLIC_URL (explicit "the public
-      // origin of the web app") since that's unambiguous. Don't read
-      // CORS_ORIGINS — that often lists localhost first for dev and we
-      // can't tell prod from dev by string-sniffing.
-      const dashboardOrigin = (env.WEB_PUBLIC_URL ?? 'https://dashboard.jeradhill.com').replace(/\/$/, '');
+      // Tap-through target. WEB_PUBLIC_URL is the explicit "public origin
+      // of the web app". Don't read CORS_ORIGINS — that often lists
+      // localhost first for dev and we can't tell prod from dev by
+      // string-sniffing.
+      const dashboardOrigin = (env.WEB_PUBLIC_URL ?? env.WEB_APP_URL).replace(/\/$/, '');
 
       const payload: { item: WidgetQuote } = {
         item: {
@@ -109,12 +95,12 @@ export const widgetRoutes: FastifyPluginAsync = async (app) => {
           source_author: chosen.source_author ?? null,
           source_reference: chosen.source_reference ?? null,
           source_url: chosen.source_url ?? null,
-          book: bookJoin
+          book: chosen.book
             ? {
-                id: bookJoin.id,
-                title: bookJoin.title,
-                author: bookJoin.author ?? null,
-                cover_image_url: bookJoin.cover_image_url ?? null,
+                id: chosen.book.id,
+                title: chosen.book.title,
+                author: chosen.book.author ?? null,
+                cover_image_url: chosen.book.cover_image_url ?? null,
               }
             : null,
           href: `${dashboardOrigin}/library/quotes/${chosen.id}`,

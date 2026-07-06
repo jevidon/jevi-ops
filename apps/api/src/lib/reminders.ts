@@ -1,6 +1,8 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
+import { and, eq, inArray, isNotNull } from 'drizzle-orm';
 import { sendPushover, isPushoverConfigured } from './pushover.js';
 import { env } from './env.js';
+import type { Db } from './db.js';
+import { tasks as tasksTable } from '../db/schema.js';
 
 // Reminder runner — called by /api/cron/reminders every minute. Finds open
 // tasks whose due time + a reminder_offset has just passed, sends a
@@ -35,7 +37,7 @@ export interface ReminderRunResult {
   failed: number;
 }
 
-export async function runReminders(sb: SupabaseClient): Promise<ReminderRunResult> {
+export async function runReminders(db: Db): Promise<ReminderRunResult> {
   if (!isPushoverConfigured()) {
     return { considered: 0, dispatched: 0, failed: 0 };
   }
@@ -51,21 +53,19 @@ export async function runReminders(sb: SupabaseClient): Promise<ReminderRunResul
     isoDate(addDays(now, 1)),
   ];
 
-  const { data, error } = await sb
-    .from('tasks')
-    .select('id, title, status, priority, due_date, due_time, reminder_offsets, reminders_sent, project:projects(name)')
-    .eq('status', 'open')
-    .not('due_time', 'is', null)
-    .in('due_date', dates)
-    .limit(500);
-  if (error) throw new Error(`tasks query failed: ${error.message}`);
-
-  // Supabase types FK joins as arrays even when single. Normalize to single.
-  const tasks = ((data ?? []) as unknown as Array<Omit<DueTask, 'project'> & { project: { name: string | null } | { name: string | null }[] | null }>)
-    .map((t) => ({
-      ...t,
-      project: Array.isArray(t.project) ? (t.project[0] ?? null) : t.project,
-    })) as DueTask[];
+  const tasks: DueTask[] = await db.query.tasks.findMany({
+    columns: {
+      id: true, title: true, status: true, priority: true,
+      due_date: true, due_time: true, reminder_offsets: true, reminders_sent: true,
+    },
+    with: { project: { columns: { name: true } } },
+    where: and(
+      eq(tasksTable.status, 'open'),
+      isNotNull(tasksTable.due_time),
+      inArray(tasksTable.due_date, dates),
+    ),
+    limit: 500,
+  });
 
   let dispatched = 0;
   let failed = 0;
@@ -118,11 +118,11 @@ export async function runReminders(sb: SupabaseClient): Promise<ReminderRunResul
     }
 
     if (touched) {
-      const { error: updErr } = await sb
-        .from('tasks')
-        .update({ reminders_sent: newSent })
-        .eq('id', t.id);
-      if (updErr) failed += 1;
+      try {
+        await db.update(tasksTable).set({ reminders_sent: newSent }).where(eq(tasksTable.id, t.id));
+      } catch {
+        failed += 1;
+      }
     }
   }
 

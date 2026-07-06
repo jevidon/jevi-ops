@@ -1,13 +1,15 @@
 import { google } from 'googleapis';
 import type { OAuth2Client, Credentials } from 'google-auth-library';
 import type { calendar_v3 } from 'googleapis';
+import { desc, eq } from 'drizzle-orm';
 import { env } from './env.js';
-import { supabaseAdmin } from './supabase.js';
+import { getDb } from './db.js';
+import { google_oauth_tokens } from '../db/schema.js';
 import { getAppTz } from './app-settings.js';
 
 // Google OAuth + Calendar wrapper. Tokens are stored in google_oauth_tokens
-// (single row, single-user system). All access goes through the
-// service-role Supabase client — tokens never leave the API process.
+// (single row, single-user system). Access goes through the API's direct
+// DB connection — tokens never leave the API process.
 
 // ─── OAuth client (used by /api/auth/google routes) ──────────────────────
 
@@ -50,14 +52,10 @@ interface StoredTokens {
 }
 
 export async function loadTokens(): Promise<StoredTokens | null> {
-  const { data, error } = await supabaseAdmin()
-    .from('google_oauth_tokens')
-    .select('*')
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (error) throw new Error(`failed to load google tokens: ${error.message}`);
-  return data ?? null;
+  const row = await getDb().query.google_oauth_tokens.findFirst({
+    orderBy: desc(google_oauth_tokens.created_at),
+  });
+  return row ?? null;
 }
 
 export async function saveTokens(creds: Credentials): Promise<void> {
@@ -72,34 +70,31 @@ export async function saveTokens(creds: Credentials): Promise<void> {
   };
 
   const existing = await loadTokens();
-  const sb = supabaseAdmin();
+  const db = getDb();
   if (existing) {
     // Refresh tokens come back only on the first consent — preserve the
     // stored one if a refresh response omits it.
-    const update: Record<string, unknown> = { ...row };
+    const update = { ...row };
     if (!row.refresh_token && existing.refresh_token) {
       update.refresh_token = existing.refresh_token;
     }
-    const { error } = await sb.from('google_oauth_tokens').update(update).eq('id', existing.id);
-    if (error) throw new Error(`failed to update google tokens: ${error.message}`);
+    await db.update(google_oauth_tokens).set(update).where(eq(google_oauth_tokens.id, existing.id));
   } else {
-    const { error } = await sb.from('google_oauth_tokens').insert(row);
-    if (error) throw new Error(`failed to insert google tokens: ${error.message}`);
+    await db.insert(google_oauth_tokens).values(row);
   }
 }
 
 export async function clearTokens(): Promise<void> {
-  const { error } = await supabaseAdmin().from('google_oauth_tokens').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-  if (error) throw new Error(`failed to clear google tokens: ${error.message}`);
+  await getDb().delete(google_oauth_tokens);
 }
 
 export async function markSynced(): Promise<void> {
   const existing = await loadTokens();
   if (!existing) return;
-  await supabaseAdmin()
-    .from('google_oauth_tokens')
-    .update({ last_synced_at: new Date().toISOString() })
-    .eq('id', existing.id);
+  await getDb()
+    .update(google_oauth_tokens)
+    .set({ last_synced_at: new Date().toISOString() })
+    .where(eq(google_oauth_tokens.id, existing.id));
 }
 
 // ─── Authenticated client factory (with auto-refresh) ───────────────────

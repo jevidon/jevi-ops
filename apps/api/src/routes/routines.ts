@@ -1,9 +1,12 @@
 import type { FastifyPluginAsync } from 'fastify';
+import { and, asc, count, desc, eq, sql } from 'drizzle-orm';
 import {
   CreateRoutineSchema, UpdateRoutineSchema, ToggleCompletionSchema,
 } from '@jevi-ops/shared/schemas';
 import { computeRoutineStats } from '@jevi-ops/shared';
 import { getAppTz } from '../lib/app-settings.js';
+import { getDb } from '../lib/db.js';
+import { routine_completions, routines } from '../db/schema.js';
 
 // Routines + completions. Daily habits (read Bible, take meds…) live
 // here instead of in tasks because they have different semantics — no
@@ -11,10 +14,9 @@ import { getAppTz } from '../lib/app-settings.js';
 // implicit: "did I do it today" is just "does a completion row exist
 // for today's date".
 
-// Build a YYYY-MM-DD for "today" in America/Denver. Same TZ pin as the
-// rest of the app. Doing this server-side keeps every consumer (today
-// widget, routines list, daily summary cron) agreeing on what "today"
-// means.
+// Build a YYYY-MM-DD for "today" in the app TZ. Doing this server-side
+// keeps every consumer (today widget, routines list, daily summary cron)
+// agreeing on what "today" means.
 function todayIso(tz: string): string {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: tz,
@@ -48,26 +50,18 @@ export const routineRoutes: FastifyPluginAsync = async (app) => {
     '/api/routines',
     async (req) => {
       const includeArchived = req.query.include_archived === 'true';
-      let q = req.supabase!
-        .from('routines')
-        .select('*, completions:routine_completions(completed_date)')
-        .order('position', { ascending: true })
-        .order('created_at', { ascending: true });
-      if (!includeArchived) q = q.eq('active', true);
-      const { data, error } = await q;
-      if (error) throw app.httpErrors.internalServerError(error.message);
+      const rows = await getDb().query.routines.findMany({
+        with: { completions: { columns: { completed_date: true } } },
+        where: includeArchived ? undefined : eq(routines.active, true),
+        orderBy: [asc(routines.position), asc(routines.created_at)],
+      });
 
       const tz = await getAppTz();
       const today = todayIso(tz);
       const cutoff = lookbackIso(COMPLETIONS_WINDOW_DAYS, tz);
-      type Row = {
-        id: string;
-        completions?: { completed_date: string }[];
-        [k: string]: unknown;
-      };
-      const routines = ((data ?? []) as Row[]).map((r) => {
-        // Trim the embedded completions to our window. Supabase's nested
-        // select doesn't accept a filter, so we filter in JS.
+      const routineRows = rows.map((r) => {
+        // Trim the embedded completions to our window (filter in JS —
+        // matches the pre-fork response shape).
         const dates = (r.completions ?? [])
           .map((c) => c.completed_date)
           .filter((d) => d >= cutoff);
@@ -79,29 +73,31 @@ export const routineRoutes: FastifyPluginAsync = async (app) => {
           stats,
         };
       });
-      return { routines, today };
+      return { routines: routineRows, today };
     },
   );
 
   app.get<{ Params: { id: string } }>('/api/routines/:id', async (req, reply) => {
     const id = req.params.id;
-    const sb = req.supabase!;
-    const [routineRes, completionsRes] = await Promise.all([
-      sb.from('routines').select('*').eq('id', id).maybeSingle(),
+    const db = getDb();
+    const [routine, completions] = await Promise.all([
+      db.query.routines.findFirst({ where: eq(routines.id, id) }),
       // Pull ALL completions for the detail view — the heatmap is 30d
       // but lifetime stats need the full history. We don't paginate;
       // even at one row/day for 10 years that's <4000 rows.
-      sb.from('routine_completions').select('completed_date').eq('routine_id', id).order('completed_date', { ascending: false }),
+      db.query.routine_completions.findMany({
+        columns: { completed_date: true },
+        where: eq(routine_completions.routine_id, id),
+        orderBy: desc(routine_completions.completed_date),
+      }),
     ]);
-    if (routineRes.error) throw app.httpErrors.internalServerError(routineRes.error.message);
-    if (!routineRes.data) return reply.code(404).send({ error: 'not_found' });
-    if (completionsRes.error) throw app.httpErrors.internalServerError(completionsRes.error.message);
+    if (!routine) return reply.code(404).send({ error: 'not_found' });
 
     const tz = await getAppTz();
     const today = todayIso(tz);
-    const dates = (completionsRes.data ?? []).map((c) => c.completed_date);
+    const dates = completions.map((c) => c.completed_date);
     return {
-      routine: routineRes.data,
+      routine,
       completions: dates,
       stats: computeRoutineStats(dates, today),
       today,
@@ -113,16 +109,14 @@ export const routineRoutes: FastifyPluginAsync = async (app) => {
     if (!parsed.success) {
       return reply.code(400).send({ error: 'invalid_payload', details: parsed.error.flatten().fieldErrors });
     }
+    const db = getDb();
     // Default position = end of the active list, so new routines append.
     let position = parsed.data.position;
     if (position == null) {
-      const { count } = await req.supabase!
-        .from('routines')
-        .select('id', { count: 'exact', head: true })
-        .eq('active', true);
-      position = count ?? 0;
+      const [row] = await db.select({ n: count() }).from(routines).where(eq(routines.active, true));
+      position = row?.n ?? 0;
     }
-    const insert: Record<string, unknown> = {
+    const insert: typeof routines.$inferInsert = {
       name: parsed.data.name,
       description: parsed.data.description,
       position,
@@ -139,13 +133,9 @@ export const routineRoutes: FastifyPluginAsync = async (app) => {
     } else if (parsed.data.reminder_enabled === false) {
       insert.reminder_enabled = false;
     }
-    const { data, error } = await req.supabase!
-      .from('routines')
-      .insert(insert)
-      .select('*')
-      .single();
-    if (error) throw app.httpErrors.internalServerError(error.message);
-    return reply.code(201).send(data);
+    const [row] = await db.insert(routines).values(insert).returning();
+    if (!row) throw app.httpErrors.internalServerError('insert_returned_no_row');
+    return reply.code(201).send(row);
   });
 
   app.patch<{ Params: { id: string } }>('/api/routines/:id', async (req, reply) => {
@@ -156,7 +146,8 @@ export const routineRoutes: FastifyPluginAsync = async (app) => {
     if (Object.keys(parsed.data).length === 0) {
       return reply.code(400).send({ error: 'empty_payload' });
     }
-    const update: Record<string, unknown> = { ...parsed.data };
+    const db = getDb();
+    const update: Partial<typeof routines.$inferInsert> = { ...parsed.data };
     // Reminders require a specific_time. If the caller is clearing
     // specific_time (sending null), also disable reminders — otherwise
     // we'd have a row that says "remind me at null o'clock" which the
@@ -173,29 +164,26 @@ export const routineRoutes: FastifyPluginAsync = async (app) => {
     ) {
       // Look up the existing row to see if it has a specific_time we can
       // pair the reminder with.
-      const { data: existing } = await req.supabase!
-        .from('routines')
-        .select('specific_time')
-        .eq('id', req.params.id)
-        .maybeSingle();
+      const existing = await db.query.routines.findFirst({
+        columns: { specific_time: true },
+        where: eq(routines.id, req.params.id),
+      });
       if (!existing?.specific_time) update.reminder_enabled = false;
     }
-    const { data, error } = await req.supabase!
-      .from('routines')
-      .update(update)
-      .eq('id', req.params.id)
-      .select('*')
-      .single();
-    if (error) throw app.httpErrors.internalServerError(error.message);
-    return data;
+    const [row] = await db
+      .update(routines)
+      .set(update)
+      .where(eq(routines.id, req.params.id))
+      .returning();
+    if (!row) return reply.code(404).send({ error: 'not_found' });
+    return row;
   });
 
   app.delete<{ Params: { id: string } }>('/api/routines/:id', async (req, reply) => {
     // Hard delete cascades to completions. The UI nudges toward soft
     // delete (archive — sets active=false) so streak history is preserved
     // when you re-activate.
-    const { error } = await req.supabase!.from('routines').delete().eq('id', req.params.id);
-    if (error) throw app.httpErrors.internalServerError(error.message);
+    await getDb().delete(routines).where(eq(routines.id, req.params.id));
     return reply.code(204).send();
   });
 
@@ -205,9 +193,9 @@ export const routineRoutes: FastifyPluginAsync = async (app) => {
   //   done=true  (default) → upsert row, no-op if it already exists
   //   done=false           → delete row
   //
-  // We use upsert with ignoreDuplicates so the API stays idempotent —
-  // checking a checked routine is a 200 with the existing row, not an
-  // error. The web client can fire and forget without checking state.
+  // Upsert keeps the API idempotent — checking a checked routine is a 200
+  // with the existing row, not an error. The web client can fire and
+  // forget without checking state.
 
   app.post<{ Params: { id: string } }>(
     '/api/routines/:id/completions',
@@ -219,53 +207,57 @@ export const routineRoutes: FastifyPluginAsync = async (app) => {
       const tz = await getAppTz();
       const date = parsed.data.date ?? todayIso(tz);
       const done = parsed.data.done !== false;
+      const db = getDb();
 
       if (done) {
-        const { data, error } = await req.supabase!
-          .from('routine_completions')
-          .upsert(
-            { routine_id: req.params.id, completed_date: date },
-            { onConflict: 'routine_id,completed_date', ignoreDuplicates: false },
-          )
-          .select('*')
-          .single();
-        if (error) throw app.httpErrors.internalServerError(error.message);
+        const [row] = await db
+          .insert(routine_completions)
+          .values({ routine_id: req.params.id, completed_date: date })
+          .onConflictDoUpdate({
+            target: [routine_completions.routine_id, routine_completions.completed_date],
+            set: { completed_date: sql`excluded.completed_date` },
+          })
+          .returning();
+        if (!row) throw app.httpErrors.internalServerError('upsert_returned_no_row');
 
         // If this routine has a goal AND isn't already archived AND
         // the current streak just hit/crossed the goal, auto-archive it.
         // The client gets `archived: true` in the response so it can show
         // a celebratory state.
         let archived = false;
-        const { data: r } = await req.supabase!
-          .from('routines')
-          .select('goal_days, archived_at')
-          .eq('id', req.params.id)
-          .maybeSingle();
+        const r = await db.query.routines.findFirst({
+          columns: { goal_days: true, archived_at: true },
+          where: eq(routines.id, req.params.id),
+        });
         if (r?.goal_days && !r.archived_at) {
-          const { data: completions } = await req.supabase!
-            .from('routine_completions')
-            .select('completed_date')
-            .eq('routine_id', req.params.id)
-            .order('completed_date', { ascending: false })
-            .limit(r.goal_days + 30);
-          const dates = (completions ?? []).map((c) => c.completed_date);
+          const completions = await db.query.routine_completions.findMany({
+            columns: { completed_date: true },
+            where: eq(routine_completions.routine_id, req.params.id),
+            orderBy: desc(routine_completions.completed_date),
+            limit: r.goal_days + 30,
+          });
+          const dates = completions.map((c) => c.completed_date);
           const stats = computeRoutineStats(dates, todayIso(tz));
           if (stats.current_streak >= r.goal_days) {
-            const { error: archiveErr } = await req.supabase!
-              .from('routines')
-              .update({ active: false, archived_at: new Date().toISOString() })
-              .eq('id', req.params.id);
-            if (!archiveErr) archived = true;
+            try {
+              await db
+                .update(routines)
+                .set({ active: false, archived_at: new Date().toISOString() })
+                .where(eq(routines.id, req.params.id));
+              archived = true;
+            } catch {
+              /* best-effort — the completion row is what matters */
+            }
           }
         }
-        return reply.code(201).send({ ...data, archived });
+        return reply.code(201).send({ ...row, archived });
       } else {
-        const { error } = await req.supabase!
-          .from('routine_completions')
-          .delete()
-          .eq('routine_id', req.params.id)
-          .eq('completed_date', date);
-        if (error) throw app.httpErrors.internalServerError(error.message);
+        await db
+          .delete(routine_completions)
+          .where(and(
+            eq(routine_completions.routine_id, req.params.id),
+            eq(routine_completions.completed_date, date),
+          ));
         return reply.code(204).send();
       }
     },

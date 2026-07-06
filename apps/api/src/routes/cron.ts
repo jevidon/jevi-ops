@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { timingSafeEqual } from 'node:crypto';
 import { env } from '../lib/env.js';
-import { supabaseAdmin, isSupabaseConfigured } from '../lib/supabase.js';
+import { getDb, isDatabaseConfigured } from '../lib/db.js';
 import { runObservations } from '../lib/observations.js';
 import { runReminders } from '../lib/reminders.js';
 import { runRoutineReminders, runRoutineMissed } from '../lib/routine-reminders.js';
@@ -12,8 +12,7 @@ import { isPushoverConfigured } from '../lib/pushover.js';
 
 // /api/cron/* — secret-gated endpoints external schedulers hit on a cadence.
 // Same shape as /api/ingest: shared secret in a header, timingSafeEqual
-// comparison, service-role Supabase client (cron isn't a user-authenticated
-// context).
+// comparison, direct db handle (cron isn't a user-authenticated context).
 
 function checkSecret(provided: string | undefined): boolean {
   const expected = env.CRON_SECRET;
@@ -51,12 +50,12 @@ export const cronRoutes: FastifyPluginAsync = async (app) => {
     if (!checkSecret(readSecret(req))) {
       return reply.code(401).send({ error: 'unauthorized' });
     }
-    if (!isSupabaseConfigured()) {
-      return reply.code(503).send({ error: 'supabase_not_configured' });
+    if (!isDatabaseConfigured()) {
+      return reply.code(503).send({ error: 'database_not_configured' });
     }
 
     try {
-      const result = await runObservations(supabaseAdmin());
+      const result = await runObservations(getDb());
       req.log.info({ event: 'observations_run', ...result }, 'observations cron complete');
       return reply.code(200).send(result);
     } catch (err) {
@@ -83,8 +82,8 @@ export const cronRoutes: FastifyPluginAsync = async (app) => {
     if (!checkSecret(readSecret(req))) {
       return reply.code(401).send({ error: 'unauthorized' });
     }
-    if (!isSupabaseConfigured()) {
-      return reply.code(503).send({ error: 'supabase_not_configured' });
+    if (!isDatabaseConfigured()) {
+      return reply.code(503).send({ error: 'database_not_configured' });
     }
     if (!isPushoverConfigured()) {
       // Soft-disable rather than hard-fail — the user may not have set
@@ -97,11 +96,11 @@ export const cronRoutes: FastifyPluginAsync = async (app) => {
       // sweep. Routines piggyback on the existing per-minute cron rather
       // than adding a second job — all three queries are cheap and the
       // domains are independent.
-      const sb = supabaseAdmin();
+      const db = getDb();
       const [tasks, routines, missed] = await Promise.allSettled([
-        runReminders(sb),
-        runRoutineReminders(sb),
-        runRoutineMissed(sb),
+        runReminders(db),
+        runRoutineReminders(db),
+        runRoutineMissed(db),
       ]);
 
       const taskResult = tasks.status === 'fulfilled'
@@ -151,15 +150,15 @@ export const cronRoutes: FastifyPluginAsync = async (app) => {
     if (!checkSecret(readSecret(req))) {
       return reply.code(401).send({ error: 'unauthorized' });
     }
-    if (!isSupabaseConfigured()) {
-      return reply.code(503).send({ error: 'supabase_not_configured' });
+    if (!isDatabaseConfigured()) {
+      return reply.code(503).send({ error: 'database_not_configured' });
     }
     if (!isPushoverConfigured()) {
       return reply.code(200).send({ skipped: 'pushover_not_configured' });
     }
 
     try {
-      const result = await runDailySummary(supabaseAdmin());
+      const result = await runDailySummary(getDb());
       req.log.info({ event: 'daily_summary_run', ...result }, 'daily summary cron complete');
       return reply.code(200).send(result);
     } catch (err) {
@@ -183,15 +182,15 @@ export const cronRoutes: FastifyPluginAsync = async (app) => {
     if (!checkSecret(readSecret(req))) {
       return reply.code(401).send({ error: 'unauthorized' });
     }
-    if (!isSupabaseConfigured()) {
-      return reply.code(503).send({ error: 'supabase_not_configured' });
+    if (!isDatabaseConfigured()) {
+      return reply.code(503).send({ error: 'database_not_configured' });
     }
     if (!isPushoverConfigured()) {
       return reply.code(200).send({ skipped: 'pushover_not_configured' });
     }
 
     try {
-      const result = await runOverdue(supabaseAdmin());
+      const result = await runOverdue(getDb());
       if (result.dispatched > 0 || result.failed > 0) {
         req.log.info({ event: 'overdue_run', ...result }, 'overdue cron dispatched');
       }
@@ -222,8 +221,8 @@ export const cronRoutes: FastifyPluginAsync = async (app) => {
     if (!checkSecret(readSecret(req))) {
       return reply.code(401).send({ error: 'unauthorized' });
     }
-    if (!isSupabaseConfigured()) {
-      return reply.code(503).send({ error: 'supabase_not_configured' });
+    if (!isDatabaseConfigured()) {
+      return reply.code(503).send({ error: 'database_not_configured' });
     }
 
     try {

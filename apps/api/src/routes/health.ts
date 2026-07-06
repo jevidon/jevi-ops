@@ -1,4 +1,5 @@
 import type { FastifyPluginAsync } from 'fastify';
+import { and, asc, desc, eq, gte, inArray, lte, type SQL } from 'drizzle-orm';
 import {
   CreateHealthVisitSchema, UpdateHealthVisitSchema,
   CreateHealthMetricSchema, UpdateHealthMetricSchema,
@@ -7,6 +8,17 @@ import {
   CreateMedicationSchema, UpdateMedicationSchema,
   UpdateHealthHistorySchema,
 } from '@jevi-ops/shared/schemas';
+import { getDb } from '../lib/db.js';
+import {
+  health_documents,
+  health_history,
+  health_metrics,
+  health_visits,
+  lab_panels,
+  lab_results,
+  medications,
+  wellbeing_check_ins,
+} from '../db/schema.js';
 
 // /api/health/* — CRUD for the personal health record (see migration 0024).
 //
@@ -18,33 +30,33 @@ export const healthRoutes: FastifyPluginAsync = async (app) => {
 
   // ─── Visits ────────────────────────────────────────────────────────────
 
-  app.get('/api/health/visits', async (req) => {
-    const { data, error } = await req.supabase!
-      .from('health_visits')
-      .select('*')
-      .order('visit_date', { ascending: false })
-      .order('created_at', { ascending: false })
-      .limit(500);
-    if (error) throw app.httpErrors.internalServerError(error.message);
-    return { visits: data ?? [] };
+  app.get('/api/health/visits', async () => {
+    const visits = await getDb().query.health_visits.findMany({
+      orderBy: [desc(health_visits.visit_date), desc(health_visits.created_at)],
+      limit: 500,
+    });
+    return { visits };
   });
 
   app.get<{ Params: { id: string } }>('/api/health/visits/:id', async (req, reply) => {
-    const sb = req.supabase!;
-    const [visitRes, metricsRes, panelsRes, docsRes] = await Promise.all([
-      sb.from('health_visits').select('*').eq('id', req.params.id).maybeSingle(),
-      sb.from('health_metrics').select('*').eq('visit_id', req.params.id).order('measured_at'),
-      sb.from('lab_panels').select('*').eq('visit_id', req.params.id).order('drawn_date'),
-      sb.from('health_documents').select('*').eq('visit_id', req.params.id).order('uploaded_at'),
+    const db = getDb();
+    const [visit, metrics, panels, documents] = await Promise.all([
+      db.query.health_visits.findFirst({ where: eq(health_visits.id, req.params.id) }),
+      db.query.health_metrics.findMany({
+        where: eq(health_metrics.visit_id, req.params.id),
+        orderBy: asc(health_metrics.measured_at),
+      }),
+      db.query.lab_panels.findMany({
+        where: eq(lab_panels.visit_id, req.params.id),
+        orderBy: asc(lab_panels.drawn_date),
+      }),
+      db.query.health_documents.findMany({
+        where: eq(health_documents.visit_id, req.params.id),
+        orderBy: asc(health_documents.uploaded_at),
+      }),
     ]);
-    if (visitRes.error) throw app.httpErrors.internalServerError(visitRes.error.message);
-    if (!visitRes.data) return reply.code(404).send({ error: 'not_found' });
-    return {
-      visit: visitRes.data,
-      metrics: metricsRes.data ?? [],
-      panels: panelsRes.data ?? [],
-      documents: docsRes.data ?? [],
-    };
+    if (!visit) return reply.code(404).send({ error: 'not_found' });
+    return { visit, metrics, panels, documents };
   });
 
   app.post('/api/health/visits', async (req, reply) => {
@@ -52,13 +64,9 @@ export const healthRoutes: FastifyPluginAsync = async (app) => {
     if (!parsed.success) {
       return reply.code(400).send({ error: 'invalid_payload', details: parsed.error.flatten().fieldErrors });
     }
-    const { data, error } = await req.supabase!
-      .from('health_visits')
-      .insert(parsed.data)
-      .select('*')
-      .single();
-    if (error) throw app.httpErrors.internalServerError(error.message);
-    return reply.code(201).send(data);
+    const [row] = await getDb().insert(health_visits).values(parsed.data).returning();
+    if (!row) throw app.httpErrors.internalServerError('insert_returned_no_row');
+    return reply.code(201).send(row);
   });
 
   app.patch<{ Params: { id: string } }>('/api/health/visits/:id', async (req, reply) => {
@@ -69,19 +77,17 @@ export const healthRoutes: FastifyPluginAsync = async (app) => {
     if (Object.keys(parsed.data).length === 0) {
       return reply.code(400).send({ error: 'empty_payload' });
     }
-    const { data, error } = await req.supabase!
-      .from('health_visits')
-      .update(parsed.data)
-      .eq('id', req.params.id)
-      .select('*')
-      .single();
-    if (error) throw app.httpErrors.internalServerError(error.message);
-    return data;
+    const [row] = await getDb()
+      .update(health_visits)
+      .set(parsed.data)
+      .where(eq(health_visits.id, req.params.id))
+      .returning();
+    if (!row) return reply.code(404).send({ error: 'not_found' });
+    return row;
   });
 
   app.delete<{ Params: { id: string } }>('/api/health/visits/:id', async (req, reply) => {
-    const { error } = await req.supabase!.from('health_visits').delete().eq('id', req.params.id);
-    if (error) throw app.httpErrors.internalServerError(error.message);
+    await getDb().delete(health_visits).where(eq(health_visits.id, req.params.id));
     return reply.code(204).send();
   });
 
@@ -91,18 +97,17 @@ export const healthRoutes: FastifyPluginAsync = async (app) => {
     '/api/health/metrics',
     async (req) => {
       const limit = Math.min(parseInt(req.query.limit ?? '500', 10) || 500, 5000);
-      let q = req.supabase!
-        .from('health_metrics')
-        .select('*')
-        .order('measured_at', { ascending: false })
-        .limit(limit);
-      if (req.query.metric) q = q.eq('metric', req.query.metric);
-      if (req.query.source) q = q.eq('source', req.query.source);
-      if (req.query.from) q = q.gte('measured_at', req.query.from);
-      if (req.query.to) q = q.lte('measured_at', req.query.to);
-      const { data, error } = await q;
-      if (error) throw app.httpErrors.internalServerError(error.message);
-      return { metrics: data ?? [] };
+      const conds: SQL[] = [];
+      if (req.query.metric) conds.push(eq(health_metrics.metric, req.query.metric));
+      if (req.query.source) conds.push(eq(health_metrics.source, req.query.source));
+      if (req.query.from) conds.push(gte(health_metrics.measured_at, req.query.from));
+      if (req.query.to) conds.push(lte(health_metrics.measured_at, req.query.to));
+      const metrics = await getDb().query.health_metrics.findMany({
+        where: conds.length ? and(...conds) : undefined,
+        orderBy: desc(health_metrics.measured_at),
+        limit,
+      });
+      return { metrics };
     },
   );
 
@@ -111,13 +116,9 @@ export const healthRoutes: FastifyPluginAsync = async (app) => {
     if (!parsed.success) {
       return reply.code(400).send({ error: 'invalid_payload', details: parsed.error.flatten().fieldErrors });
     }
-    const { data, error } = await req.supabase!
-      .from('health_metrics')
-      .insert(parsed.data)
-      .select('*')
-      .single();
-    if (error) throw app.httpErrors.internalServerError(error.message);
-    return reply.code(201).send(data);
+    const [row] = await getDb().insert(health_metrics).values(parsed.data).returning();
+    if (!row) throw app.httpErrors.internalServerError('insert_returned_no_row');
+    return reply.code(201).send(row);
   });
 
   app.patch<{ Params: { id: string } }>('/api/health/metrics/:id', async (req, reply) => {
@@ -128,44 +129,38 @@ export const healthRoutes: FastifyPluginAsync = async (app) => {
     if (Object.keys(parsed.data).length === 0) {
       return reply.code(400).send({ error: 'empty_payload' });
     }
-    const { data, error } = await req.supabase!
-      .from('health_metrics')
-      .update(parsed.data)
-      .eq('id', req.params.id)
-      .select('*')
-      .single();
-    if (error) throw app.httpErrors.internalServerError(error.message);
-    return data;
+    const [row] = await getDb()
+      .update(health_metrics)
+      .set(parsed.data)
+      .where(eq(health_metrics.id, req.params.id))
+      .returning();
+    if (!row) return reply.code(404).send({ error: 'not_found' });
+    return row;
   });
 
   app.delete<{ Params: { id: string } }>('/api/health/metrics/:id', async (req, reply) => {
-    const { error } = await req.supabase!.from('health_metrics').delete().eq('id', req.params.id);
-    if (error) throw app.httpErrors.internalServerError(error.message);
+    await getDb().delete(health_metrics).where(eq(health_metrics.id, req.params.id));
     return reply.code(204).send();
   });
 
   // ─── Labs (panels + nested results) ────────────────────────────────────
 
-  app.get('/api/health/lab-panels', async (req) => {
-    const { data, error } = await req.supabase!
-      .from('lab_panels')
-      .select('*, results:lab_results(id, analyte, value, unit, flag)')
-      .order('drawn_date', { ascending: false })
-      .order('created_at', { ascending: false })
-      .limit(500);
-    if (error) throw app.httpErrors.internalServerError(error.message);
-    return { panels: data ?? [] };
+  app.get('/api/health/lab-panels', async () => {
+    const panels = await getDb().query.lab_panels.findMany({
+      with: { results: { columns: { id: true, analyte: true, value: true, unit: true, flag: true } } },
+      orderBy: [desc(lab_panels.drawn_date), desc(lab_panels.created_at)],
+      limit: 500,
+    });
+    return { panels };
   });
 
   app.get<{ Params: { id: string } }>('/api/health/lab-panels/:id', async (req, reply) => {
-    const { data, error } = await req.supabase!
-      .from('lab_panels')
-      .select('*, results:lab_results(*)')
-      .eq('id', req.params.id)
-      .maybeSingle();
-    if (error) throw app.httpErrors.internalServerError(error.message);
-    if (!data) return reply.code(404).send({ error: 'not_found' });
-    return data;
+    const row = await getDb().query.lab_panels.findFirst({
+      with: { results: true },
+      where: eq(lab_panels.id, req.params.id),
+    });
+    if (!row) return reply.code(404).send({ error: 'not_found' });
+    return row;
   });
 
   app.post('/api/health/lab-panels', async (req, reply) => {
@@ -174,31 +169,23 @@ export const healthRoutes: FastifyPluginAsync = async (app) => {
       return reply.code(400).send({ error: 'invalid_payload', details: parsed.error.flatten().fieldErrors });
     }
     const { results, ...panelFields } = parsed.data;
-    const { data: panel, error } = await req.supabase!
-      .from('lab_panels')
-      .insert(panelFields)
-      .select('*')
-      .single();
-    if (error) throw app.httpErrors.internalServerError(error.message);
+    const db = getDb();
 
-    if (results && results.length > 0) {
-      const { error: resErr } = await req.supabase!
-        .from('lab_results')
-        .insert(results.map((r) => ({ ...r, panel_id: panel.id })));
-      if (resErr) {
-        // Roll back the panel so a partial-failure doesn't strand an
-        // empty panel in the list.
-        await req.supabase!.from('lab_panels').delete().eq('id', panel.id);
-        throw app.httpErrors.internalServerError(resErr.message);
+    // Panel + its results land together or not at all.
+    const panelId = await db.transaction(async (tx) => {
+      const [panel] = await tx.insert(lab_panels).values(panelFields).returning({ id: lab_panels.id });
+      if (!panel) throw new Error('insert_returned_no_row');
+      if (results && results.length > 0) {
+        await tx.insert(lab_results).values(results.map((r) => ({ ...r, panel_id: panel.id })));
       }
-    }
+      return panel.id;
+    });
 
-    const { data: fullPanel } = await req.supabase!
-      .from('lab_panels')
-      .select('*, results:lab_results(*)')
-      .eq('id', panel.id)
-      .single();
-    return reply.code(201).send(fullPanel ?? panel);
+    const fullPanel = await db.query.lab_panels.findFirst({
+      with: { results: true },
+      where: eq(lab_panels.id, panelId),
+    });
+    return reply.code(201).send(fullPanel);
   });
 
   app.patch<{ Params: { id: string } }>('/api/health/lab-panels/:id', async (req, reply) => {
@@ -209,19 +196,17 @@ export const healthRoutes: FastifyPluginAsync = async (app) => {
     if (Object.keys(parsed.data).length === 0) {
       return reply.code(400).send({ error: 'empty_payload' });
     }
-    const { data, error } = await req.supabase!
-      .from('lab_panels')
-      .update(parsed.data)
-      .eq('id', req.params.id)
-      .select('*')
-      .single();
-    if (error) throw app.httpErrors.internalServerError(error.message);
-    return data;
+    const [row] = await getDb()
+      .update(lab_panels)
+      .set(parsed.data)
+      .where(eq(lab_panels.id, req.params.id))
+      .returning();
+    if (!row) return reply.code(404).send({ error: 'not_found' });
+    return row;
   });
 
   app.delete<{ Params: { id: string } }>('/api/health/lab-panels/:id', async (req, reply) => {
-    const { error } = await req.supabase!.from('lab_panels').delete().eq('id', req.params.id);
-    if (error) throw app.httpErrors.internalServerError(error.message);
+    await getDb().delete(lab_panels).where(eq(lab_panels.id, req.params.id));
     return reply.code(204).send();
   });
 
@@ -232,18 +217,16 @@ export const healthRoutes: FastifyPluginAsync = async (app) => {
     if (!parsed.success) {
       return reply.code(400).send({ error: 'invalid_payload', details: parsed.error.flatten().fieldErrors });
     }
-    const { data, error } = await req.supabase!
-      .from('lab_results')
-      .insert({ ...parsed.data, panel_id: req.params.panelId })
-      .select('*')
-      .single();
-    if (error) throw app.httpErrors.internalServerError(error.message);
-    return reply.code(201).send(data);
+    const [row] = await getDb()
+      .insert(lab_results)
+      .values({ ...parsed.data, panel_id: req.params.panelId })
+      .returning();
+    if (!row) throw app.httpErrors.internalServerError('insert_returned_no_row');
+    return reply.code(201).send(row);
   });
 
   app.delete<{ Params: { id: string } }>('/api/health/lab-results/:id', async (req, reply) => {
-    const { error } = await req.supabase!.from('lab_results').delete().eq('id', req.params.id);
-    if (error) throw app.httpErrors.internalServerError(error.message);
+    await getDb().delete(lab_results).where(eq(lab_results.id, req.params.id));
     return reply.code(204).send();
   });
 
@@ -253,13 +236,16 @@ export const healthRoutes: FastifyPluginAsync = async (app) => {
   app.get<{ Querystring: { analyte: string } }>('/api/health/lab-trends', async (req, reply) => {
     const analyte = (req.query.analyte ?? '').trim();
     if (!analyte) return reply.code(400).send({ error: 'analyte_required' });
-    const { data, error } = await req.supabase!
-      .from('lab_results')
-      .select('id, value, value_text, unit, flag, reference_range_low, reference_range_high, panel:lab_panels(drawn_date, panel_name)')
-      .eq('analyte', analyte)
-      .order('id', { ascending: true });
-    if (error) throw app.httpErrors.internalServerError(error.message);
-    return { analyte, results: data ?? [] };
+    const results = await getDb().query.lab_results.findMany({
+      columns: {
+        id: true, value: true, value_text: true, unit: true, flag: true,
+        reference_range_low: true, reference_range_high: true,
+      },
+      with: { panel: { columns: { drawn_date: true, panel_name: true } } },
+      where: eq(lab_results.analyte, analyte),
+      orderBy: asc(lab_results.id),
+    });
+    return { analyte, results };
   });
 
   // ─── Wellbeing check-ins ───────────────────────────────────────────────
@@ -268,16 +254,15 @@ export const healthRoutes: FastifyPluginAsync = async (app) => {
     '/api/health/check-ins',
     async (req) => {
       const limit = Math.min(parseInt(req.query.limit ?? '500', 10) || 500, 5000);
-      let q = req.supabase!
-        .from('wellbeing_check_ins')
-        .select('*')
-        .order('checked_in_at', { ascending: false })
-        .limit(limit);
-      if (req.query.from) q = q.gte('checked_in_at', req.query.from);
-      if (req.query.to) q = q.lte('checked_in_at', req.query.to);
-      const { data, error } = await q;
-      if (error) throw app.httpErrors.internalServerError(error.message);
-      return { check_ins: data ?? [] };
+      const conds: SQL[] = [];
+      if (req.query.from) conds.push(gte(wellbeing_check_ins.checked_in_at, req.query.from));
+      if (req.query.to) conds.push(lte(wellbeing_check_ins.checked_in_at, req.query.to));
+      const checkIns = await getDb().query.wellbeing_check_ins.findMany({
+        where: conds.length ? and(...conds) : undefined,
+        orderBy: desc(wellbeing_check_ins.checked_in_at),
+        limit,
+      });
+      return { check_ins: checkIns };
     },
   );
 
@@ -286,18 +271,13 @@ export const healthRoutes: FastifyPluginAsync = async (app) => {
     if (!parsed.success) {
       return reply.code(400).send({ error: 'invalid_payload', details: parsed.error.flatten().fieldErrors });
     }
-    const { data, error } = await req.supabase!
-      .from('wellbeing_check_ins')
-      .insert(parsed.data)
-      .select('*')
-      .single();
-    if (error) throw app.httpErrors.internalServerError(error.message);
-    return reply.code(201).send(data);
+    const [row] = await getDb().insert(wellbeing_check_ins).values(parsed.data).returning();
+    if (!row) throw app.httpErrors.internalServerError('insert_returned_no_row');
+    return reply.code(201).send(row);
   });
 
   app.delete<{ Params: { id: string } }>('/api/health/check-ins/:id', async (req, reply) => {
-    const { error } = await req.supabase!.from('wellbeing_check_ins').delete().eq('id', req.params.id);
-    if (error) throw app.httpErrors.internalServerError(error.message);
+    await getDb().delete(wellbeing_check_ins).where(eq(wellbeing_check_ins.id, req.params.id));
     return reply.code(204).send();
   });
 
@@ -306,17 +286,15 @@ export const healthRoutes: FastifyPluginAsync = async (app) => {
   app.get<{ Querystring: { active?: string; kind?: string } }>(
     '/api/health/medications',
     async (req) => {
-      let q = req.supabase!
-        .from('medications')
-        .select('*')
-        .order('kind', { ascending: true })
-        .order('name', { ascending: true });
-      if (req.query.active === 'true') q = q.eq('active', true);
-      if (req.query.active === 'false') q = q.eq('active', false);
-      if (req.query.kind) q = q.eq('kind', req.query.kind);
-      const { data, error } = await q;
-      if (error) throw app.httpErrors.internalServerError(error.message);
-      return { medications: data ?? [] };
+      const conds: SQL[] = [];
+      if (req.query.active === 'true') conds.push(eq(medications.active, true));
+      if (req.query.active === 'false') conds.push(eq(medications.active, false));
+      if (req.query.kind) conds.push(eq(medications.kind, req.query.kind));
+      const rows = await getDb().query.medications.findMany({
+        where: conds.length ? and(...conds) : undefined,
+        orderBy: [asc(medications.kind), asc(medications.name)],
+      });
+      return { medications: rows };
     },
   );
 
@@ -325,13 +303,9 @@ export const healthRoutes: FastifyPluginAsync = async (app) => {
     if (!parsed.success) {
       return reply.code(400).send({ error: 'invalid_payload', details: parsed.error.flatten().fieldErrors });
     }
-    const { data, error } = await req.supabase!
-      .from('medications')
-      .insert(parsed.data)
-      .select('*')
-      .single();
-    if (error) throw app.httpErrors.internalServerError(error.message);
-    return reply.code(201).send(data);
+    const [row] = await getDb().insert(medications).values(parsed.data).returning();
+    if (!row) throw app.httpErrors.internalServerError('insert_returned_no_row');
+    return reply.code(201).send(row);
   });
 
   app.patch<{ Params: { id: string } }>('/api/health/medications/:id', async (req, reply) => {
@@ -342,33 +316,28 @@ export const healthRoutes: FastifyPluginAsync = async (app) => {
     if (Object.keys(parsed.data).length === 0) {
       return reply.code(400).send({ error: 'empty_payload' });
     }
-    const { data, error } = await req.supabase!
-      .from('medications')
-      .update(parsed.data)
-      .eq('id', req.params.id)
-      .select('*')
-      .single();
-    if (error) throw app.httpErrors.internalServerError(error.message);
-    return data;
+    const [row] = await getDb()
+      .update(medications)
+      .set(parsed.data)
+      .where(eq(medications.id, req.params.id))
+      .returning();
+    if (!row) return reply.code(404).send({ error: 'not_found' });
+    return row;
   });
 
   app.delete<{ Params: { id: string } }>('/api/health/medications/:id', async (req, reply) => {
-    const { error } = await req.supabase!.from('medications').delete().eq('id', req.params.id);
-    if (error) throw app.httpErrors.internalServerError(error.message);
+    await getDb().delete(medications).where(eq(medications.id, req.params.id));
     return reply.code(204).send();
   });
 
   // ─── History (singleton) ───────────────────────────────────────────────
 
-  app.get('/api/health/history', async (req) => {
-    const { data, error } = await req.supabase!
-      .from('health_history')
-      .select('*')
-      .eq('id', true)
-      .maybeSingle();
-    if (error) throw app.httpErrors.internalServerError(error.message);
+  app.get('/api/health/history', async () => {
+    const row = await getDb().query.health_history.findFirst({
+      where: eq(health_history.id, true),
+    });
     // Migration seeds the row; this fallback is just defense in depth.
-    return data ?? {
+    return row ?? {
       id: true,
       narrative: null,
       conditions: [],
@@ -387,14 +356,13 @@ export const healthRoutes: FastifyPluginAsync = async (app) => {
     if (Object.keys(parsed.data).length === 0) {
       return reply.code(400).send({ error: 'empty_payload' });
     }
-    const { data, error } = await req.supabase!
-      .from('health_history')
-      .update(parsed.data)
-      .eq('id', true)
-      .select('*')
-      .single();
-    if (error) throw app.httpErrors.internalServerError(error.message);
-    return data;
+    const [row] = await getDb()
+      .update(health_history)
+      .set(parsed.data)
+      .where(eq(health_history.id, true))
+      .returning();
+    if (!row) throw app.httpErrors.internalServerError('history_row_missing');
+    return row;
   });
 
   // ─── Overview snapshot ─────────────────────────────────────────────────
@@ -402,45 +370,48 @@ export const healthRoutes: FastifyPluginAsync = async (app) => {
   // recent of each thing the UI wants to surface in one round-trip so the
   // overview load is one HTTP request, not eight.
 
-  app.get('/api/health/overview', async (req) => {
-    const sb = req.supabase!;
+  app.get('/api/health/overview', async () => {
+    const db = getDb();
     const [
       latestVitals, recentCheckIns, recentLabs, upcomingVisits,
       activeMedications,
     ] = await Promise.all([
       // Latest reading per known vital metric — fetch the last 30 of each
       // common metric type and let the UI pick out the most recent.
-      sb.from('health_metrics')
-        .select('id, measured_at, metric, value, value_secondary, unit, source')
-        .in('metric', ['weight', 'bp', 'hr_resting', 'sleep_duration', 'sleep_score', 'hrv_overnight', 'spo2_avg'])
-        .order('measured_at', { ascending: false })
-        .limit(50),
-      sb.from('wellbeing_check_ins')
-        .select('*')
-        .order('checked_in_at', { ascending: false })
-        .limit(5),
-      sb.from('lab_panels')
-        .select('id, drawn_date, panel_name, results:lab_results(id, analyte, flag)')
-        .order('drawn_date', { ascending: false })
-        .limit(3),
-      sb.from('health_visits')
-        .select('id, visit_date, provider_name, visit_type, reason')
-        .gte('visit_date', new Date().toISOString().slice(0, 10))
-        .order('visit_date', { ascending: true })
-        .limit(5),
-      sb.from('medications')
-        .select('*')
-        .eq('active', true)
-        .order('kind')
-        .order('name'),
+      db.query.health_metrics.findMany({
+        columns: { id: true, measured_at: true, metric: true, value: true, value_secondary: true, unit: true, source: true },
+        where: inArray(health_metrics.metric, ['weight', 'bp', 'hr_resting', 'sleep_duration', 'sleep_score', 'hrv_overnight', 'spo2_avg']),
+        orderBy: desc(health_metrics.measured_at),
+        limit: 50,
+      }),
+      db.query.wellbeing_check_ins.findMany({
+        orderBy: desc(wellbeing_check_ins.checked_in_at),
+        limit: 5,
+      }),
+      db.query.lab_panels.findMany({
+        columns: { id: true, drawn_date: true, panel_name: true },
+        with: { results: { columns: { id: true, analyte: true, flag: true } } },
+        orderBy: desc(lab_panels.drawn_date),
+        limit: 3,
+      }),
+      db.query.health_visits.findMany({
+        columns: { id: true, visit_date: true, provider_name: true, visit_type: true, reason: true },
+        where: gte(health_visits.visit_date, new Date().toISOString().slice(0, 10)),
+        orderBy: asc(health_visits.visit_date),
+        limit: 5,
+      }),
+      db.query.medications.findMany({
+        where: eq(medications.active, true),
+        orderBy: [asc(medications.kind), asc(medications.name)],
+      }),
     ]);
 
     return {
-      latest_vitals: latestVitals.data ?? [],
-      recent_check_ins: recentCheckIns.data ?? [],
-      recent_labs: recentLabs.data ?? [],
-      upcoming_visits: upcomingVisits.data ?? [],
-      active_medications: activeMedications.data ?? [],
+      latest_vitals: latestVitals,
+      recent_check_ins: recentCheckIns,
+      recent_labs: recentLabs,
+      upcoming_visits: upcomingVisits,
+      active_medications: activeMedications,
     };
   });
 };

@@ -1,5 +1,8 @@
 import type { FastifyPluginAsync } from 'fastify';
+import { and, asc, gte, lte } from 'drizzle-orm';
 import { runCalendarSync } from '../lib/calendar-sync.js';
+import { getDb } from '../lib/db.js';
+import { calendar_events } from '../db/schema.js';
 
 // Calendar sync:
 //   POST /api/sync/calendar/pull  — fetch Google events for ±7 days, upsert
@@ -37,14 +40,12 @@ export const calendarRoutes: FastifyPluginAsync = async (app) => {
   app.get<{ Querystring: { limit?: string } }>('/api/calendar/upcoming', async (req) => {
     const limit = Math.min(parseInt(req.query.limit ?? '4', 10) || 4, 20);
     const nowIso = new Date().toISOString();
-    const { data, error } = await req.supabase!
-      .from('calendar_events')
-      .select('*')
-      .gte('end_at', nowIso) // include events currently in progress
-      .order('start_at', { ascending: true })
-      .limit(limit);
-    if (error) throw app.httpErrors.internalServerError(error.message);
-    return { events: data ?? [] };
+    const events = await getDb().query.calendar_events.findMany({
+      where: gte(calendar_events.end_at, nowIso), // include events currently in progress
+      orderBy: asc(calendar_events.start_at),
+      limit,
+    });
+    return { events };
   });
 
   // Range list for the /calendar page. Defaults to ±30 days.
@@ -54,14 +55,11 @@ export const calendarRoutes: FastifyPluginAsync = async (app) => {
     const defaultTo = new Date(now.getTime() + 60 * 24 * 60 * 60 * 1000).toISOString();
     const from = req.query.from ?? defaultFrom;
     const to = req.query.to ?? defaultTo;
-    const { data, error } = await req.supabase!
-      .from('calendar_events')
-      .select('*')
-      .gte('start_at', from)
-      .lte('start_at', to)
-      .order('start_at', { ascending: true })
-      .limit(500);
-    if (error) throw app.httpErrors.internalServerError(error.message);
-    return { events: data ?? [], range: { from, to } };
+    const events = await getDb().query.calendar_events.findMany({
+      where: and(gte(calendar_events.start_at, from), lte(calendar_events.start_at, to)),
+      orderBy: asc(calendar_events.start_at),
+      limit: 500,
+    });
+    return { events, range: { from, to } };
   });
 };

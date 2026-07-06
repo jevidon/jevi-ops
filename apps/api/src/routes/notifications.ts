@@ -1,5 +1,8 @@
 import type { FastifyPluginAsync } from 'fastify';
+import { count, desc, eq } from 'drizzle-orm';
 import { z } from 'zod';
+import { getDb } from '../lib/db.js';
+import { notifications } from '../db/schema.js';
 
 // Notifications feed — audit log of voice actions and (later) autonomous
 // moves. Schema lives in migration 0001. Status transitions: unread → read,
@@ -16,31 +19,26 @@ export const notificationRoutes: FastifyPluginAsync = async (app) => {
 
   app.get<{ Querystring: { status?: string; limit?: string } }>(
     '/api/notifications',
-    async (req, reply) => {
+    async (req) => {
       const statusParam = StatusFilterSchema.safeParse(req.query.status ?? 'all');
       const status = statusParam.success ? statusParam.data : 'all';
       const limit = Math.min(parseInt(req.query.limit ?? '50', 10) || 50, 200);
 
-      let q = req.supabase!
-        .from('notifications')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(limit);
-      if (status !== 'all') q = q.eq('status', status);
-
-      const { data, error } = await q;
-      if (error) throw app.httpErrors.internalServerError(error.message);
-      return { notifications: data ?? [] };
+      const rows = await getDb().query.notifications.findMany({
+        where: status !== 'all' ? eq(notifications.status, status) : undefined,
+        orderBy: desc(notifications.created_at),
+        limit,
+      });
+      return { notifications: rows };
     },
   );
 
-  app.get('/api/notifications/count', async (req) => {
-    const { count, error } = await req.supabase!
-      .from('notifications')
-      .select('id', { count: 'exact', head: true })
-      .eq('status', 'unread');
-    if (error) throw app.httpErrors.internalServerError(error.message);
-    return { unread: count ?? 0 };
+  app.get('/api/notifications/count', async () => {
+    const [row] = await getDb()
+      .select({ n: count() })
+      .from(notifications)
+      .where(eq(notifications.status, 'unread'));
+    return { unread: row?.n ?? 0 };
   });
 
   app.patch<{ Params: { id: string } }>('/api/notifications/:id', async (req, reply) => {
@@ -51,22 +49,21 @@ export const notificationRoutes: FastifyPluginAsync = async (app) => {
         details: parsed.error.flatten().fieldErrors,
       });
     }
-    const { data, error } = await req.supabase!
-      .from('notifications')
-      .update({ status: parsed.data.status })
-      .eq('id', req.params.id)
-      .select('*')
-      .single();
-    if (error) throw app.httpErrors.internalServerError(error.message);
-    return data;
+    const [row] = await getDb()
+      .update(notifications)
+      .set({ status: parsed.data.status })
+      .where(eq(notifications.id, req.params.id))
+      .returning();
+    if (!row) return reply.code(404).send({ error: 'not_found' });
+    return row;
   });
 
-  app.post('/api/notifications/mark-all-read', async (req) => {
-    const { count, error } = await req.supabase!
-      .from('notifications')
-      .update({ status: 'read' }, { count: 'exact' })
-      .eq('status', 'unread');
-    if (error) throw app.httpErrors.internalServerError(error.message);
-    return { marked_read: count ?? 0 };
+  app.post('/api/notifications/mark-all-read', async () => {
+    const marked = await getDb()
+      .update(notifications)
+      .set({ status: 'read' })
+      .where(eq(notifications.status, 'unread'))
+      .returning({ id: notifications.id });
+    return { marked_read: marked.length };
   });
 };

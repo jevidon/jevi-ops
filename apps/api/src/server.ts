@@ -54,6 +54,24 @@ export async function buildServer() {
   });
   await app.register(authPlugin);
 
+  // Global error handler. Route handlers use plain awaits — thrown errors
+  // land here. @fastify/sensible httpErrors carry statusCode and pass
+  // through; everything else is a 500. postgres.js errors carry a SQLSTATE
+  // in .code — surfaced for debuggability (single-user app, no tenant
+  // leakage concern).
+  app.setErrorHandler((err: Error & { statusCode?: number; code?: string; name?: string }, req, reply) => {
+    const statusCode = typeof err.statusCode === 'number' && err.statusCode >= 400 ? err.statusCode : 500;
+    if (statusCode >= 500) {
+      req.log.error({ err }, 'request failed');
+    }
+    const pgCode = err.code;
+    return reply.code(statusCode).send({
+      error: statusCode >= 500 ? 'internal_error' : (err.name ?? 'error'),
+      message: err.message,
+      ...(pgCode && /^[0-9A-Z]{5}$/.test(pgCode) ? { code: pgCode } : {}),
+    });
+  });
+
   await app.register(healthzRoutes);
   await app.register(ingestRoutes);
   await app.register(taskRoutes);

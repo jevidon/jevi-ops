@@ -3,7 +3,8 @@ import { timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import { IngestRequestSchema, CaptureTranscriptSourceSchema } from '@jevi-ops/shared/schemas';
 import { env } from '../lib/env.js';
-import { supabaseAdmin, isSupabaseConfigured } from '../lib/supabase.js';
+import { getDb, isDatabaseConfigured } from '../lib/db.js';
+import { captured_data } from '../db/schema.js';
 import { parseTranscript } from '../lib/parser.js';
 import { executeActions } from '../lib/executor.js';
 import { isAnthropicConfigured } from '../lib/anthropic.js';
@@ -46,40 +47,39 @@ export const ingestRoutes: FastifyPluginAsync = async (app) => {
       });
     }
 
-    if (!isSupabaseConfigured()) {
+    if (!isDatabaseConfigured()) {
       req.log.info({ event: 'ingest_stub', body: parsed.data }, 'captured (no db)');
       return reply.code(202).send({ status: 'accepted_no_db', stub: true });
     }
 
-    // Service-role client — webhook is not a user-authenticated context;
-    // RLS would block this insert. The secret check above is the auth.
-    const { data, error } = await supabaseAdmin()
-      .from('captured_data')
-      .insert({
-        source: parsed.data.source,
-        type: parsed.data.type,
-        payload: parsed.data.payload,
-        tags: parsed.data.tags ?? [],
-        display_hint: parsed.data.display_hint ?? 'log',
-        source_ref: parsed.data.source_ref ?? null,
-      })
-      .select('id, created_at')
-      .single();
-
-    if (error) {
-      req.log.error({ error }, 'ingest insert failed');
+    // Direct insert — webhook is not a user-authenticated context; the
+    // secret check above is the auth.
+    try {
+      const [row] = await getDb()
+        .insert(captured_data)
+        .values({
+          source: parsed.data.source,
+          type: parsed.data.type,
+          payload: parsed.data.payload,
+          tags: parsed.data.tags ?? [],
+          display_hint: parsed.data.display_hint ?? 'log',
+          source_ref: parsed.data.source_ref ?? null,
+        })
+        .returning({ id: captured_data.id, created_at: captured_data.created_at });
+      return reply.code(201).send(row);
+    } catch (err) {
+      req.log.error({ err }, 'ingest insert failed');
       // Surface the Postgres message in the response. Single-user app —
       // no risk of cross-tenant info leakage — and it makes debugging
       // schema/constraint mismatches from a watch shortcut much easier
       // than spelunking through PM2 logs.
+      const pgCode = (err as { code?: string })?.code;
       return reply.code(500).send({
         error: 'insert_failed',
-        message: error.message,
-        code: error.code,
+        message: err instanceof Error ? err.message : 'unknown',
+        code: pgCode,
       });
     }
-
-    return reply.code(201).send(data);
   });
 
   // POST /api/ingest/capture — secret-gated equivalent of /api/capture/voice.
@@ -110,8 +110,8 @@ export const ingestRoutes: FastifyPluginAsync = async (app) => {
     if (!isAnthropicConfigured()) {
       return reply.code(503).send({ error: 'anthropic_not_configured' });
     }
-    if (!isSupabaseConfigured()) {
-      return reply.code(503).send({ error: 'supabase_not_configured' });
+    if (!isDatabaseConfigured()) {
+      return reply.code(503).send({ error: 'database_not_configured' });
     }
 
     const BodySchema = z.object({
@@ -128,13 +128,13 @@ export const ingestRoutes: FastifyPluginAsync = async (app) => {
     const transcript = parsed.data.transcript.trim();
     const captureSource = parsed.data.source ?? 'voice';
 
-    // Webhook context — no JWT user, so use the service-role client
-    // throughout. The secret check above is the auth boundary.
-    const sb = supabaseAdmin();
+    // Webhook context — no JWT user. The secret check above is the auth
+    // boundary.
+    const db = getDb();
 
     let result;
     try {
-      result = await parseTranscript(transcript, sb);
+      result = await parseTranscript(transcript, db);
     } catch (err) {
       req.log.error({ err }, 'webhook capture parser failed');
       return reply.code(502).send({
@@ -159,7 +159,7 @@ export const ingestRoutes: FastifyPluginAsync = async (app) => {
       });
     }
 
-    const executionResults = await executeActions(sb, result.actions, { captureSource });
+    const executionResults = await executeActions(db, result.actions, { captureSource });
     req.log.info(
       {
         event: 'webhook_capture',

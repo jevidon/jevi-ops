@@ -1,5 +1,7 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
+import { and, eq, inArray, isNotNull } from 'drizzle-orm';
 import { sendPushover, isPushoverConfigured } from './pushover.js';
+import type { Db } from './db.js';
+import { routine_completions, routines } from '../db/schema.js';
 import { env } from './env.js';
 import { getAppTz } from './app-settings.js';
 
@@ -72,7 +74,7 @@ const MISSED_FIRE_TRAIL_MIN = 30;
 // minutes. After that, missed fires (within MISSED_FIRE_TRAIL_MIN).
 const EXACT_TIME_GRACE_MIN = 60;
 
-export async function runRoutineReminders(sb: SupabaseClient): Promise<RoutineReminderResult> {
+export async function runRoutineReminders(db: Db): Promise<RoutineReminderResult> {
   if (!isPushoverConfigured()) {
     return { considered: 0, dispatched: 0, failed: 0, skipped_done: 0 };
   }
@@ -82,17 +84,21 @@ export async function runRoutineReminders(sb: SupabaseClient): Promise<RoutineRe
   const nowMinutes = nowMinutesInTz(tz);
 
   // Pull candidate routines. The partial index defined in 0016 makes
-  // this cheap. We filter by date in JS rather than in PostgREST because
-  // `neq` with null behaves surprisingly; explicit JS check is clearer.
-  const { data, error } = await sb
-    .from('routines')
-    .select('id, name, description, time_of_day, specific_time, reminder_enabled, last_reminder_sent_date, last_missed_sent_date, active')
-    .eq('active', true)
-    .eq('reminder_enabled', true)
-    .not('specific_time', 'is', null);
-  if (error) throw new Error(`routines query failed: ${error.message}`);
+  // this cheap. We filter by date in JS rather than SQL because `neq`
+  // with null behaves surprisingly; explicit JS check is clearer.
+  const rows = await db.query.routines.findMany({
+    columns: {
+      id: true, name: true, description: true, time_of_day: true, specific_time: true,
+      reminder_enabled: true, last_reminder_sent_date: true, last_missed_sent_date: true, active: true,
+    },
+    where: and(
+      eq(routines.active, true),
+      eq(routines.reminder_enabled, true),
+      isNotNull(routines.specific_time),
+    ),
+  });
 
-  const candidates = ((data ?? []) as RoutineRow[]).filter((r) => {
+  const candidates = (rows as RoutineRow[]).filter((r) => {
     if (r.last_reminder_sent_date === todayIso) return false;
     return true;
   });
@@ -105,13 +111,17 @@ export async function runRoutineReminders(sb: SupabaseClient): Promise<RoutineRe
   // than N. If a routine is already done today, skip the ping.
   let completedSet = new Set<string>();
   if (candidates.length > 0) {
-    const { data: doneRows, error: doneErr } = await sb
-      .from('routine_completions')
-      .select('routine_id')
-      .in('routine_id', candidates.map((r) => r.id))
-      .eq('completed_date', todayIso);
-    if (!doneErr && doneRows) {
-      completedSet = new Set(doneRows.map((r: { routine_id: string }) => r.routine_id));
+    try {
+      const doneRows = await db.query.routine_completions.findMany({
+        columns: { routine_id: true },
+        where: and(
+          inArray(routine_completions.routine_id, candidates.map((r) => r.id)),
+          eq(routine_completions.completed_date, todayIso),
+        ),
+      });
+      completedSet = new Set(doneRows.map((r) => r.routine_id));
+    } catch {
+      /* best-effort — a failed lookup just means we might ping a done routine */
     }
   }
 
@@ -127,10 +137,7 @@ export async function runRoutineReminders(sb: SupabaseClient): Promise<RoutineRe
       skippedDone += 1;
       // Mark sent so we don't ping later in the day if they uncheck
       // accidentally — closer to user-expected behavior than re-firing.
-      await sb
-        .from('routines')
-        .update({ last_reminder_sent_date: todayIso })
-        .eq('id', r.id);
+      await db.update(routines).set({ last_reminder_sent_date: todayIso }).where(eq(routines.id, r.id));
       continue;
     }
 
@@ -145,12 +152,12 @@ export async function runRoutineReminders(sb: SupabaseClient): Promise<RoutineRe
     });
 
     if (result.ok) {
-      const { error: updErr } = await sb
-        .from('routines')
-        .update({ last_reminder_sent_date: todayIso })
-        .eq('id', r.id);
-      if (updErr) failed += 1;
-      else dispatched += 1;
+      try {
+        await db.update(routines).set({ last_reminder_sent_date: todayIso }).where(eq(routines.id, r.id));
+        dispatched += 1;
+      } catch {
+        failed += 1;
+      }
     } else {
       failed += 1;
     }
@@ -173,7 +180,7 @@ export async function runRoutineReminders(sb: SupabaseClient): Promise<RoutineRe
 // today, and we haven't already fired today's missed ping, send a
 // distinct Pushover (priority 1, siren sound).
 
-export async function runRoutineMissed(sb: SupabaseClient): Promise<RoutineMissedResult> {
+export async function runRoutineMissed(db: Db): Promise<RoutineMissedResult> {
   if (!isPushoverConfigured()) {
     return { considered: 0, dispatched: 0, failed: 0 };
   }
@@ -183,18 +190,15 @@ export async function runRoutineMissed(sb: SupabaseClient): Promise<RoutineMisse
   const nowMinutes = nowMinutesInTz(tz);
 
   // Candidates: active routines with either a specific_time set OR a
-  // time_of_day bucket that has a deadline. We can't easily express
-  // "specific_time IS NOT NULL OR time_of_day IN (morning/afternoon/evening)"
-  // in a single PostgREST query, so we fetch all active routines that
-  // haven't already had today's missed sent, then filter in JS. With
-  // <100 routines this is fine.
-  const { data, error } = await sb
-    .from('routines')
-    .select('id, name, description, time_of_day, specific_time, reminder_enabled, last_reminder_sent_date, last_missed_sent_date, active')
-    .eq('active', true);
-  if (error) throw new Error(`routines query failed: ${error.message}`);
-
-  const all = (data ?? []) as RoutineRow[];
+  // time_of_day bucket that has a deadline. Fetch all active routines,
+  // then filter in JS. With <100 routines this is fine.
+  const all = (await db.query.routines.findMany({
+    columns: {
+      id: true, name: true, description: true, time_of_day: true, specific_time: true,
+      reminder_enabled: true, last_reminder_sent_date: true, last_missed_sent_date: true, active: true,
+    },
+    where: eq(routines.active, true),
+  })) as RoutineRow[];
   // Pre-filter to rows that haven't fired today AND have a deadline.
   const eligible = all.filter((r) => {
     if (r.last_missed_sent_date === todayIso) return false;
@@ -210,13 +214,17 @@ export async function runRoutineMissed(sb: SupabaseClient): Promise<RoutineMisse
 
   // Batch-fetch today's completions for the candidates.
   let completedSet = new Set<string>();
-  const { data: doneRows, error: doneErr } = await sb
-    .from('routine_completions')
-    .select('routine_id')
-    .in('routine_id', eligible.map((r) => r.id))
-    .eq('completed_date', todayIso);
-  if (!doneErr && doneRows) {
-    completedSet = new Set(doneRows.map((r: { routine_id: string }) => r.routine_id));
+  try {
+    const doneRows = await db.query.routine_completions.findMany({
+      columns: { routine_id: true },
+      where: and(
+        inArray(routine_completions.routine_id, eligible.map((r) => r.id)),
+        eq(routine_completions.completed_date, todayIso),
+      ),
+    });
+    completedSet = new Set(doneRows.map((r) => r.routine_id));
+  } catch {
+    /* best-effort */
   }
 
   let dispatched = 0;
@@ -226,10 +234,7 @@ export async function runRoutineMissed(sb: SupabaseClient): Promise<RoutineMisse
     if (completedSet.has(r.id)) {
       // Already done — no missed ping. Still mark sent so we don't keep
       // rechecking the same row every minute through the trailing window.
-      await sb
-        .from('routines')
-        .update({ last_missed_sent_date: todayIso })
-        .eq('id', r.id);
+      await db.update(routines).set({ last_missed_sent_date: todayIso }).where(eq(routines.id, r.id));
       continue;
     }
 
@@ -245,12 +250,12 @@ export async function runRoutineMissed(sb: SupabaseClient): Promise<RoutineMisse
     });
 
     if (result.ok) {
-      const { error: updErr } = await sb
-        .from('routines')
-        .update({ last_missed_sent_date: todayIso })
-        .eq('id', r.id);
-      if (updErr) failed += 1;
-      else dispatched += 1;
+      try {
+        await db.update(routines).set({ last_missed_sent_date: todayIso }).where(eq(routines.id, r.id));
+        dispatched += 1;
+      } catch {
+        failed += 1;
+      }
     } else {
       failed += 1;
     }

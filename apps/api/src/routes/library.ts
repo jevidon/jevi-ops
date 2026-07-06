@@ -1,13 +1,24 @@
 import type { FastifyPluginAsync } from 'fastify';
+import { and, asc, desc, eq, gt, sql, type SQL } from 'drizzle-orm';
+import { arrayContains } from 'drizzle-orm';
 import {
   CreateNoteSchema, UpdateNoteSchema,
   CreateQuoteAnnotationSchema, UpdateQuoteAnnotationSchema,
   CreateBookSchema, UpdateBookSchema,
   CreateQuoteSchema, UpdateQuoteSchema,
 } from '@jevi-ops/shared/schemas';
+import { getDb } from '../lib/db.js';
+import {
+  books,
+  journal_entries,
+  notes,
+  quote_annotations,
+  quotes,
+  type StoredAttachment,
+} from '../db/schema.js';
 
 // Library CRUD — notes, quotes, quote_annotations, journal_entries, books.
-// Auth-gated; uses the request-scoped Supabase client so RLS applies.
+// Auth-gated.
 
 // Stable 32-bit hash of a short string. Used to seed the daily
 // resurfacing pick from a date — same date in always yields the same
@@ -41,36 +52,42 @@ export const libraryRoutes: FastifyPluginAsync = async (app) => {
     '/api/notes',
     async (req) => {
       const limit = Math.min(parseInt(req.query.limit ?? '500', 10) || 500, 2000);
-      let q = req.supabase!
-        .from('notes')
-        .select('*, project:projects(id, name, color), person:people(id, name), quote:quotes(id, text)')
-        .order('created_at', { ascending: false })
-        .limit(limit);
-      if (req.query.source_type) q = q.eq('source_type', req.query.source_type);
-      if (req.query.needs_review === 'true') q = q.eq('needs_review', true);
-      // tags is a text[] column — .contains() generates the @> operator
+      const conds: SQL[] = [];
+      if (req.query.source_type) conds.push(eq(notes.source_type, req.query.source_type));
+      if (req.query.needs_review === 'true') conds.push(eq(notes.needs_review, true));
+      // tags is a text[] column — arrayContains generates the @> operator
       // which matches rows whose array includes every element we pass.
-      if (req.query.tag) q = q.contains('tags', [req.query.tag]);
+      if (req.query.tag) conds.push(arrayContains(notes.tags, [req.query.tag]));
       // ?resurface=boosted → weight > 1, excluded → weight = 0. The default
       // (no filter) shows everything regardless of weight so the list
       // doesn't mysteriously hide rows.
-      if (req.query.resurface === 'boosted') q = q.gt('resurface_weight', 1);
-      else if (req.query.resurface === 'excluded') q = q.eq('resurface_weight', 0);
-      const { data, error } = await q;
-      if (error) throw app.httpErrors.internalServerError(error.message);
-      return { notes: data ?? [] };
+      if (req.query.resurface === 'boosted') conds.push(gt(notes.resurface_weight, 1));
+      else if (req.query.resurface === 'excluded') conds.push(eq(notes.resurface_weight, 0));
+      const rows = await getDb().query.notes.findMany({
+        with: {
+          project: { columns: { id: true, name: true, color: true } },
+          person: { columns: { id: true, name: true } },
+          quote: { columns: { id: true, text: true } },
+        },
+        where: conds.length ? and(...conds) : undefined,
+        orderBy: desc(notes.created_at),
+        limit,
+      });
+      return { notes: rows };
     },
   );
 
   app.get<{ Params: { id: string } }>('/api/notes/:id', async (req, reply) => {
-    const { data, error } = await req.supabase!
-      .from('notes')
-      .select('*, project:projects(id, name, color), person:people(id, name), quote:quotes(id, text, source_author)')
-      .eq('id', req.params.id)
-      .maybeSingle();
-    if (error) throw app.httpErrors.internalServerError(error.message);
-    if (!data) return reply.code(404).send({ error: 'not_found' });
-    return data;
+    const row = await getDb().query.notes.findFirst({
+      with: {
+        project: { columns: { id: true, name: true, color: true } },
+        person: { columns: { id: true, name: true } },
+        quote: { columns: { id: true, text: true, source_author: true } },
+      },
+      where: eq(notes.id, req.params.id),
+    });
+    if (!row) return reply.code(404).send({ error: 'not_found' });
+    return row;
   });
 
   app.post('/api/notes', async (req, reply) => {
@@ -78,9 +95,10 @@ export const libraryRoutes: FastifyPluginAsync = async (app) => {
     if (!parsed.success) {
       return reply.code(400).send({ error: 'invalid_payload', details: parsed.error.flatten().fieldErrors });
     }
-    const { data, error } = await req.supabase!.from('notes').insert(parsed.data).select('*').single();
-    if (error) throw app.httpErrors.internalServerError(error.message);
-    return reply.code(201).send(data);
+    const insert = { ...parsed.data, attachments: parsed.data.attachments as StoredAttachment[] | undefined };
+    const [row] = await getDb().insert(notes).values(insert).returning();
+    if (!row) throw app.httpErrors.internalServerError('insert_returned_no_row');
+    return reply.code(201).send(row);
   });
 
   app.patch<{ Params: { id: string } }>('/api/notes/:id', async (req, reply) => {
@@ -88,19 +106,18 @@ export const libraryRoutes: FastifyPluginAsync = async (app) => {
     if (!parsed.success) {
       return reply.code(400).send({ error: 'invalid_payload', details: parsed.error.flatten().fieldErrors });
     }
-    const { data, error } = await req.supabase!
-      .from('notes')
-      .update(parsed.data)
-      .eq('id', req.params.id)
-      .select('*')
-      .single();
-    if (error) throw app.httpErrors.internalServerError(error.message);
-    return data;
+    const update = { ...parsed.data, attachments: parsed.data.attachments as StoredAttachment[] | undefined };
+    const [row] = await getDb()
+      .update(notes)
+      .set(update)
+      .where(eq(notes.id, req.params.id))
+      .returning();
+    if (!row) return reply.code(404).send({ error: 'not_found' });
+    return row;
   });
 
   app.delete<{ Params: { id: string } }>('/api/notes/:id', async (req, reply) => {
-    const { error } = await req.supabase!.from('notes').delete().eq('id', req.params.id);
-    if (error) throw app.httpErrors.internalServerError(error.message);
+    await getDb().delete(notes).where(eq(notes.id, req.params.id));
     return reply.code(204).send();
   });
 
@@ -108,44 +125,42 @@ export const libraryRoutes: FastifyPluginAsync = async (app) => {
 
   app.get<{ Querystring: { tag?: string; limit?: string; resurface?: string } }>('/api/quotes', async (req) => {
     const limit = Math.min(parseInt(req.query.limit ?? '500', 10) || 500, 2000);
-    let qb = req.supabase!
-      .from('quotes')
-      .select('*, book:books(id, title, author), annotations:quote_annotations(id)')
-      .order('created_at', { ascending: false })
-      .limit(limit);
-    if (req.query.tag) qb = qb.contains('tags', [req.query.tag]);
-    if (req.query.resurface === 'boosted') qb = qb.gt('resurface_weight', 1);
-    else if (req.query.resurface === 'excluded') qb = qb.eq('resurface_weight', 0);
-    const { data, error } = await qb;
-    if (error) throw app.httpErrors.internalServerError(error.message);
+    const conds: SQL[] = [];
+    if (req.query.tag) conds.push(arrayContains(quotes.tags, [req.query.tag]));
+    if (req.query.resurface === 'boosted') conds.push(gt(quotes.resurface_weight, 1));
+    else if (req.query.resurface === 'excluded') conds.push(eq(quotes.resurface_weight, 0));
+    const rows = await getDb().query.quotes.findMany({
+      with: {
+        book: { columns: { id: true, title: true, author: true } },
+        annotations: { columns: { id: true } },
+      },
+      where: conds.length ? and(...conds) : undefined,
+      orderBy: desc(quotes.created_at),
+      limit,
+    });
     // Compress annotation rows down to a count for the list view.
-    type AnnoRow = { id: string };
-    type QuoteRow = { annotations?: AnnoRow[]; [k: string]: unknown };
-    const quotes = ((data ?? []) as QuoteRow[]).map((q) => ({
+    const quoteRows = rows.map((q) => ({
       ...q,
       annotation_count: q.annotations?.length ?? 0,
       annotations: undefined,
     }));
-    return { quotes };
+    return { quotes: quoteRows };
   });
 
   app.get<{ Params: { id: string } }>('/api/quotes/:id', async (req, reply) => {
-    const [quoteRes, annoRes] = await Promise.all([
-      req.supabase!
-        .from('quotes')
-        .select('*, book:books(id, title, author)')
-        .eq('id', req.params.id)
-        .maybeSingle(),
-      req.supabase!
-        .from('quote_annotations')
-        .select('*')
-        .eq('quote_id', req.params.id)
-        .order('annotated_at', { ascending: true }),
+    const db = getDb();
+    const [quote, annotations] = await Promise.all([
+      db.query.quotes.findFirst({
+        with: { book: { columns: { id: true, title: true, author: true } } },
+        where: eq(quotes.id, req.params.id),
+      }),
+      db.query.quote_annotations.findMany({
+        where: eq(quote_annotations.quote_id, req.params.id),
+        orderBy: asc(quote_annotations.annotated_at),
+      }),
     ]);
-    if (quoteRes.error) throw app.httpErrors.internalServerError(quoteRes.error.message);
-    if (!quoteRes.data) return reply.code(404).send({ error: 'not_found' });
-    if (annoRes.error) throw app.httpErrors.internalServerError(annoRes.error.message);
-    return { quote: quoteRes.data, annotations: annoRes.data ?? [] };
+    if (!quote) return reply.code(404).send({ error: 'not_found' });
+    return { quote, annotations };
   });
 
   app.post('/api/quotes', async (req, reply) => {
@@ -153,13 +168,9 @@ export const libraryRoutes: FastifyPluginAsync = async (app) => {
     if (!parsed.success) {
       return reply.code(400).send({ error: 'invalid_payload', details: parsed.error.flatten().fieldErrors });
     }
-    const { data, error } = await req.supabase!
-      .from('quotes')
-      .insert(parsed.data)
-      .select('*')
-      .single();
-    if (error) throw app.httpErrors.internalServerError(error.message);
-    return reply.code(201).send(data);
+    const [row] = await getDb().insert(quotes).values(parsed.data).returning();
+    if (!row) throw app.httpErrors.internalServerError('insert_returned_no_row');
+    return reply.code(201).send(row);
   });
 
   app.patch<{ Params: { id: string } }>('/api/quotes/:id', async (req, reply) => {
@@ -170,20 +181,18 @@ export const libraryRoutes: FastifyPluginAsync = async (app) => {
     if (Object.keys(parsed.data).length === 0) {
       return reply.code(400).send({ error: 'empty_payload' });
     }
-    const { data, error } = await req.supabase!
-      .from('quotes')
-      .update(parsed.data)
-      .eq('id', req.params.id)
-      .select('*')
-      .single();
-    if (error) throw app.httpErrors.internalServerError(error.message);
-    return data;
+    const [row] = await getDb()
+      .update(quotes)
+      .set(parsed.data)
+      .where(eq(quotes.id, req.params.id))
+      .returning();
+    if (!row) return reply.code(404).send({ error: 'not_found' });
+    return row;
   });
 
   app.delete<{ Params: { id: string } }>('/api/quotes/:id', async (req, reply) => {
     // CASCADE on quote_annotations.quote_id cleans up annotations automatically.
-    const { error } = await req.supabase!.from('quotes').delete().eq('id', req.params.id);
-    if (error) throw app.httpErrors.internalServerError(error.message);
+    await getDb().delete(quotes).where(eq(quotes.id, req.params.id));
     return reply.code(204).send();
   });
 
@@ -194,13 +203,9 @@ export const libraryRoutes: FastifyPluginAsync = async (app) => {
     if (!parsed.success) {
       return reply.code(400).send({ error: 'invalid_payload', details: parsed.error.flatten().fieldErrors });
     }
-    const { data, error } = await req.supabase!
-      .from('quote_annotations')
-      .insert(parsed.data)
-      .select('*')
-      .single();
-    if (error) throw app.httpErrors.internalServerError(error.message);
-    return reply.code(201).send(data);
+    const [row] = await getDb().insert(quote_annotations).values(parsed.data).returning();
+    if (!row) throw app.httpErrors.internalServerError('insert_returned_no_row');
+    return reply.code(201).send(row);
   });
 
   app.patch<{ Params: { id: string } }>('/api/quote-annotations/:id', async (req, reply) => {
@@ -208,19 +213,17 @@ export const libraryRoutes: FastifyPluginAsync = async (app) => {
     if (!parsed.success) {
       return reply.code(400).send({ error: 'invalid_payload', details: parsed.error.flatten().fieldErrors });
     }
-    const { data, error } = await req.supabase!
-      .from('quote_annotations')
-      .update(parsed.data)
-      .eq('id', req.params.id)
-      .select('*')
-      .single();
-    if (error) throw app.httpErrors.internalServerError(error.message);
-    return data;
+    const [row] = await getDb()
+      .update(quote_annotations)
+      .set(parsed.data)
+      .where(eq(quote_annotations.id, req.params.id))
+      .returning();
+    if (!row) return reply.code(404).send({ error: 'not_found' });
+    return row;
   });
 
   app.delete<{ Params: { id: string } }>('/api/quote-annotations/:id', async (req, reply) => {
-    const { error } = await req.supabase!.from('quote_annotations').delete().eq('id', req.params.id);
-    if (error) throw app.httpErrors.internalServerError(error.message);
+    await getDb().delete(quote_annotations).where(eq(quote_annotations.id, req.params.id));
     return reply.code(204).send();
   });
 
@@ -233,20 +236,18 @@ export const libraryRoutes: FastifyPluginAsync = async (app) => {
 
   app.get<{ Querystring: { limit?: string; resurface?: string } }>('/api/journal-entries', async (req) => {
     const limit = Math.min(parseInt(req.query.limit ?? '500', 10) || 500, 2000);
-    let qb = req.supabase!
-      .from('journal_entries')
-      .select('*')
-      .order('entry_date', { ascending: false })
+    const conds: SQL[] = [];
+    if (req.query.resurface === 'boosted') conds.push(gt(journal_entries.resurface_weight, 1));
+    else if (req.query.resurface === 'excluded') conds.push(eq(journal_entries.resurface_weight, 0));
+    const entries = await getDb().query.journal_entries.findMany({
+      where: conds.length ? and(...conds) : undefined,
       // Secondary sort by created_at so multiple entries on the same
       // day surface newest-first. Without this Postgres returns same-
       // entry_date rows in insertion order — oldest at the top.
-      .order('created_at', { ascending: false })
-      .limit(limit);
-    if (req.query.resurface === 'boosted') qb = qb.gt('resurface_weight', 1);
-    else if (req.query.resurface === 'excluded') qb = qb.eq('resurface_weight', 0);
-    const { data, error } = await qb;
-    if (error) throw app.httpErrors.internalServerError(error.message);
-    return { entries: data ?? [] };
+      orderBy: [desc(journal_entries.entry_date), desc(journal_entries.created_at)],
+      limit,
+    });
+    return { entries };
   });
 
   app.post<{
@@ -261,34 +262,27 @@ export const libraryRoutes: FastifyPluginAsync = async (app) => {
     // the heavy lifting. Manual creates via the web form land here; the
     // voice path inserts directly via the executor.
     const body = req.body ?? {};
-    const insert: Record<string, unknown> = {
+    const insert: typeof journal_entries.$inferInsert = {
       transcription_text: typeof body.transcription_text === 'string'
         ? body.transcription_text
         : null,
       entry_date: typeof body.entry_date === 'string' && body.entry_date
         ? body.entry_date
         : new Date().toISOString().slice(0, 10),
-      attachments: Array.isArray(body.attachments) ? body.attachments : [],
+      attachments: Array.isArray(body.attachments) ? (body.attachments as StoredAttachment[]) : [],
       source: typeof body.source === 'string' ? body.source : 'manual',
     };
-    const { data, error } = await req.supabase!
-      .from('journal_entries')
-      .insert(insert)
-      .select('*')
-      .single();
-    if (error) throw app.httpErrors.internalServerError(error.message);
-    return reply.code(201).send(data);
+    const [row] = await getDb().insert(journal_entries).values(insert).returning();
+    if (!row) throw app.httpErrors.internalServerError('insert_returned_no_row');
+    return reply.code(201).send(row);
   });
 
   app.get<{ Params: { id: string } }>('/api/journal-entries/:id', async (req, reply) => {
-    const { data, error } = await req.supabase!
-      .from('journal_entries')
-      .select('*')
-      .eq('id', req.params.id)
-      .maybeSingle();
-    if (error) throw app.httpErrors.internalServerError(error.message);
-    if (!data) return reply.code(404).send({ error: 'not_found' });
-    return data;
+    const row = await getDb().query.journal_entries.findFirst({
+      where: eq(journal_entries.id, req.params.id),
+    });
+    if (!row) return reply.code(404).send({ error: 'not_found' });
+    return row;
   });
 
   app.patch<{
@@ -300,7 +294,7 @@ export const libraryRoutes: FastifyPluginAsync = async (app) => {
       resurface_weight?: number;
     };
   }>('/api/journal-entries/:id', async (req, reply) => {
-    const update: Record<string, unknown> = {};
+    const update: Partial<typeof journal_entries.$inferInsert> = {};
     if (typeof req.body?.transcription_text === 'string') {
       update.transcription_text = req.body.transcription_text;
     } else if (req.body?.transcription_text === null) {
@@ -310,7 +304,7 @@ export const libraryRoutes: FastifyPluginAsync = async (app) => {
       update.entry_date = req.body.entry_date;
     }
     if (Array.isArray(req.body?.attachments)) {
-      update.attachments = req.body.attachments;
+      update.attachments = req.body.attachments as StoredAttachment[];
     }
     if (typeof req.body?.resurface_weight === 'number' && req.body.resurface_weight >= 0) {
       update.resurface_weight = req.body.resurface_weight;
@@ -318,26 +312,21 @@ export const libraryRoutes: FastifyPluginAsync = async (app) => {
     if (Object.keys(update).length === 0) {
       return reply.code(400).send({ error: 'empty_payload' });
     }
-    const { data, error } = await req.supabase!
-      .from('journal_entries')
-      .update(update)
-      .eq('id', req.params.id)
-      .select('*')
-      .single();
-    if (error) throw app.httpErrors.internalServerError(error.message);
-    return data;
+    const [row] = await getDb()
+      .update(journal_entries)
+      .set(update)
+      .where(eq(journal_entries.id, req.params.id))
+      .returning();
+    if (!row) return reply.code(404).send({ error: 'not_found' });
+    return row;
   });
 
   app.delete<{ Params: { id: string } }>('/api/journal-entries/:id', async (req, reply) => {
-    // We delete attachments from Bunny lazily — the row's gone, the
-    // CDN files become orphaned. A future cleanup job can sweep them.
-    // Inline deletion would add a Bunny round-trip per attachment and
+    // We delete attachment files lazily — the row's gone, the stored
+    // files become orphaned. A future cleanup job can sweep them.
+    // Inline deletion would add a storage round-trip per attachment and
     // failure modes (DB gone, file still there) we'd have to handle.
-    const { error } = await req.supabase!
-      .from('journal_entries')
-      .delete()
-      .eq('id', req.params.id);
-    if (error) throw app.httpErrors.internalServerError(error.message);
+    await getDb().delete(journal_entries).where(eq(journal_entries.id, req.params.id));
     return reply.code(204).send();
   });
 
@@ -345,21 +334,18 @@ export const libraryRoutes: FastifyPluginAsync = async (app) => {
 
   app.get<{ Querystring: { limit?: string } }>('/api/books', async (req) => {
     const limit = Math.min(parseInt(req.query.limit ?? '500', 10) || 500, 2000);
-    const { data, error } = await req.supabase!
-      .from('books')
-      .select('*, quotes:quotes(id)')
-      .order('title', { ascending: true })
-      .limit(limit);
-    if (error) throw app.httpErrors.internalServerError(error.message);
+    const rows = await getDb().query.books.findMany({
+      with: { quotes: { columns: { id: true } } },
+      orderBy: asc(books.title),
+      limit,
+    });
     // Compress the quotes join down to a count for the list view.
-    type QuoteRef = { id: string };
-    type BookRow = { quotes?: QuoteRef[]; [k: string]: unknown };
-    const books = ((data ?? []) as BookRow[]).map((b) => ({
+    const bookRows = rows.map((b) => ({
       ...b,
       quote_count: b.quotes?.length ?? 0,
       quotes: undefined,
     }));
-    return { books };
+    return { books: bookRows };
   });
 
   app.post('/api/books', async (req, reply) => {
@@ -367,13 +353,9 @@ export const libraryRoutes: FastifyPluginAsync = async (app) => {
     if (!parsed.success) {
       return reply.code(400).send({ error: 'invalid_payload', details: parsed.error.flatten().fieldErrors });
     }
-    const { data, error } = await req.supabase!
-      .from('books')
-      .insert(parsed.data)
-      .select('*')
-      .single();
-    if (error) throw app.httpErrors.internalServerError(error.message);
-    return reply.code(201).send(data);
+    const [row] = await getDb().insert(books).values(parsed.data).returning();
+    if (!row) throw app.httpErrors.internalServerError('insert_returned_no_row');
+    return reply.code(201).send(row);
   });
 
   app.patch<{ Params: { id: string } }>('/api/books/:id', async (req, reply) => {
@@ -384,38 +366,33 @@ export const libraryRoutes: FastifyPluginAsync = async (app) => {
     if (Object.keys(parsed.data).length === 0) {
       return reply.code(400).send({ error: 'empty_payload' });
     }
-    const { data, error } = await req.supabase!
-      .from('books')
-      .update(parsed.data)
-      .eq('id', req.params.id)
-      .select('*')
-      .single();
-    if (error) throw app.httpErrors.internalServerError(error.message);
-    return data;
+    const [row] = await getDb()
+      .update(books)
+      .set(parsed.data)
+      .where(eq(books.id, req.params.id))
+      .returning();
+    if (!row) return reply.code(404).send({ error: 'not_found' });
+    return row;
   });
 
   app.delete<{ Params: { id: string } }>('/api/books/:id', async (req, reply) => {
     // quotes.book_id has ON DELETE SET NULL so highlights are preserved
     // (just unlinked) when a book row is removed.
-    const { error } = await req.supabase!.from('books').delete().eq('id', req.params.id);
-    if (error) throw app.httpErrors.internalServerError(error.message);
+    await getDb().delete(books).where(eq(books.id, req.params.id));
     return reply.code(204).send();
   });
 
   app.get<{ Params: { id: string } }>('/api/books/:id', async (req, reply) => {
-    const [bookRes, quotesRes] = await Promise.all([
-      req.supabase!.from('books').select('*').eq('id', req.params.id).maybeSingle(),
-      req.supabase!
-        .from('quotes')
-        .select('*')
-        .eq('book_id', req.params.id)
-        .order('page_number', { ascending: true, nullsFirst: false })
-        .order('created_at', { ascending: true }),
+    const db = getDb();
+    const [book, bookQuotes] = await Promise.all([
+      db.query.books.findFirst({ where: eq(books.id, req.params.id) }),
+      db.query.quotes.findMany({
+        where: eq(quotes.book_id, req.params.id),
+        orderBy: [sql`${quotes.page_number} asc nulls last`, asc(quotes.created_at)],
+      }),
     ]);
-    if (bookRes.error) throw app.httpErrors.internalServerError(bookRes.error.message);
-    if (!bookRes.data) return reply.code(404).send({ error: 'not_found' });
-    if (quotesRes.error) throw app.httpErrors.internalServerError(quotesRes.error.message);
-    return { book: bookRes.data, quotes: quotesRes.data ?? [] };
+    if (!book) return reply.code(404).send({ error: 'not_found' });
+    return { book, quotes: bookQuotes };
   });
 
   // ─── Tag aggregation ──────────────────────────────────────────────────
@@ -424,17 +401,15 @@ export const libraryRoutes: FastifyPluginAsync = async (app) => {
   // per-source count, sorted by total count desc. The Readwise import gave
   // a lot of items tag arrays — this lets the UI render a tag cloud and
   // filter by clicking. We aggregate in JS rather than via a Postgres
-  // function so we don't need a new migration; with ~1500 rows total it's
-  // a single column-scan-and-count, well under a second.
+  // function; with ~1500 rows total it's a single column-scan-and-count,
+  // well under a second.
 
-  app.get('/api/library/tags', async (req) => {
-    const sb = req.supabase!;
-    const [notesRes, quotesRes] = await Promise.all([
-      sb.from('notes').select('tags').limit(5000),
-      sb.from('quotes').select('tags').limit(5000),
+  app.get('/api/library/tags', async () => {
+    const db = getDb();
+    const [noteTags, quoteTags] = await Promise.all([
+      db.query.notes.findMany({ columns: { tags: true }, limit: 5000 }),
+      db.query.quotes.findMany({ columns: { tags: true }, limit: 5000 }),
     ]);
-    if (notesRes.error) throw app.httpErrors.internalServerError(notesRes.error.message);
-    if (quotesRes.error) throw app.httpErrors.internalServerError(quotesRes.error.message);
 
     const tally = new Map<string, { tag: string; notes: number; quotes: number }>();
     function bump(tags: string[] | null | undefined, key: 'notes' | 'quotes') {
@@ -446,9 +421,8 @@ export const libraryRoutes: FastifyPluginAsync = async (app) => {
         tally.set(tag, existing);
       }
     }
-    type TagsRow = { tags?: string[] | null };
-    for (const r of (notesRes.data ?? []) as TagsRow[]) bump(r.tags, 'notes');
-    for (const r of (quotesRes.data ?? []) as TagsRow[]) bump(r.tags, 'quotes');
+    for (const r of noteTags) bump(r.tags, 'notes');
+    for (const r of quoteTags) bump(r.tags, 'quotes');
 
     const tags = Array.from(tally.values())
       .map((t) => ({ ...t, total: t.notes + t.quotes }))
@@ -456,23 +430,19 @@ export const libraryRoutes: FastifyPluginAsync = async (app) => {
     return { tags };
   });
 
-  // ─── Unified library feed (all sources, chronological) ────────────────
-
   // ─── Resurfacing — daily rotating pick ────────────────────────────────
   //
   // Pulls one item per day from the resurfacing pool (quotes +
   // journal entries) for the Today page's Resurfacing panel.
   //
-  // Selection is weighted-random seeded by today's date (in the
-  // requester's app timezone, defaulted to America/Denver server-side
-  // for now). Same item shows all day, rotates tomorrow. No state to
-  // update — pure read-only pick.
+  // Selection is weighted-random seeded by today's date. Same item shows
+  // all day, rotates tomorrow. No state to update — pure read-only pick.
   //
   // Each row carries a resurface_weight column (default 1.0). Items
   // with weight 0 are excluded. Higher weights = proportionally more
-  // likely to land. UI for adjusting weights ships later.
+  // likely to land.
   app.get<{ Querystring: { date?: string; skip?: string } }>('/api/library/resurfacing', async (req) => {
-    const sb = req.supabase!;
+    const db = getDb();
     // Comma-separated IDs to exclude from the pool. The web side passes
     // these from a "resurfacing_seen" cookie that the "Next" button on
     // Today bumps every time the user wants to cycle to a different item.
@@ -484,13 +454,16 @@ export const libraryRoutes: FastifyPluginAsync = async (app) => {
     );
     // Pull only what we need to pick + render. ~thousand rows max for
     // a personal library; full scan is fine.
-    const [quotesRes, journalRes] = await Promise.all([
-      sb.from('quotes')
-        .select('id, text, source_author, resurface_weight, book:books(id, title, author)')
-        .gt('resurface_weight', 0),
-      sb.from('journal_entries')
-        .select('id, transcription_text, entry_date, resurface_weight')
-        .gt('resurface_weight', 0),
+    const [poolQuotes, poolJournal] = await Promise.all([
+      db.query.quotes.findMany({
+        columns: { id: true, text: true, source_author: true, resurface_weight: true },
+        with: { book: { columns: { id: true, title: true, author: true } } },
+        where: gt(quotes.resurface_weight, 0),
+      }),
+      db.query.journal_entries.findMany({
+        columns: { id: true, transcription_text: true, entry_date: true, resurface_weight: true },
+        where: gt(journal_entries.resurface_weight, 0),
+      }),
     ]);
 
     // Flatten everything into one weighted pool with a shared shape.
@@ -504,29 +477,25 @@ export const libraryRoutes: FastifyPluginAsync = async (app) => {
     };
     const pool: PoolItem[] = [];
 
-    for (const q of quotesRes.data ?? []) {
-      const book = Array.isArray((q as { book?: unknown }).book)
-        ? ((q as { book: unknown[] }).book[0] as { title?: string; author?: string } | undefined)
-        : ((q as { book?: { title?: string; author?: string } | null }).book ?? undefined);
-      const sourceBits = [book?.title, book?.author ?? (q as { source_author?: string }).source_author]
-        .filter(Boolean);
+    for (const q of poolQuotes) {
+      const sourceBits = [q.book?.title, q.book?.author ?? q.source_author].filter(Boolean);
       pool.push({
         kind: 'quote',
-        id: (q as { id: string }).id,
-        weight: Number((q as { resurface_weight?: number }).resurface_weight ?? 1),
-        excerpt: String((q as { text?: string }).text ?? ''),
+        id: q.id,
+        weight: Number(q.resurface_weight ?? 1),
+        excerpt: String(q.text ?? ''),
         source: sourceBits.length > 0 ? sourceBits.join(' · ') : null,
-        href: `/library/quotes/${(q as { id: string }).id}`,
+        href: `/library/quotes/${q.id}`,
       });
     }
-    for (const j of journalRes.data ?? []) {
+    for (const j of poolJournal) {
       pool.push({
         kind: 'journal',
-        id: (j as { id: string }).id,
-        weight: Number((j as { resurface_weight?: number }).resurface_weight ?? 1),
-        excerpt: String((j as { transcription_text?: string }).transcription_text ?? ''),
-        source: (j as { entry_date?: string }).entry_date ?? null,
-        href: `/library/journal/${(j as { id: string }).id}`,
+        id: j.id,
+        weight: Number(j.resurface_weight ?? 1),
+        excerpt: String(j.transcription_text ?? ''),
+        source: j.entry_date ?? null,
+        href: `/library/journal/${j.id}`,
       });
     }
 
@@ -590,36 +559,48 @@ export const libraryRoutes: FastifyPluginAsync = async (app) => {
     };
   });
 
+  // ─── Unified library feed (all sources, chronological) ────────────────
+
   app.get<{ Querystring: { limit?: string } }>('/api/library/feed', async (req) => {
     // Raised from 200 → 2000 to accommodate bulk-imported vaults. At that
     // scale we'll eventually need pagination, but for now letting the UI
     // ask for everything is simpler than building an infinite-scroll feed.
     const limit = Math.min(parseInt(req.query.limit ?? '60', 10) || 60, 2000);
-    const sb = req.supabase!;
+    const db = getDb();
     // Include title (notes), tags + source_reference (notes + quotes),
     // and the book join (quotes) so the /library "All" view can render
     // the same scannable rows that the per-kind sub-pages do — instead
     // of dumping a wall of body text per item.
-    const [notes, quotes, annotations, journal] = await Promise.all([
-      sb.from('notes')
-        .select('id, title, body, source_type, source_reference, tags, created_at')
-        .order('created_at', { ascending: false }).limit(limit),
-      sb.from('quotes')
-        .select('id, text, source_author, source_reference, tags, created_at, book:books(id, title, author)')
-        .order('created_at', { ascending: false }).limit(limit),
-      sb.from('quote_annotations')
-        .select('id, body, quote_id, annotated_at, quote:quotes(id, text, source_author)')
-        .order('annotated_at', { ascending: false }).limit(limit),
-      sb.from('journal_entries')
-        .select('id, transcription_text, entry_date, created_at')
-        .order('entry_date', { ascending: false }).limit(limit),
+    const [feedNotes, feedQuotes, feedAnnotations, feedJournal] = await Promise.all([
+      db.query.notes.findMany({
+        columns: { id: true, title: true, body: true, source_type: true, source_reference: true, tags: true, created_at: true },
+        orderBy: desc(notes.created_at),
+        limit,
+      }),
+      db.query.quotes.findMany({
+        columns: { id: true, text: true, source_author: true, source_reference: true, tags: true, created_at: true },
+        with: { book: { columns: { id: true, title: true, author: true } } },
+        orderBy: desc(quotes.created_at),
+        limit,
+      }),
+      db.query.quote_annotations.findMany({
+        columns: { id: true, body: true, quote_id: true, annotated_at: true },
+        with: { quote: { columns: { id: true, text: true, source_author: true } } },
+        orderBy: desc(quote_annotations.annotated_at),
+        limit,
+      }),
+      db.query.journal_entries.findMany({
+        columns: { id: true, transcription_text: true, entry_date: true, created_at: true },
+        orderBy: desc(journal_entries.entry_date),
+        limit,
+      }),
     ]);
 
     type FeedItem = { kind: 'note' | 'quote' | 'annotation' | 'journal'; id: string; at: string; payload: Record<string, unknown> };
     const items: FeedItem[] = [];
-    for (const n of notes.data ?? []) items.push({ kind: 'note', id: n.id, at: n.created_at, payload: n });
-    for (const q of quotes.data ?? []) items.push({ kind: 'quote', id: q.id, at: q.created_at, payload: q });
-    for (const a of annotations.data ?? []) items.push({ kind: 'annotation', id: a.id, at: a.annotated_at, payload: a });
+    for (const n of feedNotes) items.push({ kind: 'note', id: n.id, at: n.created_at, payload: n });
+    for (const q of feedQuotes) items.push({ kind: 'quote', id: q.id, at: q.created_at, payload: q });
+    for (const a of feedAnnotations) items.push({ kind: 'annotation', id: a.id, at: a.annotated_at, payload: a });
     // Journal entries: the user can backdate them, so the feed sorts
     // + displays by entry_date (the day the user attributes the entry
     // to), not created_at (when the row was inserted).
@@ -630,7 +611,7 @@ export const libraryRoutes: FastifyPluginAsync = async (app) => {
     // sort as May-23 14:00 above May-23 09:00 instead of collapsing
     // to identical noon-UTC keys. Same-day notes/quotes mix in by
     // their own timestamps too, which feels right.
-    for (const j of journal.data ?? []) {
+    for (const j of feedJournal) {
       const createdTime = j.created_at
         ? new Date(j.created_at).toISOString().slice(11, 19)
         : '12:00:00';

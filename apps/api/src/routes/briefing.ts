@@ -1,6 +1,15 @@
 import type { FastifyPluginAsync } from 'fastify';
+import { and, asc, count, desc, eq, gte, inArray, isNull, lte } from 'drizzle-orm';
 import { getAppTz } from '../lib/app-settings.js';
 import { computeDomainCadences, type CadenceRow } from '../lib/cadence.js';
+import { getDb } from '../lib/db.js';
+import {
+  calendar_events,
+  quotes,
+  routine_completions,
+  routines as routinesTable,
+  tasks,
+} from '../db/schema.js';
 
 // /api/briefing/today — the data layer for the new editorial home screen.
 //
@@ -13,9 +22,9 @@ import { computeDomainCadences, type CadenceRow } from '../lib/cadence.js';
 // observations so the page always reads true at load time. A handful of
 // "max(date)" queries is cheaper than the previous render loop anyway.
 //
-// Routines are folded in as additional brief lines when they're past
-// their goal_days threshold (the user "missed the streak"). System
-// domains (Inbox) are filtered out — slipping doesn't apply.
+// Routines are folded in via routine_completions for today. (The pre-fork
+// code read a nonexistent routines.last_done_date column — the query
+// silently failed and routines_today always reported zeros. Fixed here.)
 
 interface BriefLine {
   kind: 'domain' | 'routine';
@@ -95,10 +104,9 @@ function cadenceRowToBriefLine(row: CadenceRow): BriefLine | null {
 export const briefingRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', app.requireAuth);
 
-  app.get('/api/briefing/today', async (req) => {
-    const sb = req.supabase!;
+  app.get('/api/briefing/today', async () => {
+    const db = getDb();
     const tz = await getAppTz();
-    const nowIso = new Date().toISOString();
     const today = new Intl.DateTimeFormat('en-CA', {
       timeZone: tz,
       year: 'numeric', month: '2-digit', day: '2-digit',
@@ -113,34 +121,36 @@ export const briefingRoutes: FastifyPluginAsync = async (app) => {
     // just kick it off alongside the Today-specific queries.
     const [
       cadenceRows,
-      inboxCountRes,
-      eventsRes,
-      openTasksRes,
-      routinesRes,
-      latestQuoteRes,
+      inboxCountRows,
+      events,
+      openTasks,
+      activeRoutines,
+      latestQuoteRows,
     ] = await Promise.all([
-      computeDomainCadences(sb),
-      sb.from('tasks')
-        .select('id', { count: 'exact', head: true })
-        .eq('domain_id', INBOX_ID)
-        .eq('status', 'open'),
-      sb.from('calendar_events')
-        .select('start_at, title')
-        .gte('start_at', `${today}T00:00:00Z`)
-        .lte('start_at', `${today}T23:59:59Z`)
-        .order('start_at', { ascending: true }),
-      sb.from('tasks')
-        .select('id, title, due_date, top3_for_date')
-        .eq('status', 'open'),
-      sb.from('routines')
-        .select('id, name, active, archived_at, last_done_date, time_of_day')
-        .eq('active', true)
-        .is('archived_at', null),
-      sb.from('quotes')
-        .select('id, text, source_author, source_reference, source_url')
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle(),
+      computeDomainCadences(db),
+      db.select({ n: count() }).from(tasks)
+        .where(and(eq(tasks.domain_id, INBOX_ID), eq(tasks.status, 'open'))),
+      db.query.calendar_events.findMany({
+        columns: { start_at: true, title: true },
+        where: and(
+          gte(calendar_events.start_at, `${today}T00:00:00Z`),
+          lte(calendar_events.start_at, `${today}T23:59:59Z`),
+        ),
+        orderBy: asc(calendar_events.start_at),
+      }),
+      db.query.tasks.findMany({
+        columns: { id: true, title: true, due_date: true, top3_for_date: true },
+        where: eq(tasks.status, 'open'),
+      }),
+      db.query.routines.findMany({
+        columns: { id: true, name: true },
+        where: and(eq(routinesTable.active, true), isNull(routinesTable.archived_at)),
+      }),
+      db.query.quotes.findMany({
+        columns: { id: true, text: true, source_author: true, source_reference: true, source_url: true },
+        orderBy: desc(quotes.created_at),
+        limit: 1,
+      }),
     ]);
 
     // ─── Brief lines — only slipping/stale cadence rows surface here. ──
@@ -149,11 +159,9 @@ export const briefingRoutes: FastifyPluginAsync = async (app) => {
       .filter((b): b is BriefLine => b !== null);
 
     // ─── Inbox count ───────────────────────────────────────────────────
-    const inboxCount = inboxCountRes.count ?? 0;
+    const inboxCount = inboxCountRows[0]?.n ?? 0;
 
     // ─── Commitments anchor data ──────────────────────────────────────
-    type Event = { start_at: string; title: string };
-    const events = (eventsRes.data ?? []) as Event[];
     const nextEvent = events[0]
       ? {
           time: new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(events[0].start_at)),
@@ -167,8 +175,6 @@ export const briefingRoutes: FastifyPluginAsync = async (app) => {
     // top-3. Without overdue in the strip a user with no due-today / no
     // top-3 task would see "Nothing pinned for today." even when work is
     // visibly past deadline — bad UX.
-    type Task = { id: string; title: string; due_date: string | null; top3_for_date: string | null };
-    const openTasks = (openTasksRes.data ?? []) as Task[];
     const overdue = openTasks
       .filter((t) => t.due_date && t.due_date < today)
       .sort((a, b) => (a.due_date ?? '').localeCompare(b.due_date ?? ''));
@@ -183,23 +189,24 @@ export const briefingRoutes: FastifyPluginAsync = async (app) => {
       if (doingTitles.length >= 3) break;
     }
 
-    // ─── Routines for today ────────────────────────────────────────────
-    type Routine = { id: string; name: string; last_done_date: string | null };
-    const routines = (routinesRes.data ?? []) as Routine[];
-    const doneRoutines = routines.filter((r) => r.last_done_date === today);
-    const remainingRoutines = routines.filter((r) => r.last_done_date !== today);
+    // ─── Routines for today (done-ness from routine_completions) ───────
+    let doneIds = new Set<string>();
+    if (activeRoutines.length > 0) {
+      const doneRows = await db.query.routine_completions.findMany({
+        columns: { routine_id: true },
+        where: and(
+          inArray(routine_completions.routine_id, activeRoutines.map((r) => r.id)),
+          eq(routine_completions.completed_date, today),
+        ),
+      });
+      doneIds = new Set(doneRows.map((r) => r.routine_id));
+    }
+    const remainingRoutines = activeRoutines.filter((r) => !doneIds.has(r.id));
 
     // ─── Latest quote — newest by created_at, regardless of weight. ────
     // Stays put on the Today page until the user saves a newer quote;
     // distinct from Resurfaced (date-seeded daily rotation).
-    type LatestQuoteRow = {
-      id: string;
-      text: string | null;
-      source_author: string | null;
-      source_reference: string | null;
-      source_url: string | null;
-    };
-    const lq = (latestQuoteRes.data ?? null) as LatestQuoteRow | null;
+    const lq = latestQuoteRows[0] ?? null;
     const latestQuote: LatestQuote | null = lq
       ? {
           id: lq.id,
@@ -222,8 +229,8 @@ export const briefingRoutes: FastifyPluginAsync = async (app) => {
         titles: doingTitles,
       },
       routines_today: {
-        total: routines.length,
-        done: doneRoutines.length,
+        total: activeRoutines.length,
+        done: doneIds.size,
         remaining_names: remainingRoutines.slice(0, 3).map((r) => r.name),
       },
       latest_quote: latestQuote,
@@ -235,9 +242,8 @@ export const briefingRoutes: FastifyPluginAsync = async (app) => {
   // /api/briefing/domains — full cadence list for the Domains pulse
   // board. Returns every active non-system domain with its cadence row
   // (slip / stale / ok / unconfigured), sorted worst-first.
-  app.get('/api/briefing/domains', async (req) => {
-    const sb = req.supabase!;
-    const rows = await computeDomainCadences(sb);
+  app.get('/api/briefing/domains', async () => {
+    const rows = await computeDomainCadences(getDb());
     return { domains: rows };
   });
 };

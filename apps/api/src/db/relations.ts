@@ -198,7 +198,7 @@ export const routine_completionsRelations = relations(routine_completions, ({one
 }));
 
 export const routinesRelations = relations(routines, ({many}) => ({
-	routine_completions: many(routine_completions),
+	completions: many(routine_completions),
 }));
 
 export const health_metricsRelations = relations(health_metrics, ({one}) => ({
@@ -224,7 +224,7 @@ export const lab_panelsRelations = relations(lab_panels, ({one, many}) => ({
 }));
 
 export const lab_resultsRelations = relations(lab_results, ({one}) => ({
-	lab_panel: one(lab_panels, {
+	panel: one(lab_panels, {
 		fields: [lab_results.panel_id],
 		references: [lab_panels.id]
 	}),

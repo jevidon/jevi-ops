@@ -1,5 +1,12 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
+import { and, asc, count, desc, eq, gte, isNull, lt, sql } from 'drizzle-orm';
 import { sendPushover, isPushoverConfigured } from './pushover.js';
+import type { Db } from './db.js';
+import {
+  calendar_events,
+  notes,
+  observations as observationsTable,
+  tasks as tasksTable,
+} from '../db/schema.js';
 import { env } from './env.js';
 import { getAppTz } from './app-settings.js';
 
@@ -41,7 +48,7 @@ export interface DailySummaryResult {
   needs_review_count: number;
 }
 
-export async function runDailySummary(sb: SupabaseClient): Promise<DailySummaryResult> {
+export async function runDailySummary(db: Db): Promise<DailySummaryResult> {
   if (!isPushoverConfigured()) {
     return {
       sent: false,
@@ -60,36 +67,32 @@ export async function runDailySummary(sb: SupabaseClient): Promise<DailySummaryR
   const todayLocal = formatInTz(new Date(), tz);
 
   // Fetch everything in parallel.
-  const [tasksRes, eventsRes, obsRes, reviewRes] = await Promise.all([
-    sb.from('tasks')
-      .select('id, title, due_time, priority')
-      .eq('status', 'open')
-      .eq('due_date', todayLocal)
-      .order('priority', { ascending: true })
-      .order('due_time', { ascending: true, nullsFirst: false })
-      .limit(50),
-    sb.from('calendar_events')
-      .select('id, title, start_at, all_day')
-      .gte('start_at', startOfLocalDayIso(todayLocal, tz))
-      .lt('start_at', startOfLocalDayIso(addDays(todayLocal, 1, tz), tz))
-      .order('start_at', { ascending: true })
-      .limit(50),
-    sb.from('observations')
-      .select('id, title, severity')
-      .is('dismissed_at', null)
-      .eq('acted_on', false)
-      .order('severity', { ascending: false })
-      .order('surfaced_at', { ascending: false })
-      .limit(20),
-    sb.from('notes')
-      .select('id', { count: 'exact', head: true })
-      .eq('needs_review', true),
+  const [tasks, events, observations, reviewRows] = await Promise.all([
+    db.query.tasks.findMany({
+      columns: { id: true, title: true, due_time: true, priority: true },
+      where: and(eq(tasksTable.status, 'open'), eq(tasksTable.due_date, todayLocal)),
+      orderBy: [asc(tasksTable.priority), sql`${tasksTable.due_time} asc nulls last`],
+      limit: 50,
+    }),
+    db.query.calendar_events.findMany({
+      columns: { id: true, title: true, start_at: true, all_day: true },
+      where: and(
+        gte(calendar_events.start_at, startOfLocalDayIso(todayLocal, tz)),
+        lt(calendar_events.start_at, startOfLocalDayIso(addDays(todayLocal, 1, tz), tz)),
+      ),
+      orderBy: asc(calendar_events.start_at),
+      limit: 50,
+    }),
+    db.query.observations.findMany({
+      columns: { id: true, title: true, severity: true },
+      where: and(isNull(observationsTable.dismissed_at), eq(observationsTable.acted_on, false)),
+      orderBy: [desc(observationsTable.severity), desc(observationsTable.surfaced_at)],
+      limit: 20,
+    }),
+    db.select({ n: count() }).from(notes).where(eq(notes.needs_review, true)),
   ]);
 
-  const tasks = (tasksRes.data ?? []) as TaskRow[];
-  const events = (eventsRes.data ?? []) as EventRow[];
-  const observations = (obsRes.data ?? []) as ObservationRow[];
-  const needsReviewCount = reviewRes.count ?? 0;
+  const needsReviewCount = reviewRows[0]?.n ?? 0;
 
   const totalSignal =
     tasks.length + events.length + observations.length + (needsReviewCount > 0 ? 1 : 0);

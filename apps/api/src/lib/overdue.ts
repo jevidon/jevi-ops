@@ -1,5 +1,7 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
+import { and, eq, inArray, isNotNull } from 'drizzle-orm';
 import { sendPushover, isPushoverConfigured } from './pushover.js';
+import type { Db } from './db.js';
+import { tasks as tasksTable } from '../db/schema.js';
 import { env } from './env.js';
 import { getAppTz } from './app-settings.js';
 
@@ -31,7 +33,7 @@ export interface OverdueRunResult {
   failed: number;
 }
 
-export async function runOverdue(sb: SupabaseClient): Promise<OverdueRunResult> {
+export async function runOverdue(db: Db): Promise<OverdueRunResult> {
   if (!isPushoverConfigured()) {
     return { considered: 0, dispatched: 0, failed: 0 };
   }
@@ -43,20 +45,19 @@ export async function runOverdue(sb: SupabaseClient): Promise<OverdueRunResult> 
     isoDate(now),
   ];
 
-  const { data, error } = await sb
-    .from('tasks')
-    .select('id, title, status, priority, due_date, due_time, reminders_sent, project:projects(name)')
-    .eq('status', 'open')
-    .not('due_time', 'is', null)
-    .in('due_date', dates)
-    .limit(500);
-  if (error) throw new Error(`tasks query failed: ${error.message}`);
-
-  const tasks = ((data ?? []) as unknown as Array<Omit<OverdueTask, 'project'> & { project: { name: string | null } | { name: string | null }[] | null }>)
-    .map((t) => ({
-      ...t,
-      project: Array.isArray(t.project) ? (t.project[0] ?? null) : t.project,
-    })) as OverdueTask[];
+  const tasks: OverdueTask[] = await db.query.tasks.findMany({
+    columns: {
+      id: true, title: true, status: true, priority: true,
+      due_date: true, due_time: true, reminders_sent: true,
+    },
+    with: { project: { columns: { name: true } } },
+    where: and(
+      eq(tasksTable.status, 'open'),
+      isNotNull(tasksTable.due_time),
+      inArray(tasksTable.due_date, dates),
+    ),
+    limit: 500,
+  });
 
   let dispatched = 0;
   let failed = 0;
@@ -83,14 +84,11 @@ export async function runOverdue(sb: SupabaseClient): Promise<OverdueRunResult> 
 
     if (result.ok) {
       const newSent = { ...sent, overdue: new Date().toISOString() };
-      const { error: updErr } = await sb
-        .from('tasks')
-        .update({ reminders_sent: newSent })
-        .eq('id', t.id);
-      if (updErr) {
-        failed += 1;
-      } else {
+      try {
+        await db.update(tasksTable).set({ reminders_sent: newSent }).where(eq(tasksTable.id, t.id));
         dispatched += 1;
+      } catch {
+        failed += 1;
       }
     } else {
       failed += 1;

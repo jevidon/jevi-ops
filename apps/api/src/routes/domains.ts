@@ -1,5 +1,8 @@
 import type { FastifyPluginAsync } from 'fastify';
+import { asc, eq } from 'drizzle-orm';
 import { UpdateDomainSchema } from '@jevi-ops/shared/schemas';
+import { getDb } from '../lib/db.js';
+import { stewardship_domains } from '../db/schema.js';
 
 // Domain CRUD. Single-user system, so we surface every active domain on
 // list. Editing happens via the /domains/[id] detail page on the web side.
@@ -7,25 +10,20 @@ import { UpdateDomainSchema } from '@jevi-ops/shared/schemas';
 export const domainRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', app.requireAuth);
 
-  app.get('/api/domains', async (req) => {
-    const { data, error } = await req.supabase!
-      .from('stewardship_domains')
-      .select('*')
-      .eq('active', true)
-      .order('name', { ascending: true });
-    if (error) throw app.httpErrors.internalServerError(error.message);
-    return { domains: data ?? [] };
+  app.get('/api/domains', async () => {
+    const rows = await getDb().query.stewardship_domains.findMany({
+      where: eq(stewardship_domains.active, true),
+      orderBy: asc(stewardship_domains.name),
+    });
+    return { domains: rows };
   });
 
   app.get<{ Params: { id: string } }>('/api/domains/:id', async (req, reply) => {
-    const { data, error } = await req.supabase!
-      .from('stewardship_domains')
-      .select('*')
-      .eq('id', req.params.id)
-      .maybeSingle();
-    if (error) throw app.httpErrors.internalServerError(error.message);
-    if (!data) return reply.code(404).send({ error: 'not_found' });
-    return data;
+    const row = await getDb().query.stewardship_domains.findFirst({
+      where: eq(stewardship_domains.id, req.params.id),
+    });
+    if (!row) return reply.code(404).send({ error: 'not_found' });
+    return row;
   });
 
   app.patch<{ Params: { id: string } }>('/api/domains/:id', async (req, reply) => {
@@ -40,16 +38,16 @@ export const domainRoutes: FastifyPluginAsync = async (app) => {
       return reply.code(400).send({ error: 'empty_payload' });
     }
 
+    const db = getDb();
+
     // System-domain protection (Addendum 03). Read is_system before the
     // update so we can reject identity-changing patches (name, active) on
     // Inbox and any future system domains. Description and failure_patterns
     // remain editable — those don't break the system contract.
-    const { data: existing, error: readErr } = await req.supabase!
-      .from('stewardship_domains')
-      .select('is_system')
-      .eq('id', req.params.id)
-      .maybeSingle();
-    if (readErr) throw app.httpErrors.internalServerError(readErr.message);
+    const existing = await db.query.stewardship_domains.findFirst({
+      columns: { is_system: true },
+      where: eq(stewardship_domains.id, req.params.id),
+    });
     if (!existing) return reply.code(404).send({ error: 'not_found' });
     if (existing.is_system === true) {
       const forbidden = ['name', 'active', 'is_system'] as const;
@@ -63,14 +61,13 @@ export const domainRoutes: FastifyPluginAsync = async (app) => {
       }
     }
 
-    const { data, error } = await req.supabase!
-      .from('stewardship_domains')
-      .update(parsed.data)
-      .eq('id', req.params.id)
-      .select('*')
-      .single();
-    if (error) throw app.httpErrors.internalServerError(error.message);
-    return data;
+    const [row] = await db
+      .update(stewardship_domains)
+      .set(parsed.data)
+      .where(eq(stewardship_domains.id, req.params.id))
+      .returning();
+    if (!row) return reply.code(404).send({ error: 'not_found' });
+    return row;
   });
 
   // DELETE is not exposed today. If it ever ships, the is_system check

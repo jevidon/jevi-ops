@@ -1,22 +1,36 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
 import type Anthropic from '@anthropic-ai/sdk';
+import { and, asc, count, desc, eq, gte, ilike, inArray, lte, sql, type SQL } from 'drizzle-orm';
+import { arrayContains } from 'drizzle-orm';
 import { getAppTz } from './app-settings.js';
+import type { Db } from './db.js';
+import {
+  activity_log,
+  calendar_events,
+  milestones as milestonesTable,
+  notes,
+  people,
+  person_facts,
+  person_interactions,
+  projects,
+  quote_annotations,
+  quotes,
+  routines,
+  tasks,
+} from '../db/schema.js';
 
 // Tool surface for the chat query interface (spec §11). Each tool is a
-// thin DB query that returns concise JSON Claude can summarize. Keep them
-// small and well-described — Claude picks tools based on the description.
+// thin DB query that returns concise JSON the model can summarize. Keep them
+// small and well-described — the model picks tools based on the description.
 //
 // Pattern:
-//   1. JSON-schema for the tool input (passed to Claude)
-//   2. handler(input, sb) — runs the query, returns plain-text-friendly JSON
-//
-// All queries go through the user-scoped Supabase client (RLS applies).
+//   1. JSON-schema for the tool input (passed to the model)
+//   2. handler(input, db) — runs the query, returns plain-text-friendly JSON
 
 export interface ChatTool {
   name: string;
   description: string;
   input_schema: Record<string, unknown>;
-  handler: (input: Record<string, unknown>, sb: SupabaseClient) => Promise<unknown>;
+  handler: (input: Record<string, unknown>, db: Db) => Promise<unknown>;
 }
 
 // ─── search_tasks ────────────────────────────────────────────────────────
@@ -34,25 +48,30 @@ const searchTasks: ChatTool = {
       project_name: { type: 'string', description: 'Exact project name (case-insensitive)' },
     },
   },
-  handler: async (input, sb) => {
-    let q = sb
-      .from('tasks')
-      .select('id, title, status, due_date, completed_at, project:projects(id, name)')
-      .order('created_at', { ascending: false })
-      .limit(50);
-    if (typeof input.title_contains === 'string') q = q.ilike('title', `%${input.title_contains}%`);
-    if (input.status === 'open' || input.status === 'done') q = q.eq('status', input.status);
-    if (typeof input.due_on_or_after === 'string') q = q.gte('due_date', input.due_on_or_after);
-    if (typeof input.due_on_or_before === 'string') q = q.lte('due_date', input.due_on_or_before);
+  handler: async (input, db) => {
+    const conds: SQL[] = [];
+    if (typeof input.title_contains === 'string') conds.push(ilike(tasks.title, `%${input.title_contains}%`));
+    if (input.status === 'open' || input.status === 'done') conds.push(eq(tasks.status, input.status));
+    if (typeof input.due_on_or_after === 'string') conds.push(gte(tasks.due_date, input.due_on_or_after));
+    if (typeof input.due_on_or_before === 'string') conds.push(lte(tasks.due_date, input.due_on_or_before));
     if (typeof input.project_name === 'string') {
-      const { data: ps } = await sb.from('projects').select('id').ilike('name', input.project_name).limit(1);
-      const pid = ps?.[0]?.id;
-      if (pid) q = q.eq('project_id', pid);
+      const ps = await db.query.projects.findMany({
+        columns: { id: true },
+        where: ilike(projects.name, input.project_name),
+        limit: 1,
+      });
+      const pid = ps[0]?.id;
+      if (pid) conds.push(eq(tasks.project_id, pid));
       else return { matches: 0, results: [], note: `No project matching "${input.project_name}"` };
     }
-    const { data, error } = await q;
-    if (error) return { error: error.message };
-    return { matches: data?.length ?? 0, results: data ?? [] };
+    const results = await db.query.tasks.findMany({
+      columns: { id: true, title: true, status: true, due_date: true, completed_at: true },
+      with: { project: { columns: { id: true, name: true } } },
+      where: conds.length ? and(...conds) : undefined,
+      orderBy: desc(tasks.created_at),
+      limit: 50,
+    });
+    return { matches: results.length, results };
   },
 };
 
@@ -74,19 +93,23 @@ const searchNotes: ChatTool = {
       needs_review: { type: 'boolean', description: 'Only return notes flagged for re-classification' },
     },
   },
-  handler: async (input, sb) => {
-    let q = sb
-      .from('notes')
-      .select('id, body, source_type, source_reference, tags, related_quote_id, related_project_id, related_person_id, needs_review, created_at')
-      .order('created_at', { ascending: false })
-      .limit(30);
-    if (typeof input.tag === 'string') q = q.contains('tags', [input.tag]);
-    if (typeof input.body_contains === 'string') q = q.ilike('body', `%${input.body_contains}%`);
-    if (typeof input.source_type === 'string') q = q.eq('source_type', input.source_type);
-    if (input.needs_review === true) q = q.eq('needs_review', true);
-    const { data, error } = await q;
-    if (error) return { error: error.message };
-    return { matches: data?.length ?? 0, results: data ?? [] };
+  handler: async (input, db) => {
+    const conds: SQL[] = [];
+    if (typeof input.tag === 'string') conds.push(arrayContains(notes.tags, [input.tag]));
+    if (typeof input.body_contains === 'string') conds.push(ilike(notes.body, `%${input.body_contains}%`));
+    if (typeof input.source_type === 'string') conds.push(eq(notes.source_type, input.source_type));
+    if (input.needs_review === true) conds.push(eq(notes.needs_review, true));
+    const results = await db.query.notes.findMany({
+      columns: {
+        id: true, body: true, source_type: true, source_reference: true, tags: true,
+        related_quote_id: true, related_project_id: true, related_person_id: true,
+        needs_review: true, created_at: true,
+      },
+      where: conds.length ? and(...conds) : undefined,
+      orderBy: desc(notes.created_at),
+      limit: 30,
+    });
+    return { matches: results.length, results };
   },
 };
 
@@ -103,25 +126,20 @@ const searchAnnotations: ChatTool = {
       quote_text_contains: { type: 'string', description: 'Substring to match in the parent quote text' },
     },
   },
-  handler: async (input, sb) => {
-    let q = sb
-      .from('quote_annotations')
-      .select('id, body, context, tags, annotated_at, quote:quotes(id, text, source_author, source_reference)')
-      .order('annotated_at', { ascending: false })
-      .limit(30);
-    if (typeof input.body_contains === 'string') q = q.ilike('body', `%${input.body_contains}%`);
-    if (typeof input.tag === 'string') q = q.contains('tags', [input.tag]);
-    const { data, error } = await q;
-    if (error) return { error: error.message };
-    let results = data ?? [];
+  handler: async (input, db) => {
+    const conds: SQL[] = [];
+    if (typeof input.body_contains === 'string') conds.push(ilike(quote_annotations.body, `%${input.body_contains}%`));
+    if (typeof input.tag === 'string') conds.push(arrayContains(quote_annotations.tags, [input.tag]));
+    let results = await db.query.quote_annotations.findMany({
+      columns: { id: true, body: true, context: true, tags: true, annotated_at: true },
+      with: { quote: { columns: { id: true, text: true, source_author: true, source_reference: true } } },
+      where: conds.length ? and(...conds) : undefined,
+      orderBy: desc(quote_annotations.annotated_at),
+      limit: 30,
+    });
     if (typeof input.quote_text_contains === 'string') {
       const needle = input.quote_text_contains.toLowerCase();
-      type QuoteRel = { text?: string | null };
-      results = results.filter((r) => {
-        const quote = (r as { quote?: QuoteRel | QuoteRel[] | null }).quote;
-        const qarr = Array.isArray(quote) ? quote : quote ? [quote] : [];
-        return (qarr[0]?.text ?? '').toLowerCase().includes(needle);
-      });
+      results = results.filter((r) => (r.quote?.text ?? '').toLowerCase().includes(needle));
     }
     return { matches: results.length, results };
   },
@@ -140,26 +158,29 @@ const searchQuotes: ChatTool = {
       book_or_author_contains: { type: 'string' },
     },
   },
-  handler: async (input, sb) => {
-    let q = sb
-      .from('quotes')
-      .select('id, text, page_number, chapter, source_author, source_reference, tags, book:books(title, author), annotations:quote_annotations(id, body, annotated_at, context)')
-      .order('created_at', { ascending: false })
-      .limit(30);
-    if (typeof input.tag === 'string') q = q.contains('tags', [input.tag]);
-    if (typeof input.text_contains === 'string') q = q.ilike('text', `%${input.text_contains}%`);
-    const { data, error } = await q;
-    if (error) return { error: error.message };
-    let results = data ?? [];
+  handler: async (input, db) => {
+    const conds: SQL[] = [];
+    if (typeof input.tag === 'string') conds.push(arrayContains(quotes.tags, [input.tag]));
+    if (typeof input.text_contains === 'string') conds.push(ilike(quotes.text, `%${input.text_contains}%`));
+    let results = await db.query.quotes.findMany({
+      columns: {
+        id: true, text: true, page_number: true, chapter: true,
+        source_author: true, source_reference: true, tags: true,
+      },
+      with: {
+        book: { columns: { title: true, author: true } },
+        annotations: { columns: { id: true, body: true, annotated_at: true, context: true } },
+      },
+      where: conds.length ? and(...conds) : undefined,
+      orderBy: desc(quotes.created_at),
+      limit: 30,
+    });
     if (typeof input.book_or_author_contains === 'string') {
       const needle = input.book_or_author_contains.toLowerCase();
       results = results.filter((r) => {
         const author = (r.source_author ?? '').toLowerCase();
-        type BookRel = { title?: string | null; author?: string | null };
-        const book = (r as { book?: BookRel | BookRel[] | null }).book;
-        const bookArr = Array.isArray(book) ? book : book ? [book] : [];
-        const bookTitle = (bookArr[0]?.title ?? '').toLowerCase();
-        const bookAuthor = (bookArr[0]?.author ?? '').toLowerCase();
+        const bookTitle = (r.book?.title ?? '').toLowerCase();
+        const bookAuthor = (r.book?.author ?? '').toLowerCase();
         return author.includes(needle) || bookTitle.includes(needle) || bookAuthor.includes(needle);
       });
     }
@@ -179,29 +200,42 @@ const getProjectSummary: ChatTool = {
     },
     required: ['project_name'],
   },
-  handler: async (input, sb) => {
+  handler: async (input, db) => {
     const name = String(input.project_name ?? '');
-    const { data: projects } = await sb
-      .from('projects')
-      .select('id, name, status, hours_logged, quoted_hours, start_date, target_date, color, updated_at, domain:stewardship_domains(name)')
-      .ilike('name', `%${name}%`)
-      .limit(5);
-    if (!projects || projects.length === 0) return { matched: 0 };
-    if (projects.length > 1) return { matched: projects.length, candidates: projects.map((p) => p.name) };
+    const matched = await db.query.projects.findMany({
+      columns: {
+        id: true, name: true, status: true, hours_logged: true, quoted_hours: true,
+        start_date: true, target_date: true, color: true, updated_at: true,
+      },
+      with: { domain: { columns: { name: true } } },
+      where: ilike(projects.name, `%${name}%`),
+      limit: 5,
+    });
+    if (matched.length === 0) return { matched: 0 };
+    if (matched.length > 1) return { matched: matched.length, candidates: matched.map((p) => p.name) };
 
-    const p = projects[0]!;
-    const [{ data: milestones }, { data: openTasks, count: openCount }, { data: lastActivity }] =
-      await Promise.all([
-        sb.from('milestones').select('title, status, weight').eq('project_id', p.id).order('position'),
-        sb.from('tasks').select('id', { count: 'exact', head: false }).eq('project_id', p.id).eq('status', 'open').limit(20),
-        sb.from('activity_log').select('entry, hours_logged, logged_at, source').eq('project_id', p.id).order('logged_at', { ascending: false }).limit(5),
-      ]);
+    const p = matched[0]!;
+    const [projectMilestones, openCountRows, lastActivity] = await Promise.all([
+      db.query.milestones.findMany({
+        columns: { title: true, status: true, weight: true },
+        where: eq(milestonesTable.project_id, p.id),
+        orderBy: asc(milestonesTable.position),
+      }),
+      db.select({ n: count() }).from(tasks)
+        .where(and(eq(tasks.project_id, p.id), eq(tasks.status, 'open'))),
+      db.query.activity_log.findMany({
+        columns: { entry: true, hours_logged: true, logged_at: true, source: true },
+        where: eq(activity_log.project_id, p.id),
+        orderBy: desc(activity_log.logged_at),
+        limit: 5,
+      }),
+    ]);
 
     return {
       project: p,
-      milestones: milestones ?? [],
-      open_tasks_count: openCount ?? openTasks?.length ?? 0,
-      last_activity_entries: lastActivity ?? [],
+      milestones: projectMilestones,
+      open_tasks_count: openCountRows[0]?.n ?? 0,
+      last_activity_entries: lastActivity,
     };
   },
 };
@@ -221,7 +255,7 @@ const getRecentEvents: ChatTool = {
     },
     required: ['range'],
   },
-  handler: async (input, sb) => {
+  handler: async (input, db) => {
     const now = new Date();
     const range = String(input.range ?? '');
     const day = 24 * 60 * 60 * 1000;
@@ -235,14 +269,15 @@ const getRecentEvents: ChatTool = {
       case 'last_30_days': from = new Date(now.getTime() - 30 * day); to = now; break;
       default: return { error: 'unknown_range' };
     }
-    const { data, error } = await sb
-      .from('calendar_events')
-      .select('title, start_at, end_at, all_day, location, source')
-      .gte('start_at', from.toISOString())
-      .lte('start_at', to.toISOString())
-      .order('start_at');
-    if (error) return { error: error.message };
-    return { range, from: from.toISOString(), to: to.toISOString(), count: data?.length ?? 0, events: data ?? [] };
+    const events = await db.query.calendar_events.findMany({
+      columns: { title: true, start_at: true, end_at: true, all_day: true, location: true, source: true },
+      where: and(
+        gte(calendar_events.start_at, from.toISOString()),
+        lte(calendar_events.start_at, to.toISOString()),
+      ),
+      orderBy: asc(calendar_events.start_at),
+    });
+    return { range, from: from.toISOString(), to: to.toISOString(), count: events.length, events };
   },
 };
 
@@ -291,36 +326,41 @@ const searchPeople: ChatTool = {
       company_contains: { type: 'string', description: 'Substring to match in the company/org field' },
     },
   },
-  handler: async (input, sb) => {
-    let q = sb
-      .from('people')
-      .select('id, name, relationship_type, email, phone, company, notes, updated_at')
-      .order('name', { ascending: true })
-      .limit(20);
-    if (typeof input.name_contains === 'string') q = q.ilike('name', `%${input.name_contains}%`);
-    if (typeof input.relationship_type === 'string') q = q.eq('relationship_type', input.relationship_type);
-    if (typeof input.company_contains === 'string') q = q.ilike('company', `%${input.company_contains}%`);
-    const { data: people, error } = await q;
-    if (error) return { error: error.message };
-    if (!people || people.length === 0) return { matches: 0, results: [] };
+  handler: async (input, db) => {
+    const conds: SQL[] = [];
+    if (typeof input.name_contains === 'string') conds.push(ilike(people.name, `%${input.name_contains}%`));
+    if (typeof input.relationship_type === 'string') conds.push(eq(people.relationship_type, input.relationship_type));
+    if (typeof input.company_contains === 'string') conds.push(ilike(people.company, `%${input.company_contains}%`));
+    const matchedPeople = await db.query.people.findMany({
+      columns: {
+        id: true, name: true, relationship_type: true, email: true,
+        phone: true, company: true, notes: true, updated_at: true,
+      },
+      where: conds.length ? and(...conds) : undefined,
+      orderBy: asc(people.name),
+      limit: 20,
+    });
+    if (matchedPeople.length === 0) return { matches: 0, results: [] };
 
     // Fan out to facts + interactions in one batch each. Cheaper than
     // per-person queries when the result set is small.
-    const ids = people.map((p) => p.id);
-    const [factsRes, intRes] = await Promise.all([
-      sb.from('person_facts')
-        .select('person_id, fact_type, fact_value, date_relevant, recurring')
-        .in('person_id', ids)
-        .order('date_relevant', { ascending: true, nullsFirst: false }),
-      sb.from('person_interactions')
-        .select('person_id, interaction_type, notes, occurred_at')
-        .in('person_id', ids)
-        .order('occurred_at', { ascending: false })
-        .limit(ids.length * 5),
+    const ids = matchedPeople.map((p) => p.id);
+    const [facts, interactions] = await Promise.all([
+      db.query.person_facts.findMany({
+        columns: { person_id: true, fact_type: true, fact_value: true, date_relevant: true, recurring: true },
+        where: inArray(person_facts.person_id, ids),
+        orderBy: sql`${person_facts.date_relevant} asc nulls last`,
+      }),
+      db.query.person_interactions.findMany({
+        columns: { person_id: true, interaction_type: true, notes: true, occurred_at: true },
+        where: inArray(person_interactions.person_id, ids),
+        orderBy: desc(person_interactions.occurred_at),
+        limit: ids.length * 5,
+      }),
     ]);
 
     const factsBy = new Map<string, unknown[]>();
-    for (const f of factsRes.data ?? []) {
+    for (const f of facts) {
       const list = factsBy.get(f.person_id) ?? [];
       list.push({
         type: f.fact_type,
@@ -331,7 +371,7 @@ const searchPeople: ChatTool = {
       factsBy.set(f.person_id, list);
     }
     const intsBy = new Map<string, unknown[]>();
-    for (const i of intRes.data ?? []) {
+    for (const i of interactions) {
       const list = intsBy.get(i.person_id) ?? [];
       // Trim each person to their 5 most recent.
       if (list.length < 5) {
@@ -344,7 +384,7 @@ const searchPeople: ChatTool = {
       intsBy.set(i.person_id, list);
     }
 
-    const results = people.map((p) => ({
+    const results = matchedPeople.map((p) => ({
       ...p,
       facts: factsBy.get(p.id) ?? [],
       recent_interactions: intsBy.get(p.id) ?? [],
@@ -374,32 +414,27 @@ const searchRoutines: ChatTool = {
       include_archived: { type: 'boolean', description: 'Include archived (inactive) routines' },
     },
   },
-  handler: async (input, sb) => {
-    let q = sb
-      .from('routines')
-      .select('id, name, description, time_of_day, specific_time, active, completions:routine_completions(completed_date)')
-      .order('position', { ascending: true });
-    if (input.include_archived !== true) q = q.eq('active', true);
-    if (typeof input.name_contains === 'string') q = q.ilike('name', `%${input.name_contains}%`);
-    if (typeof input.time_of_day === 'string') q = q.eq('time_of_day', input.time_of_day);
-    const { data, error } = await q;
-    if (error) return { error: error.message };
+  handler: async (input, db) => {
+    const conds: SQL[] = [];
+    if (input.include_archived !== true) conds.push(eq(routines.active, true));
+    if (typeof input.name_contains === 'string') conds.push(ilike(routines.name, `%${input.name_contains}%`));
+    if (typeof input.time_of_day === 'string') conds.push(eq(routines.time_of_day, input.time_of_day));
+    const rows = await db.query.routines.findMany({
+      columns: {
+        id: true, name: true, description: true, time_of_day: true,
+        specific_time: true, active: true,
+      },
+      with: { completions: { columns: { completed_date: true } } },
+      where: conds.length ? and(...conds) : undefined,
+      orderBy: asc(routines.position),
+    });
 
     // Compute today + last-90-day stats inline. We mirror what
     // routine-stats.ts does in shared but keep this self-contained so
     // the chat tool doesn't depend on a workspace import.
     const todayIso = todayInTz(await getAppTz());
-    type Row = {
-      id: string;
-      name: string;
-      description: string | null;
-      time_of_day: string;
-      specific_time: string | null;
-      active: boolean;
-      completions?: { completed_date: string }[];
-    };
 
-    const results = ((data ?? []) as Row[]).map((r) => {
+    const results = rows.map((r) => {
       const dates = (r.completions ?? [])
         .map((c) => c.completed_date)
         .sort()
@@ -498,9 +533,9 @@ export function toolDefsForAnthropic(): Anthropic.Tool[] {
 export async function runTool(
   name: string,
   input: Record<string, unknown>,
-  sb: SupabaseClient,
+  db: Db,
 ): Promise<unknown> {
   const tool = CHAT_TOOLS.find((t) => t.name === name);
   if (!tool) return { error: `unknown_tool: ${name}` };
-  return tool.handler(input, sb);
+  return tool.handler(input, db);
 }

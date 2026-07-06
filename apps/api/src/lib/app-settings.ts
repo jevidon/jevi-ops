@@ -1,4 +1,6 @@
-import { supabaseAdmin } from './supabase.js';
+import { eq } from 'drizzle-orm';
+import { getDb } from './db.js';
+import { app_settings } from '../db/schema.js';
 
 // App-wide settings loader with a process-lifetime cache. The settings
 // table is a single row that changes essentially never, so we read it
@@ -13,21 +15,17 @@ interface AppSettings {
 }
 
 // In-memory cache. Reset by invalidateAppSettings() when /api/settings/app
-// PATCH succeeds. Across processes (PM2 cluster, multiple pm2 reload
-// instances) cache drift is possible but harmless — each process gets
-// its own copy and the user-facing settings page rereads on every load.
+// PATCH succeeds. This is the single API process, so drift isn't a concern.
 let cache: AppSettings | null = null;
 let inflight: Promise<AppSettings> | null = null;
 
 async function load(): Promise<AppSettings> {
   try {
-    const { data, error } = await supabaseAdmin()
-      .from('app_settings')
-      .select('timezone')
-      .eq('id', true)
-      .maybeSingle();
-    if (error) throw error;
-    return { timezone: data?.timezone ?? DEFAULT_TIMEZONE };
+    const row = await getDb().query.app_settings.findFirst({
+      columns: { timezone: true },
+      where: eq(app_settings.id, true),
+    });
+    return { timezone: row?.timezone ?? DEFAULT_TIMEZONE };
   } catch {
     // Pre-migration or transient DB error — keep the app running with
     // the default. Callers don't need to handle this case.

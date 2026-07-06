@@ -1,10 +1,12 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
 import type Anthropic from '@anthropic-ai/sdk';
+import { eq, gte, not, inArray } from 'drizzle-orm';
 import { anthropic, anthropicModel } from './anthropic.js';
 import { getAppTz } from './app-settings.js';
+import type { Db } from './db.js';
+import { content_items, person_interactions, projects, stewardship_domains } from '../db/schema.js';
 
-// Voice parser — spec §14. Receives a transcript + a user-scoped Supabase
-// client (for context gathering), returns a structured ParseResult.
+// Voice parser — spec §14. Receives a transcript + the db handle (for
+// context gathering), returns a structured ParseResult.
 
 // ─── Context gathered from the DB and sent with every request ────────────
 
@@ -17,7 +19,7 @@ interface ParseContext {
   active_content_items: { id: string; title: string; status: string }[];
 }
 
-async function gatherContext(sb: SupabaseClient): Promise<ParseContext> {
+async function gatherContext(db: Db): Promise<ParseContext> {
   const now = new Date();
   const tz = await getAppTz();
   const todayDate = new Intl.DateTimeFormat('en-CA', {
@@ -28,37 +30,43 @@ async function gatherContext(sb: SupabaseClient): Promise<ParseContext> {
   // Last 30 days cutoff for "recent people"
   const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
 
-  const [projects, domains, people, content] = await Promise.all([
-    sb.from('projects').select('id, name, domain_id').eq('status', 'active').limit(50),
-    sb.from('stewardship_domains').select('id, name').eq('active', true),
-    sb.from('person_interactions')
-      .select('person_id, people(id, name)')
-      .gte('occurred_at', thirtyDaysAgo)
-      .limit(100),
-    sb.from('content_items')
-      .select('id, title, status')
-      .not('status', 'in', '("done")')
-      .limit(50),
+  const [activeProjects, activeDomains, interactions, activeContent] = await Promise.all([
+    db.query.projects.findMany({
+      columns: { id: true, name: true, domain_id: true },
+      where: eq(projects.status, 'active'),
+      limit: 50,
+    }),
+    db.query.stewardship_domains.findMany({
+      columns: { id: true, name: true },
+      where: eq(stewardship_domains.active, true),
+    }),
+    db.query.person_interactions.findMany({
+      columns: { person_id: true },
+      with: { person: { columns: { id: true, name: true } } },
+      where: gte(person_interactions.occurred_at, thirtyDaysAgo),
+      limit: 100,
+    }),
+    db.query.content_items.findMany({
+      columns: { id: true, title: true, status: true },
+      where: not(inArray(content_items.status, ['done'])),
+      limit: 50,
+    }),
   ]);
 
-  // Dedup people pulled from interactions. Supabase types the FK join as an
-  // array regardless of cardinality, so flatten before dedup.
+  // Dedup people pulled from interactions.
   const peopleMap = new Map<string, { id: string; name: string }>();
-  type PeopleJoinRow = { people: { id: string; name: string } | { id: string; name: string }[] | null };
-  for (const row of (people.data ?? []) as unknown as PeopleJoinRow[]) {
-    const arr = Array.isArray(row.people) ? row.people : row.people ? [row.people] : [];
-    for (const p of arr) {
-      if (p?.id) peopleMap.set(p.id, { id: p.id, name: p.name });
-    }
+  for (const row of interactions) {
+    const p = row.person;
+    if (p?.id) peopleMap.set(p.id, { id: p.id, name: p.name });
   }
 
   return {
     now_iso: now.toISOString(),
     today_date: todayDate,
-    active_projects: projects.data ?? [],
-    active_domains: domains.data ?? [],
+    active_projects: activeProjects,
+    active_domains: activeDomains,
     recent_people: Array.from(peopleMap.values()),
-    active_content_items: content.data ?? [],
+    active_content_items: activeContent,
   };
 }
 
@@ -210,9 +218,9 @@ export type ParseResult =
 
 export async function parseTranscript(
   transcript: string,
-  sb: SupabaseClient,
+  db: Db,
 ): Promise<ParseResult> {
-  const context = await gatherContext(sb);
+  const context = await gatherContext(db);
 
   // Request body. Adaptive thinking + low effort: parsing is well-scoped,
   // doesn't need deep reasoning. System prompt is static (cached); per-request

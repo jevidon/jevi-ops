@@ -323,7 +323,7 @@ export const calendar_events = pgTable("calendar_events", {
 	end_at: timestamp({ withTimezone: true, mode: 'string' }).notNull(),
 	all_day: boolean().default(false).notNull(),
 	location: text(),
-	attendees: jsonb().$type<string[]>().default([]).notNull(),
+	attendees: jsonb().$type<Array<string | { email?: string | null; response?: string | null }>>().default([]).notNull(),
 	source: text().default('google').notNull(),
 	synced_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),

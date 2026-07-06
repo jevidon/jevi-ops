@@ -7,6 +7,7 @@ import { parseTranscript } from '../lib/parser.js';
 import { executeActions } from '../lib/executor.js';
 import { isAnthropicConfigured } from '../lib/anthropic.js';
 import { transcribeAudio, isWhisperConfigured } from '../lib/whisper.js';
+import { getDb } from '../lib/db.js';
 
 // POST /api/capture/voice         — pre-transcribed text path (Web Speech API)
 // POST /api/capture/voice-audio   — multipart audio path (MediaRecorder → Whisper)
@@ -22,7 +23,7 @@ async function runPipeline(
 ) {
   let result;
   try {
-    result = await parseTranscript(transcript, req.supabase!);
+    result = await parseTranscript(transcript, getDb());
   } catch (err) {
     req.log.error({ err }, 'parser failed');
     return reply.code(502).send({
@@ -47,7 +48,7 @@ async function runPipeline(
     });
   }
 
-  const executionResults = await executeActions(req.supabase!, result.actions, { captureSource });
+  const executionResults = await executeActions(getDb(), result.actions, { captureSource });
   req.log.info(
     {
       user_id: req.user!.id,

@@ -1,4 +1,12 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
+import { and, count, eq, gte, isNull, isNotNull, lte, ne } from 'drizzle-orm';
+import type { Db } from './db.js';
+import {
+  activity_log,
+  journal_entries,
+  observations as observationsTable,
+  projects,
+  stewardship_domains,
+} from '../db/schema.js';
 
 // Observations engine — spec §10. Each active domain has a JSONB array of
 // failure_patterns. We loop those, dispatch to a rule evaluator, and write
@@ -51,39 +59,40 @@ function daysAgoIso(days: number): string {
 
 /** Find active projects in this domain with no activity_log rows in N days. */
 async function ruleNoActivityDays(
-  sb: SupabaseClient,
+  db: Db,
   domain: DomainRow,
   cfg: RuleConfig,
 ): Promise<ObservationCandidate[]> {
   const days = num(cfg, 'value', 14)!;
   const since = daysAgoIso(days);
 
-  const { data: projects } = await sb
-    .from('projects')
-    .select('id, name')
-    .eq('domain_id', domain.id)
-    .eq('status', 'active')
-    // Areas are ongoing contexts (Home, Garage, Health) — they don't
-    // "stall" by going quiet. Exclude so the Today "Slipping" panel
-    // doesn't fill with false positives.
-    .neq('kind', 'area');
-  if (!projects || projects.length === 0) return [];
+  const domainProjects = await db.query.projects.findMany({
+    columns: { id: true, name: true },
+    where: and(
+      eq(projects.domain_id, domain.id),
+      eq(projects.status, 'active'),
+      // Areas are ongoing contexts (Home, Garage, Health) — they don't
+      // "stall" by going quiet. Exclude so the Today "Slipping" panel
+      // doesn't fill with false positives.
+      ne(projects.kind, 'area'),
+    ),
+  });
+  if (domainProjects.length === 0) return [];
 
   const out: ObservationCandidate[] = [];
-  for (const p of projects) {
-    const { count } = await sb
-      .from('activity_log')
-      .select('id', { count: 'exact', head: true })
-      .eq('project_id', p.id)
-      .gte('logged_at', since);
-    if ((count ?? 0) === 0) {
+  for (const p of domainProjects) {
+    const [recent] = await db
+      .select({ n: count() })
+      .from(activity_log)
+      .where(and(eq(activity_log.project_id, p.id), gte(activity_log.logged_at, since)));
+    if ((recent?.n ?? 0) === 0) {
       // Also exclude projects that have ZERO activity ever, since brand-new
       // projects aren't yet "stalled" — they're just unstarted.
-      const { count: anyCount } = await sb
-        .from('activity_log')
-        .select('id', { count: 'exact', head: true })
-        .eq('project_id', p.id);
-      if ((anyCount ?? 0) === 0) continue;
+      const [ever] = await db
+        .select({ n: count() })
+        .from(activity_log)
+        .where(eq(activity_log.project_id, p.id));
+      if ((ever?.n ?? 0) === 0) continue;
 
       out.push({
         type: 'no_activity_days',
@@ -103,22 +112,24 @@ async function ruleNoActivityDays(
 /** Find projects where hours_logged exceeds quoted_hours by a configurable
  *  ratio (default 1.0 = exceeded at all). */
 async function ruleHoursExceedQuote(
-  sb: SupabaseClient,
+  db: Db,
   domain: DomainRow,
   cfg: RuleConfig,
 ): Promise<ObservationCandidate[]> {
   const ratio = num(cfg, 'value', 1.0)!;
 
-  const { data: projects } = await sb
-    .from('projects')
-    .select('id, name, hours_logged, quoted_hours')
-    .eq('domain_id', domain.id)
-    .eq('status', 'active')
-    .not('quoted_hours', 'is', null);
-  if (!projects || projects.length === 0) return [];
+  const domainProjects = await db.query.projects.findMany({
+    columns: { id: true, name: true, hours_logged: true, quoted_hours: true },
+    where: and(
+      eq(projects.domain_id, domain.id),
+      eq(projects.status, 'active'),
+      isNotNull(projects.quoted_hours),
+    ),
+  });
+  if (domainProjects.length === 0) return [];
 
   const out: ObservationCandidate[] = [];
-  for (const p of projects) {
+  for (const p of domainProjects) {
     const quoted = Number(p.quoted_hours ?? 0);
     const logged = Number(p.hours_logged ?? 0);
     if (quoted <= 0) continue;
@@ -140,7 +151,7 @@ async function ruleHoursExceedQuote(
 
 /** Find projects with target_date within N days that haven't been touched in M days. */
 async function ruleDeadlineWithinDays(
-  sb: SupabaseClient,
+  db: Db,
   domain: DomainRow,
   cfg: RuleConfig,
 ): Promise<ObservationCandidate[]> {
@@ -151,23 +162,24 @@ async function ruleDeadlineWithinDays(
     .toISOString().slice(0, 10);
   const since = daysAgoIso(untouchedDays);
 
-  const { data: projects } = await sb
-    .from('projects')
-    .select('id, name, target_date')
-    .eq('domain_id', domain.id)
-    .eq('status', 'active')
-    .not('target_date', 'is', null)
-    .lte('target_date', cutoff);
-  if (!projects || projects.length === 0) return [];
+  const domainProjects = await db.query.projects.findMany({
+    columns: { id: true, name: true, target_date: true },
+    where: and(
+      eq(projects.domain_id, domain.id),
+      eq(projects.status, 'active'),
+      isNotNull(projects.target_date),
+      lte(projects.target_date, cutoff),
+    ),
+  });
+  if (domainProjects.length === 0) return [];
 
   const out: ObservationCandidate[] = [];
-  for (const p of projects) {
-    const { count } = await sb
-      .from('activity_log')
-      .select('id', { count: 'exact', head: true })
-      .eq('project_id', p.id)
-      .gte('logged_at', since);
-    if ((count ?? 0) === 0) {
+  for (const p of domainProjects) {
+    const [recent] = await db
+      .select({ n: count() })
+      .from(activity_log)
+      .where(and(eq(activity_log.project_id, p.id), gte(activity_log.logged_at, since)));
+    if ((recent?.n ?? 0) === 0) {
       const daysOut = Math.ceil(
         (new Date(p.target_date!).getTime() - today.getTime()) / (24 * 60 * 60 * 1000),
       );
@@ -194,19 +206,19 @@ async function ruleDeadlineWithinDays(
 
 /** Personal domain: no journal entries in N days. */
 async function ruleDaysSinceJournal(
-  sb: SupabaseClient,
+  db: Db,
   domain: DomainRow,
   cfg: RuleConfig,
 ): Promise<ObservationCandidate[]> {
   const days = num(cfg, 'value', 7)!;
   const since = daysAgoIso(days);
 
-  const { count } = await sb
-    .from('journal_entries')
-    .select('id', { count: 'exact', head: true })
-    .gte('entry_date', since.slice(0, 10));
+  const [recent] = await db
+    .select({ n: count() })
+    .from(journal_entries)
+    .where(gte(journal_entries.entry_date, since.slice(0, 10)));
 
-  if ((count ?? 0) > 0) return [];
+  if ((recent?.n ?? 0) > 0) return [];
 
   return [
     {
@@ -246,7 +258,7 @@ async function rulePersonFactDateRelevant(): Promise<ObservationCandidate[]> {
 
 // ─── Dispatcher ──────────────────────────────────────────────────────────
 
-type RuleHandler = (sb: SupabaseClient, domain: DomainRow, cfg: RuleConfig) => Promise<ObservationCandidate[]>;
+type RuleHandler = (db: Db, domain: DomainRow, cfg: RuleConfig) => Promise<ObservationCandidate[]>;
 
 const RULE_HANDLERS: Record<string, RuleHandler> = {
   no_activity_days: ruleNoActivityDays,
@@ -273,29 +285,27 @@ export interface ObservationsRunResult {
 /** Walk all active domains, evaluate every rule in their failure_patterns,
  *  dedupe against existing active observations, and insert new ones.
  *  Service-role caller (cron); RLS isn't relevant. */
-export async function runObservations(sb: SupabaseClient): Promise<ObservationsRunResult> {
+export async function runObservations(db: Db): Promise<ObservationsRunResult> {
   const result: ObservationsRunResult = {
     domains_evaluated: 0, rules_evaluated: 0, candidates: 0,
     inserted: 0, skipped_dedupe: 0, unknown_rules: [],
   };
 
-  const { data: domains } = await sb
-    .from('stewardship_domains')
-    .select('id, name, failure_patterns, active')
-    .eq('active', true)
+  const domains = await db.query.stewardship_domains.findMany({
+    columns: { id: true, name: true, failure_patterns: true, active: true },
     // Exclude system domains (Inbox). They're catch-alls for unsorted
     // tasks — domain-level slippage rules don't apply because the whole
     // point is that those tasks are awaiting triage.
-    .eq('is_system', false);
-  if (!domains) return result;
+    where: and(eq(stewardship_domains.active, true), eq(stewardship_domains.is_system, false)),
+  });
 
   // Pre-load active observations once so we can dedupe in memory.
-  const { data: existing } = await sb
-    .from('observations')
-    .select('supporting_data')
-    .is('dismissed_at', null);
+  const existing = await db.query.observations.findMany({
+    columns: { supporting_data: true },
+    where: isNull(observationsTable.dismissed_at),
+  });
   const activeSourceRefs = new Set<string>();
-  for (const row of (existing ?? []) as Array<{ supporting_data: Record<string, unknown> | null }>) {
+  for (const row of existing) {
     const ref = row.supporting_data?.source_ref;
     if (typeof ref === 'string') activeSourceRefs.add(ref);
   }
@@ -314,7 +324,7 @@ export async function runObservations(sb: SupabaseClient): Promise<ObservationsR
         result.unknown_rules.push(cfg.rule);
         continue;
       }
-      const cands = await handler(sb, d, cfg);
+      const cands = await handler(db, d, cfg);
       result.candidates += cands.length;
       for (const c of cands) {
         if (activeSourceRefs.has(c.source_ref)) {
@@ -338,8 +348,7 @@ export async function runObservations(sb: SupabaseClient): Promise<ObservationsR
       domain_id: c.domain_id,
       project_id: c.project_id ?? null,
     }));
-    const { error } = await sb.from('observations').insert(rows);
-    if (error) throw new Error(`observations insert failed: ${error.message}`);
+    await db.insert(observationsTable).values(rows);
     result.inserted = rows.length;
   }
 

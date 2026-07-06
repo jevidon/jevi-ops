@@ -1,5 +1,8 @@
 import type { FastifyPluginAsync } from 'fastify';
+import { eq } from 'drizzle-orm';
 import { env } from '../lib/env.js';
+import { getDb } from '../lib/db.js';
+import { app_settings } from '../db/schema.js';
 import { getAppSettings, invalidateAppSettings } from '../lib/app-settings.js';
 import { UpdateAppSettingsSchema } from '@jevi-ops/shared/schemas';
 
@@ -45,15 +48,14 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
     if (Object.keys(parsed.data).length === 0) {
       return reply.code(400).send({ error: 'empty_payload' });
     }
-    const { data, error } = await req.supabase!
-      .from('app_settings')
-      .update(parsed.data)
-      .eq('id', true)
-      .select('timezone, updated_at')
-      .single();
-    if (error) throw app.httpErrors.internalServerError(error.message);
+    const [row] = await getDb()
+      .update(app_settings)
+      .set(parsed.data)
+      .where(eq(app_settings.id, true))
+      .returning({ timezone: app_settings.timezone, updated_at: app_settings.updated_at });
+    if (!row) throw app.httpErrors.internalServerError('settings_row_missing');
     invalidateAppSettings();
-    return data;
+    return row;
   });
 
   app.get('/api/settings/integrations-status', async () => {

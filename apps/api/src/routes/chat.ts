@@ -3,6 +3,7 @@ import type Anthropic from '@anthropic-ai/sdk';
 import { z } from 'zod';
 import { anthropic, anthropicModel, isAnthropicConfigured } from '../lib/anthropic.js';
 import { toolDefsForAnthropic, runTool } from '../lib/chat-tools.js';
+import { getDb } from '../lib/db.js';
 
 // POST /api/chat — natural-language query against the DB (spec §11).
 //
@@ -81,7 +82,7 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
       });
     }
 
-    const sb = req.supabase!;
+    const db = getDb();
     const tools = toolDefsForAnthropic();
     const trace: ToolTrace[] = [];
 
@@ -149,7 +150,7 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
         let result: unknown;
         let isError = false;
         try {
-          result = await runTool(use.name, (use.input ?? {}) as Record<string, unknown>, sb);
+          result = await runTool(use.name, (use.input ?? {}) as Record<string, unknown>, db);
         } catch (err) {
           isError = true;
           result = { error: err instanceof Error ? err.message : 'unknown_error' };
