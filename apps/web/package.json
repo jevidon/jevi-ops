@@ -14,9 +14,8 @@
   "dependencies": {
     "@jevi-ops/shared": "workspace:*",
     "@next/env": "^15.1.0",
-    "@supabase/ssr": "^0.5.2",
-    "@supabase/supabase-js": "^2.45.0",
     "browser-image-compression": "^2.0.2",
+    "jose": "^6.2.3",
     "next": "^15.1.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

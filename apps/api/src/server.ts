@@ -7,6 +7,7 @@ import sensible from '@fastify/sensible';
 import { env, corsOrigins, isDev } from './lib/env.js';
 import authPlugin from './plugins/auth.js';
 import { healthzRoutes } from './routes/healthz.js';
+import { authRoutes } from './routes/auth.js';
 import { ingestRoutes } from './routes/ingest.js';
 import { taskRoutes } from './routes/tasks.js';
 import { projectRoutes } from './routes/projects.js';
@@ -73,6 +74,7 @@ export async function buildServer() {
   });
 
   await app.register(healthzRoutes);
+  await app.register(authRoutes);
   await app.register(ingestRoutes);
   await app.register(taskRoutes);
   await app.register(projectRoutes);

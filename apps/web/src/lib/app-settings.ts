@@ -1,26 +1,20 @@
 import 'server-only';
 import { cache } from 'react';
-import { createClient } from './supabase/server';
+import { settingsApi } from './api';
 
 // App-wide settings reader for the web app. Cached per-request via
 // React's cache() so multiple server components fetching the timezone
-// in the same render share a single DB read.
+// in the same render share a single API read.
 //
-// Falls back to America/Denver if the row is missing (pre-migration)
-// or the read fails. The site shouldn't 500 because of settings.
+// Falls back to America/Denver if the settings endpoint fails. The site
+// shouldn't 500 because of settings.
 
 const DEFAULT_TIMEZONE = 'America/Denver';
 
 export const getAppSettings = cache(async (): Promise<{ timezone: string }> => {
   try {
-    const sb = await createClient();
-    const { data, error } = await sb
-      .from('app_settings')
-      .select('timezone')
-      .eq('id', true)
-      .maybeSingle();
-    if (error) throw error;
-    return { timezone: data?.timezone ?? DEFAULT_TIMEZONE };
+    const settings = await settingsApi.getApp();
+    return { timezone: settings.timezone ?? DEFAULT_TIMEZONE };
   } catch {
     return { timezone: DEFAULT_TIMEZONE };
   }

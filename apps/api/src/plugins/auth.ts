@@ -1,24 +1,29 @@
 import fp from 'fastify-plugin';
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
-import type { User } from '@supabase/supabase-js';
-import { supabaseAdmin } from '../lib/supabase.js';
+import { eq } from 'drizzle-orm';
+import { verifySession } from '../lib/jwt.js';
+import { getDb } from '../lib/db.js';
+import { api_tokens } from '../db/schema.js';
+import { hashApiToken } from '../routes/auth.js';
 
-// Fastify plugin: verifies Bearer JWT on protected routes and decorates the
-// request with the authenticated user. Data access goes through the shared
-// Drizzle handle (lib/db.ts) — there is no per-request DB client.
+// Fastify plugin: verifies the Authorization bearer on protected routes.
+// Two credential shapes:
+//   * Session JWT — self-issued HS256, verified locally (no network).
+//   * ops_… API token — named agent/device credential from api_tokens,
+//     matched by SHA-256 hash, revocable, last_used_at touched async.
 //
-// Phase A note: token verification still round-trips to Supabase Auth
-// (auth.getUser). Phase B replaces this with local jose verification of
-// self-issued tokens + api_tokens lookup.
-//
-// Usage on a route:
-//   app.get('/api/tasks', { preHandler: app.requireAuth }, async (req) => {
-//     ...getDb().query.tasks.findMany(...)
-//   });
+// Decorates req.user ({id, email}) and req.authMethod so routes that must
+// be human-only (token management) can tell the two apart.
+
+export interface AuthUser {
+  id: string;
+  email: string;
+}
 
 declare module 'fastify' {
   interface FastifyRequest {
-    user?: User;
+    user?: AuthUser;
+    authMethod?: 'session' | 'api_token';
   }
   interface FastifyInstance {
     requireAuth: (req: FastifyRequest, reply: import('fastify').FastifyReply) => Promise<void>;
@@ -36,13 +41,36 @@ const authPlugin: FastifyPluginAsync = async (app) => {
       return reply.code(401).send({ error: 'missing_bearer_token' });
     }
 
-    const { data, error } = await supabaseAdmin().auth.getUser(token);
-    if (error || !data.user) {
-      req.log.warn({ err: error?.message }, 'auth verification failed');
-      return reply.code(401).send({ error: 'invalid_token' });
+    // Named API token (agents, edge devices).
+    if (token.startsWith('ops_')) {
+      const row = await getDb().query.api_tokens.findFirst({
+        where: eq(api_tokens.token_hash, hashApiToken(token)),
+      });
+      if (!row || row.revoked_at) {
+        req.log.warn('api token rejected');
+        return reply.code(401).send({ error: 'invalid_token' });
+      }
+      // Touch last_used_at without blocking the request. Coarse (per
+      // request) is fine — it's a "when was this credential last alive"
+      // signal for the settings page, not an audit log.
+      getDb()
+        .update(api_tokens)
+        .set({ last_used_at: new Date().toISOString() })
+        .where(eq(api_tokens.id, row.id))
+        .catch(() => {});
+      req.user = { id: row.id, email: `token:${row.name}` };
+      req.authMethod = 'api_token';
+      return;
     }
 
-    req.user = data.user;
+    // Session JWT — local verification, no network round-trip.
+    const claims = await verifySession(token);
+    if (!claims) {
+      req.log.warn('session token rejected');
+      return reply.code(401).send({ error: 'invalid_token' });
+    }
+    req.user = { id: claims.sub, email: claims.email };
+    req.authMethod = 'session';
   };
 
   app.decorate('requireAuth', requireAuth);

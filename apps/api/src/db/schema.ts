@@ -910,3 +910,16 @@ export const auth_user = pgTable("auth_user", {
 }, (table) => [
 	unique("auth_user_email_key").on(table.email),
 ]);
+
+export const api_tokens = pgTable("api_tokens", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	name: text().notNull(),
+	token_hash: text().notNull(),
+	kind: text().default('agent').notNull(),
+	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	last_used_at: timestamp({ withTimezone: true, mode: 'string' }),
+	revoked_at: timestamp({ withTimezone: true, mode: 'string' }),
+}, (table) => [
+	unique("api_tokens_token_hash_key").on(table.token_hash),
+	check("api_tokens_kind_check", sql`kind = ANY (ARRAY['agent'::text, 'device'::text])`),
+]);

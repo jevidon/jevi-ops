@@ -1,5 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify';
-import { isSupabaseConfigured } from '../lib/supabase.js';
+import { getDb, isDatabaseConfigured, sqlClient } from '../lib/db.js';
+import { isAuthConfigured } from '../lib/jwt.js';
 import { isAnthropicConfigured } from '../lib/anthropic.js';
 import { isWhisperConfigured } from '../lib/whisper.js';
 
@@ -12,19 +13,29 @@ export const healthzRoutes: FastifyPluginAsync = async (app) => {
     return {
       status: 'ok',
       time: new Date().toISOString(),
-      supabase_configured: isSupabaseConfigured(),
+      database_configured: isDatabaseConfigured(),
+      auth_configured: isAuthConfigured(),
       anthropic_configured: isAnthropicConfigured(),
       whisper_configured: isWhisperConfigured(),
     };
   });
 
   app.get('/readyz', async (_req, reply) => {
-    // Real readiness check will ping Supabase once the client is wired and
-    // a project URL is set. For now: report what's configured.
-    if (!isSupabaseConfigured()) {
+    if (!isDatabaseConfigured()) {
       return reply.code(503).send({
         status: 'not_ready',
-        reason: 'supabase_not_configured',
+        reason: 'database_not_configured',
+      });
+    }
+    // Real readiness: round-trip the database.
+    try {
+      getDb();
+      await sqlClient()`select 1`;
+    } catch (err) {
+      return reply.code(503).send({
+        status: 'not_ready',
+        reason: 'database_unreachable',
+        message: err instanceof Error ? err.message : 'unknown',
       });
     }
     return { status: 'ready' };

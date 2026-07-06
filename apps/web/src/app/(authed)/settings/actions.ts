@@ -1,3 +1,4 @@
+import { apiPublicUrl } from '@/lib/server-env';
 'use server';
 
 import { revalidatePath } from 'next/cache';
@@ -49,7 +50,7 @@ export async function syncCalendarAction(): Promise<SyncResult> {
 export async function beginGoogleOAuthAction(): Promise<void> {
   const user = await requireUser();
   const secret = process.env.OAUTH_BRIDGE_SECRET;
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
+  const apiUrl = apiPublicUrl();
 
   // Dev fallback — if no secret is configured, send the user straight to
   // the begin endpoint without a token. The API mirrors this fallback in

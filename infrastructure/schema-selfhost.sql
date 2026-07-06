@@ -937,6 +937,19 @@ create table if not exists auth_user (
   created_at timestamptz not null default now()
 );
 
+-- Named bearer credentials for agents (Hermes/OpenClaw) and future edge
+-- capture devices. Token value is shown once at creation; only the
+-- SHA-256 hash is stored. Revocation = set revoked_at.
+create table if not exists api_tokens (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  token_hash text not null unique,
+  kind text not null default 'agent' check (kind in ('agent', 'device')),
+  created_at timestamptz not null default now(),
+  last_used_at timestamptz,
+  revoked_at timestamptz
+);
+
 
 -- ─────────────────────────────────────────────────────────────────────────
 -- Done.

@@ -28,7 +28,9 @@ export async function askAction(history: ChatHistoryMessage[]): Promise<AskResul
   }
 }
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
+import { apiUrl } from '@/lib/server-env';
+
+const API_URL = apiUrl();
 
 // Server action for voice → transcript. Forwards FormData to the API's
 // /api/capture/transcribe endpoint. Returns the plain transcript.

@@ -27,12 +27,14 @@ const EnvSchema = z.object({
 
   CORS_ORIGINS: z.string().default('http://localhost:3000'),
 
-  // Supabase — required as soon as we have a project.
-  // Kept optional at boot so `pnpm dev` works before a project exists.
-  SUPABASE_URL: z.string().url().optional(),
-  SUPABASE_ANON_KEY: z.string().optional(),
-  SUPABASE_SERVICE_ROLE_KEY: z.string().optional(),
+  // Postgres connection string. Optional at boot so healthz stays up on a
+  // fresh install; every data route gates on isDatabaseConfigured().
   DATABASE_URL: z.string().optional(),
+
+  // Session-token signing secret (HS256, shared with the web app so its
+  // middleware can verify locally). Required for login to work.
+  // Generate with: openssl rand -hex 32
+  AUTH_SECRET: z.string().min(32).optional(),
 
   // Webhook secret for /api/ingest. External systems (Zapier, n8n, smart
   // glasses, Cowork workflows) post here and pass the same value in the

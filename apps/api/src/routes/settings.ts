@@ -1,6 +1,8 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { eq } from 'drizzle-orm';
 import { env } from '../lib/env.js';
+import { isDatabaseConfigured } from '../lib/db.js';
+import { isAuthConfigured } from '../lib/jwt.js';
 import { getDb } from '../lib/db.js';
 import { app_settings } from '../db/schema.js';
 import { getAppSettings, invalidateAppSettings } from '../lib/app-settings.js';
@@ -61,17 +63,24 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
   app.get('/api/settings/integrations-status', async () => {
     const items: IntegrationStatus[] = [
       {
-        key: 'supabase',
-        label: 'Supabase',
+        key: 'database',
+        label: 'PostgreSQL',
         category: 'infrastructure',
-        status: statusForAll([
-          !!env.SUPABASE_URL,
-          !!env.SUPABASE_ANON_KEY,
-          !!env.SUPABASE_SERVICE_ROLE_KEY,
-        ]),
-        detail: detailForSupabase(),
+        status: isDatabaseConfigured() ? 'configured' : 'missing',
+        detail: detailForDatabase(),
         required: true,
-        purpose: 'Database, auth, RLS — required for the app to run.',
+        purpose: 'The database — required for the app to run.',
+      },
+      {
+        key: 'auth',
+        label: 'Auth secret',
+        category: 'infrastructure',
+        status: isAuthConfigured() ? 'configured' : 'missing',
+        detail: isAuthConfigured()
+          ? 'AUTH_SECRET set (length OK).'
+          : 'AUTH_SECRET missing — sign-in disabled. Generate with: openssl rand -hex 32',
+        required: true,
+        purpose: 'Signs session tokens for the web app and API.',
       },
       {
         key: 'cron_secret',
@@ -172,15 +181,15 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
 // These return strings that surface "what's set, what's not" without ever
 // revealing the actual secret value.
 
-function detailForSupabase(): string {
-  const parts: string[] = [];
-  if (env.SUPABASE_URL) parts.push(`URL: ${env.SUPABASE_URL}`);
-  else parts.push('SUPABASE_URL missing');
-  if (env.SUPABASE_ANON_KEY) parts.push('anon key set');
-  else parts.push('SUPABASE_ANON_KEY missing');
-  if (env.SUPABASE_SERVICE_ROLE_KEY) parts.push('service role set');
-  else parts.push('SUPABASE_SERVICE_ROLE_KEY missing');
-  return parts.join(' · ');
+function detailForDatabase(): string {
+  if (!env.DATABASE_URL) return 'DATABASE_URL missing.';
+  // Surface host:port/db only — never credentials.
+  try {
+    const u = new URL(env.DATABASE_URL);
+    return `Connected target: ${u.hostname}:${u.port || '5432'}${u.pathname}`;
+  } catch {
+    return 'DATABASE_URL set (unparseable — check format).';
+  }
 }
 
 function detailForGoogle(): string {

@@ -2,8 +2,10 @@
 
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
+import { cookies } from 'next/headers';
 import { z } from 'zod';
-import { createClient } from '@/lib/supabase/server';
+import { SESSION_COOKIE, sessionCookieOptions } from '@/lib/session';
+import { apiUrl } from '@/lib/server-env';
 
 const SignInSchema = z.object({
   email: z.string().email(),
@@ -21,15 +23,34 @@ export async function signInAction(_prev: { error?: string } | null, formData: F
     return { error: 'Email and password are required.' };
   }
 
-  const supabase = await createClient();
-  const { error } = await supabase.auth.signInWithPassword({
-    email: parsed.data.email,
-    password: parsed.data.password,
-  });
-
-  if (error) {
-    return { error: error.message };
+  // The API owns the credential store — it verifies the password and mints
+  // the session JWT. We just stash the token in an HttpOnly cookie.
+  let res: Response;
+  try {
+    res = await fetch(`${apiUrl()}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: parsed.data.email, password: parsed.data.password }),
+      cache: 'no-store',
+    });
+  } catch {
+    return { error: 'Could not reach the API. Is it running?' };
   }
+
+  if (!res.ok) {
+    if (res.status === 401) return { error: 'Invalid email or password.' };
+    if (res.status === 429) return { error: 'Too many attempts — wait a minute and try again.' };
+    if (res.status === 503) return { error: 'Sign-in is not configured yet (AUTH_SECRET missing on the API).' };
+    return { error: `Sign-in failed (${res.status}).` };
+  }
+
+  const body = (await res.json()) as { token?: string };
+  if (!body.token) {
+    return { error: 'Sign-in failed: no token returned.' };
+  }
+
+  const store = await cookies();
+  store.set(SESSION_COOKIE, body.token, sessionCookieOptions());
 
   revalidatePath('/', 'layout');
   const target = parsed.data.next && parsed.data.next.startsWith('/') ? parsed.data.next : '/today';
@@ -37,8 +58,8 @@ export async function signInAction(_prev: { error?: string } | null, formData: F
 }
 
 export async function signOutAction() {
-  const supabase = await createClient();
-  await supabase.auth.signOut();
+  const store = await cookies();
+  store.delete(SESSION_COOKIE);
   revalidatePath('/', 'layout');
   redirect('/sign-in');
 }

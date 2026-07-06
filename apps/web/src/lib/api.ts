@@ -1,5 +1,6 @@
 import 'server-only';
 import { getAccessToken } from './auth';
+import { apiUrl } from './server-env';
 
 // Server-side typed fetch wrapper. Reads the current user's access token
 // (from Supabase cookies) and attaches it as a Bearer header to every call
@@ -8,7 +9,7 @@ import { getAccessToken } from './auth';
 // Use from Server Components or Server Actions only — the access token
 // shouldn't be exposed to the browser via this path.
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
+const API_URL = apiUrl();
 
 class ApiError extends Error {
   constructor(public status: number, public body: unknown, message?: string) {
