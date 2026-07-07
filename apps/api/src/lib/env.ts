@@ -87,6 +87,11 @@ const EnvSchema = z.object({
   STT_API_KEY: z.string().optional(),
   STT_MODEL: z.string().default('whisper-1'),
 
+  // ── Immich (journal photo suggestions) ─────────────────────────────────
+  // Normally configured in Settings → AI; env acts as the fallback.
+  IMMICH_BASE_URL: z.string().url().optional(),
+  IMMICH_API_KEY: z.string().optional(),
+
   // Google OAuth — Phase 1 (Calendar) + Phase 2 (Gmail, Drive). Optional at
   // boot; runtime checks enforce presence when the user tries to connect.
   GOOGLE_OAUTH_CLIENT_ID: z.string().optional(),

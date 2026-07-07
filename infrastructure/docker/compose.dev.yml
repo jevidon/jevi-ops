@@ -7,6 +7,11 @@
 # Port 54329 avoids colliding with any system Postgres on 5432.
 # Same pgvector-enabled image as production so dev/prod stay identical.
 
+# Explicit project name — this directory holds both the dev and prod
+# compose files, and without distinct names they would collide in one
+# docker compose project (a `down` on one would remove the other).
+name: jevi-ops-dev
+
 services:
   postgres:
     image: pgvector/pgvector:pg17

@@ -270,7 +270,11 @@ export const libraryRoutes: FastifyPluginAsync = async (app) => {
         ? body.entry_date
         : new Date().toISOString().slice(0, 10),
       attachments: Array.isArray(body.attachments) ? (body.attachments as StoredAttachment[]) : [],
-      source: typeof body.source === 'string' ? body.source : 'manual',
+      // 'typed' — the journal_entries source vocabulary is
+      // handwritten_photo | voice | typed (a bare 'manual' violates the
+      // CHECK constraint; pre-fork this path only worked because the web
+      // form always sent source explicitly).
+      source: typeof body.source === 'string' ? body.source : 'typed',
     };
     const [row] = await getDb().insert(journal_entries).values(insert).returning();
     if (!row) throw app.httpErrors.internalServerError('insert_returned_no_row');

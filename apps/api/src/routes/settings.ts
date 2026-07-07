@@ -6,6 +6,7 @@ import { isAuthConfigured } from '../lib/jwt.js';
 import { chatComplete, isLlmConfigured, llmDescription } from '../lib/llm.js';
 import { isSttConfigured, sttDescription } from '../lib/stt.js';
 import { isStorageConfigured } from '../lib/storage.js';
+import { isImmichConfigured, immichDescription } from '../lib/immich.js';
 import { getDb } from '../lib/db.js';
 import { app_settings } from '../db/schema.js';
 import { getAppSettings, invalidateAppSettings } from '../lib/app-settings.js';
@@ -205,6 +206,15 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
         detail: detailForGoogle(),
         required: false,
         purpose: 'Two-way calendar sync. Without it the /calendar page only shows local events.',
+      },
+      {
+        key: 'immich',
+        label: 'Immich',
+        category: 'integrations',
+        status: (await isImmichConfigured()) ? 'configured' : 'missing',
+        detail: await immichDescription(),
+        required: false,
+        purpose: 'Journal "photos from this day" suggestions.',
       },
       {
         key: 'pushover',

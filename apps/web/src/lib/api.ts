@@ -1109,6 +1109,26 @@ export const settingsApi = {
   testStt: () => api.post<ConnectionTestResult>('/api/settings/test-stt'),
 };
 
+// ─── Immich (journal photo suggestions) ──────────────────────────────────
+
+export interface ImmichCandidate {
+  id: string;
+  taken_at: string;
+  thumb_url: string;
+}
+
+export const immichApi = {
+  journalCandidates: (date: string) =>
+    api.get<{ date: string; candidates: ImmichCandidate[] }>(
+      `/api/library/journal/immich-candidates?date=${encodeURIComponent(date)}`,
+    ),
+  attachToJournal: (id: string, asset_ids: string[]) =>
+    api.post<{ attached: Attachment[]; attachments: Attachment[]; failed: string[] }>(
+      `/api/library/journal/${id}/attach-immich`,
+      { asset_ids },
+    ),
+};
+
 // ─── Auth (API tokens for agents/devices) ────────────────────────────────
 
 export interface ApiTokenRow {

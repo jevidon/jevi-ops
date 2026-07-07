@@ -16,6 +16,11 @@
 #   3. docker compose up -d
 #   4. Apply the schema + seeds, then create your user (README.md § First run).
 
+# Explicit project name — this directory holds both the dev and prod
+# compose files, and without distinct names they would collide in one
+# docker compose project (a `down` on one would remove the other).
+name: jevi-ops
+
 services:
   postgres:
     # pgvector build of Postgres 17 — the vector extension is available the
