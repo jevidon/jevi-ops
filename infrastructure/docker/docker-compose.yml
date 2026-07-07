@@ -1,0 +1,120 @@
+# jevi-ops — production stack for TrueNAS SCALE (Apps → Custom App →
+# Install via YAML) or any Docker Compose host.
+#
+# Ingress: the host's Tailscale (already running on TrueNAS) proxies
+#   https://<nas>.<tailnet>.ts.net      → 127.0.0.1:${WEB_BIND_PORT}
+#   https://<nas>.<tailnet>.ts.net:8443 → 127.0.0.1:${API_BIND_PORT}
+# via `tailscale serve` — see infrastructure/DEPENDENCIES.md. Both services
+# publish to host loopback only, so nothing is reachable from the LAN.
+#
+# External systems this stack points at (not bundled — DEPENDENCIES.md):
+#   LLM server (llama.cpp/MLX/…), STT server, Immich, Google OAuth, Pushover.
+#
+# First run:
+#   1. Create the datasets/dirs referenced under volumes below.
+#   2. Fill .env next to this file (see the env list in README.md).
+#   3. docker compose up -d
+#   4. Apply the schema + seeds, then create your user (README.md § First run).
+
+services:
+  postgres:
+    # pgvector build of Postgres 17 — the vector extension is available the
+    # day semantic search lands (CREATE EXTENSION vector), no re-platform.
+    image: pgvector/pgvector:pg17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-jevi}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-jeviops}
+    volumes:
+      - ${PGDATA_DIR:?host path for postgres data}:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-jevi} -d ${POSTGRES_DB:-jeviops}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    # No published ports — only the api container reaches it.
+
+  api:
+    build:
+      context: ../..
+      dockerfile: infrastructure/docker/Dockerfile.api
+    image: jevi-ops-api:latest
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${API_BIND_PORT:-3001}:3001"
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      API_HOST: 0.0.0.0
+      DATABASE_URL: postgresql://${POSTGRES_USER:-jevi}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-jeviops}
+      AUTH_SECRET: ${AUTH_SECRET:?openssl rand -hex 32}
+      API_PUBLIC_URL: ${API_PUBLIC_URL:?e.g. https://nas.tailnet.ts.net:8443}
+      WEB_APP_URL: ${WEB_APP_URL:?e.g. https://nas.tailnet.ts.net}
+      CORS_ORIGINS: ${WEB_APP_URL}
+      CRON_ENABLED: "true"
+      UPLOADS_DIR: /uploads
+      # LLM / STT defaults — normally configured in Settings → AI instead.
+      LLM_PROVIDER: ${LLM_PROVIDER:-openai_compatible}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      LLM_MODEL: ${LLM_MODEL:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      STT_BASE_URL: ${STT_BASE_URL:-}
+      STT_API_KEY: ${STT_API_KEY:-}
+      # Secrets for external surfaces.
+      INGEST_WEBHOOK_SECRET: ${INGEST_WEBHOOK_SECRET:-}
+      CRON_SECRET: ${CRON_SECRET:-}
+      WIDGET_SECRET: ${WIDGET_SECRET:-}
+      OAUTH_BRIDGE_SECRET: ${OAUTH_BRIDGE_SECRET:-}
+      # Integrations.
+      GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID:-}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET:-}
+      GOOGLE_OAUTH_REDIRECT_URI: ${API_PUBLIC_URL}/api/auth/google/callback
+      PUSHOVER_USER_KEY: ${PUSHOVER_USER_KEY:-}
+      PUSHOVER_API_TOKEN: ${PUSHOVER_API_TOKEN:-}
+    volumes:
+      - ${UPLOADS_DIR_HOST:?host path for image attachments}:/uploads
+
+  web:
+    build:
+      context: ../..
+      dockerfile: infrastructure/docker/Dockerfile.web
+    image: jevi-ops-web:latest
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "127.0.0.1:${WEB_BIND_PORT:-3000}:3000"
+    environment:
+      NODE_ENV: production
+      # Server-side fetches go container-to-container.
+      API_URL: http://api:3001
+      # Browser-facing API origin (Google OAuth begin redirect).
+      API_PUBLIC_URL: ${API_PUBLIC_URL}
+      AUTH_SECRET: ${AUTH_SECRET}
+      OAUTH_BRIDGE_SECRET: ${OAUTH_BRIDGE_SECRET:-}
+
+  db-backup:
+    # Nightly logical dumps alongside ZFS snapshots of the datasets.
+    # Retention: 7 daily / 4 weekly / 6 monthly.
+    image: prodrigestivill/postgres-backup-local:17
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: ${POSTGRES_DB:-jeviops}
+      POSTGRES_USER: ${POSTGRES_USER:-jevi}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      SCHEDULE: "@daily"
+      BACKUP_KEEP_DAYS: "7"
+      BACKUP_KEEP_WEEKS: "4"
+      BACKUP_KEEP_MONTHS: "6"
+      HEALTHCHECK_PORT: "8080"
+    volumes:
+      - ${BACKUPS_DIR:?host path for pg_dump output}:/backups

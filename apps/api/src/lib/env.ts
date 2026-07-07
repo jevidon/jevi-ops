@@ -112,7 +112,14 @@ const EnvSchema = z.object({
 
 });
 
-const parsed = EnvSchema.safeParse(process.env);
+// Compose-style env blocks pass unset optionals as empty strings
+// (`LLM_BASE_URL: ${LLM_BASE_URL:-}`). Treat "" as unset so optional
+// url()/min() validators don't reject them.
+const envWithoutEmpties = Object.fromEntries(
+  Object.entries(process.env).filter(([, v]) => v !== ''),
+);
+
+const parsed = EnvSchema.safeParse(envWithoutEmpties);
 
 if (!parsed.success) {
   // eslint-disable-next-line no-console

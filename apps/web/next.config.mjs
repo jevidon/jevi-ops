@@ -3,10 +3,22 @@
 // loadEnvConfig() — Next's static page collection step doesn't always honor
 // programmatic env loading. See apps/web/.env.local.
 
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
   transpilePackages: ['@jevi-ops/shared'],
+
+  // Self-contained server bundle for the Docker image (node server.js).
+  // outputFileTracingRoot points at the monorepo root so workspace deps
+  // (@jevi-ops/shared) get traced into .next/standalone — without it,
+  // tracing stops at apps/web and the container crashes on import.
+  output: 'standalone',
+  outputFileTracingRoot: path.join(here, '../../'),
   // typedRoutes is incompatible with dynamic `redirect(target)` calls from
   // server actions where the path comes from a request param.
 
