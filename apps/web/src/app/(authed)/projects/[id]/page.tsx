@@ -10,6 +10,7 @@ import {
 } from '@/lib/api';
 import { isToday } from '@/lib/today';
 import { getAppTimezone } from '@/lib/app-settings';
+import type { Task } from '@jevi-ops/shared';
 import { ProjectColorPicker } from './color-picker';
 import { ProjectStatusChips } from './status-chips';
 import { ProjectForm } from '../project-form';
@@ -75,6 +76,25 @@ export default async function ProjectDetailPage({
     .filter((t) => t.status === 'done')
     .sort((a, b) => (b.completed_at ?? '').localeCompare(a.completed_at ?? ''));
   const doneToday = doneTasks.filter((t) => isToday(tz, t.completed_at ?? null));
+
+  // Group open tasks by parent. parent_task_id has always been stored;
+  // this is where it finally renders. One level deep: an open parent
+  // becomes a collapsible group, its open children nest inside. Children
+  // whose parent is done (or missing from this project) fall back to the
+  // root so no task silently disappears.
+  const taskById = new Map(tasks.map((t) => [t.id, t]));
+  const childrenByParent = new Map<string, Task[]>();
+  for (const t of tasks) {
+    if (!t.parent_task_id) continue;
+    const list = childrenByParent.get(t.parent_task_id) ?? [];
+    list.push(t);
+    childrenByParent.set(t.parent_task_id, list);
+  }
+  const hasOpenParent = (t: Task) =>
+    t.parent_task_id != null && taskById.get(t.parent_task_id)?.status === 'open';
+  const openRoots = openTasks.filter((t) => !hasOpenParent(t));
+  const parentGroups = openRoots.filter((t) => (childrenByParent.get(t.id) ?? []).length > 0);
+  const looseTasks = openRoots.filter((t) => (childrenByParent.get(t.id) ?? []).length === 0);
 
   const hoursLogged = Number(project.hours_logged ?? 0);
   const quoted = project.quoted_hours != null ? Number(project.quoted_hours) : null;
@@ -195,7 +215,47 @@ export default async function ProjectDetailPage({
         {openTasks.length === 0 ? (
           <p className="font-sans text-[13px] text-ink-3 italic py-1">No open tasks.</p>
         ) : (
-          openTasks.map((t) => <TaskItem key={t.id} task={t} showStar={false} showProject={false} />)
+          <>
+            {parentGroups.map((p) => {
+              const kids = childrenByParent.get(p.id) ?? [];
+              const openKids = kids.filter((k) => k.status === 'open');
+              const doneKidCount = kids.length - openKids.length;
+              return (
+                <details key={p.id} className="group border-b border-line">
+                  <summary className="cursor-pointer list-none flex items-start gap-3 py-2">
+                    <span
+                      className="flex h-5 w-5 shrink-0 items-center justify-center pt-0.5 font-mono text-[10px] text-ink-3 transition-transform group-open:rotate-90"
+                      aria-hidden
+                    >
+                      ▶
+                    </span>
+                    <Link
+                      href={`/tasks/${p.id}`}
+                      className="flex-1 min-w-0 font-sans text-[14px] leading-snug text-ink hover:text-accent transition-colors pt-0.5"
+                    >
+                      {p.title}
+                    </Link>
+                    <span className="shrink-0 mt-0.5 bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] tracking-wider text-ink-2">
+                      {doneKidCount} / {kids.length}
+                    </span>
+                  </summary>
+                  <div className="ml-[9px] border-l border-line-strong pl-4 pb-2">
+                    {openKids.map((k) => (
+                      <TaskItem key={k.id} task={k} showStar={false} showProject={false} />
+                    ))}
+                    {openKids.length === 0 && (
+                      <p className="font-sans text-[13px] text-ink-3 italic py-1">
+                        All subtasks done.
+                      </p>
+                    )}
+                  </div>
+                </details>
+              );
+            })}
+            {looseTasks.map((t) => (
+              <TaskItem key={t.id} task={t} showStar={false} showProject={false} />
+            ))}
+          </>
         )}
       </section>
 

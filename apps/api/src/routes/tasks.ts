@@ -68,7 +68,7 @@ async function resolveTaskDomain(
 export const taskRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', app.requireAuth);
 
-  app.get<{ Querystring: { content_item_id?: string; project_id?: string; status?: string; domain_id?: string } }>(
+  app.get<{ Querystring: { content_item_id?: string; project_id?: string; status?: string; domain_id?: string; parent_task_id?: string } }>(
     '/api/tasks',
     async (req) => {
       const db = getDb();
@@ -77,6 +77,7 @@ export const taskRoutes: FastifyPluginAsync = async (app) => {
       if (req.query.project_id) conds.push(eq(tasks.project_id, req.query.project_id));
       if (req.query.status) conds.push(eq(tasks.status, req.query.status));
       if (req.query.domain_id) conds.push(eq(tasks.domain_id, req.query.domain_id));
+      if (req.query.parent_task_id) conds.push(eq(tasks.parent_task_id, req.query.parent_task_id));
       const rows = await db.query.tasks.findMany({
         with: TASK_EMBEDS,
         where: conds.length ? and(...conds) : undefined,
