@@ -128,6 +128,11 @@ export default async function TodayPage() {
   const railTasks = railTasksAll.slice(0, RAIL_CAP);
   const railOverflow = Math.max(0, railTasksAll.length - RAIL_CAP);
   const emptyTop3Slots = Math.max(0, 3 - top3.length);
+  // Subtasks earn a rail slot like any other due task, but wear a
+  // "↳ parent" crumb so they carry their context.
+  const titleById = new Map(allTasks.map((t) => [t.id, t.title]));
+  const crumbFor = (t: (typeof railTasks)[number]) =>
+    t.parent_task_id ? (titleById.get(t.parent_task_id) ?? null) : null;
 
   const { day, meta } = mastheadDate(tz);
 
@@ -432,7 +437,7 @@ export default async function TodayPage() {
                     as Top 3.
                   </p>
                 ) : (
-                  railTasks.map((t) => <TaskItem key={t.id} task={t} />)
+                  railTasks.map((t) => <TaskItem key={t.id} task={t} parentCrumb={crumbFor(t)} />)
                 )}
                 {/* Render empty placeholders so the missing-Top-3 slots
                     visually invite the user to pick. Only show when
