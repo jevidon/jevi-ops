@@ -48,7 +48,9 @@ export default async function AuthedLayout({ children }: { children: React.React
 
         <div className="flex-1 flex flex-col min-w-0">
           {/* Inner wrapper: clamp width on mobile so the layout matches what
-              we had before; on desktop, let it fill the rail-less space.
+              we had before; on desktop, cap the reading measure at 750px
+              (846 = 750 + 2×48px rail padding) — the earlier 1280px let
+              body text and forms stretch past comfortable line lengths.
 
               Bottom padding adapts: a base value clears the tab bar in
               regular Safari (where env(safe-area-inset-bottom) is 0), and
@@ -56,7 +58,7 @@ export default async function AuthedLayout({ children }: { children: React.React
               content stays above the home indicator without any over-
               padding in browser mode. */}
           <main
-            className="flex-1 lg:pb-12 mx-auto w-full max-w-[480px] lg:max-w-[1280px] lg:px-12"
+            className="flex-1 lg:pb-12 mx-auto w-full max-w-[480px] lg:max-w-[846px] lg:px-12"
             style={{ paddingBottom: 'calc(5rem + env(safe-area-inset-bottom))' }}
           >
             {children}

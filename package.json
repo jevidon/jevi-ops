@@ -2,7 +2,7 @@
   "name": "jevi-ops",
   "version": "0.1.0",
   "private": true,
-  "description": "Jerad's Personal Operations Dashboard — voice-first capture, one pane of glass over work, content, relationships, and personal stewardship",
+  "description": "Jevi's Personal Operations Dashboard — voice-first capture, one pane of glass over work, content, relationships, and personal stewardship",
   "engines": {
     "node": ">=20.10.0",
     "pnpm": ">=9"

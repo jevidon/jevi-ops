@@ -4,7 +4,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 //
 // Why: the Google OAuth begin endpoint is hit via `<a href>` navigation, so
 // the browser can't send the Supabase Bearer header. On a public deployment
-// that would mean anyone in the world could initiate Jerad's OAuth flow.
+// that would mean anyone in the world could initiate the owner's OAuth flow.
 //
 // The web app (which DOES have the Supabase session) mints a short-lived
 // HMAC-signed token containing { user_id, exp } and redirects the browser

@@ -75,7 +75,7 @@ export function DesktopRail({
           Operations
         </div>
         <div className="mt-1 font-mono text-[10px] uppercase tracking-wider text-ink-3">
-          jeradhill.com
+          jevi-ops
         </div>
       </div>
 
