@@ -4,9 +4,11 @@ import { EmptyState } from '@/components/EmptyState';
 import { projectsApi, ApiError, type ProjectListItem } from '@/lib/api';
 import { getAppTimezone } from '@/lib/app-settings';
 
-// /projects — list view. Split into Active projects, Retainers, then
-// Paused / Done / Archived (collapsed). Retainers are kept separate
-// because their relevant metric is monthly usage, not cumulative.
+// /projects — list view. Active work (projects + retainers) is grouped
+// by domain into collapsible sections; the flat Active/Retainers split
+// stopped scaling past ~10 domains. Retainer rows keep their monthly-cap
+// meta inside their domain group. Paused / Done / Archived stay as
+// collapsed status groups at the bottom.
 
 const STATUS_LABELS: Record<string, string> = {
   active: 'Active',
@@ -65,12 +67,31 @@ export default async function ProjectsPage() {
   const grouped = group(projects);
   const activeCount = grouped.activeProjects.length + grouped.retainers.length;
 
+  // Domain sections for active work (projects + retainers together —
+  // a retainer still belongs to its domain; its row carries the
+  // monthly-cap meta). Alphabetical by domain, orphans last.
+  const active = sortProjects([...grouped.activeProjects, ...grouped.retainers]);
+  const sections = new Map<string, { name: string; projects: ProjectListItem[] }>();
+  for (const p of active) {
+    const key = p.domain?.id ?? 'none';
+    const section = sections.get(key) ?? { name: p.domain?.name ?? 'No domain', projects: [] };
+    section.projects.push(p);
+    sections.set(key, section);
+  }
+  const domainSections = [...sections.entries()]
+    .sort(([aKey, a], [bKey, b]) => {
+      if (aKey === 'none') return 1;
+      if (bKey === 'none') return -1;
+      return a.name.localeCompare(b.name);
+    })
+    .map(([key, s]) => ({ key, ...s }));
+
   return (
     <div>
       <ScreenHeader
         eyebrow="Active work"
         title="Projects"
-        meta={`${activeCount} active · ${projects.length} total`}
+        meta={`${activeCount} active · ${domainSections.length} domains · ${projects.length} total`}
       />
       <div className="hairline" />
 
@@ -92,12 +113,9 @@ export default async function ProjectsPage() {
         />
       ) : (
         <div className="mt-2">
-          {grouped.activeProjects.length > 0 && (
-            <ProjectGroup label={`Active · ${grouped.activeProjects.length}`} projects={grouped.activeProjects} tz={tz} />
-          )}
-          {grouped.retainers.length > 0 && (
-            <ProjectGroup label={`Retainers · ${grouped.retainers.length}`} projects={grouped.retainers} tz={tz} />
-          )}
+          {domainSections.map((s) => (
+            <DomainGroup key={s.key} name={s.name} projects={s.projects} tz={tz} />
+          ))}
           {grouped.paused.length > 0 && (
             <CollapsedGroup label={`Paused · ${grouped.paused.length}`} projects={grouped.paused} tz={tz} />
           )}
@@ -113,23 +131,37 @@ export default async function ProjectsPage() {
   );
 }
 
-function ProjectGroup({
-  label,
+// One domain's active projects, collapsible but open by default —
+// collapsing is for muting the quiet domains, not hiding the work.
+function DomainGroup({
+  name,
   projects,
   tz,
 }: {
-  label: string;
+  name: string;
   projects: ProjectListItem[];
   tz: string;
 }) {
   return (
     <section className="mt-4">
-      <div className="px-5 lg:px-0 eyebrow pb-2 border-b border-line">{label}</div>
-      <ul>
-        {projects.map((p) => (
-          <ProjectRow key={p.id} project={p} tz={tz} />
-        ))}
-      </ul>
+      <details open className="group">
+        <summary className="px-5 lg:px-0 pb-2 border-b border-line cursor-pointer list-none flex items-center justify-between gap-3 hover:text-ink-2 transition-colors">
+          <span className="eyebrow">
+            {name} · {projects.length}
+          </span>
+          <span
+            className="font-mono text-[10px] text-ink-3 transition-transform group-open:rotate-90"
+            aria-hidden
+          >
+            ▶
+          </span>
+        </summary>
+        <ul>
+          {projects.map((p) => (
+            <ProjectRow key={p.id} project={p} tz={tz} />
+          ))}
+        </ul>
+      </details>
     </section>
   );
 }

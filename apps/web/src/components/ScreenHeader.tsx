@@ -7,7 +7,7 @@ export function ScreenHeader({
   title,
   meta,
 }: {
-  eyebrow: string;
+  eyebrow: React.ReactNode;
   title: React.ReactNode;
   meta?: string;
 }) {

@@ -149,6 +149,43 @@ export async function createTaskFullAction(
   redirect(`/tasks/${createdId}`);
 }
 
+// Quick-add from the Subtasks ledger on a parent task's detail page.
+// The child inherits the parent's project (or direct domain) via hidden
+// fields so it lands in the same place without another resolver
+// round-trip.
+const SubtaskFormSchema = z.object({
+  parentId: z.string().uuid(),
+  title: z.string().trim().min(1),
+  projectId: z.string().uuid().optional(),
+  domainId: z.string().uuid().optional(),
+});
+
+export async function createSubtaskAction(formData: FormData): Promise<void> {
+  const parsed = SubtaskFormSchema.safeParse({
+    parentId: formData.get('parentId'),
+    title: formData.get('title'),
+    projectId: formData.get('projectId') || undefined,
+    domainId: formData.get('domainId') || undefined,
+  });
+  if (!parsed.success) return;
+  try {
+    await tasksApi.create({
+      title: parsed.data.title,
+      parent_task_id: parsed.data.parentId,
+      project_id: parsed.data.projectId ?? null,
+      domain_id: parsed.data.domainId ?? null,
+      priority: 4,
+      source: 'manual',
+    });
+  } catch {
+    /* best-effort; the page re-renders and reflects reality */
+  }
+  revalidatePath(`/tasks/${parsed.data.parentId}`);
+  revalidatePath('/tasks');
+  revalidatePath('/today');
+  revalidatePath('/projects');
+}
+
 export async function deleteTaskAction(formData: FormData): Promise<void> {
   const taskId = String(formData.get('taskId') ?? '');
   if (!taskId) return;

@@ -52,11 +52,15 @@ export function TaskForm({
   domains,
   projects,
   contentItems,
+  subtaskCount = 0,
 }: {
   initial: InitialValues;
   domains: DomainOption[];
   projects: ProjectOption[];
   contentItems: ContentItemOption[];
+  // Children of this task (edit mode only). Deleting a parent cascade-
+  // deletes its subtasks at the DB level, so the confirm step says so.
+  subtaskCount?: number;
 }) {
   const isEdit = Boolean(initial.id);
   const action = isEdit ? updateTaskAction : createTaskFullAction;
@@ -189,7 +193,7 @@ export function TaskForm({
       </form>
 
       {isEdit && initial.id && (
-        <DeleteRow taskId={initial.id} title={initial.title} />
+        <DeleteRow taskId={initial.id} title={initial.title} subtaskCount={subtaskCount} />
       )}
     </>
   );
@@ -278,7 +282,15 @@ function SaveButton({ isEdit }: { isEdit: boolean }) {
   );
 }
 
-function DeleteRow({ taskId, title }: { taskId: string; title: string }) {
+function DeleteRow({
+  taskId,
+  title,
+  subtaskCount = 0,
+}: {
+  taskId: string;
+  title: string;
+  subtaskCount?: number;
+}) {
   const [confirming, setConfirming] = useState(false);
   return (
     <div className="mt-12 pt-6 border-t border-line">
@@ -292,10 +304,18 @@ function DeleteRow({ taskId, title }: { taskId: string; title: string }) {
           Delete task…
         </button>
       ) : (
-        <form action={deleteTaskAction} className="flex items-center gap-3">
+        <form action={deleteTaskAction} className="flex items-center gap-3 flex-wrap">
           <input type="hidden" name="taskId" value={taskId} />
           <span className="font-sans text-[13px] text-ink-2">
             Delete &ldquo;{title}&rdquo; permanently?
+            {subtaskCount > 0 && (
+              <>
+                {' '}
+                <span className="text-accent">
+                  This also deletes its {subtaskCount} subtask{subtaskCount === 1 ? '' : 's'}.
+                </span>
+              </>
+            )}
           </span>
           <button
             type="submit"

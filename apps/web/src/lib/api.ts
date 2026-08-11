@@ -129,12 +129,13 @@ export type TaskInput = Partial<Omit<Task, 'domain_id' | 'project_id' | 'content
 export type TaskCreateInput = TaskInput & { title: string };
 
 export const tasksApi = {
-  list: (opts?: { content_item_id?: string; project_id?: string; status?: string; domain_id?: string }) => {
+  list: (opts?: { content_item_id?: string; project_id?: string; status?: string; domain_id?: string; parent_task_id?: string }) => {
     const qs = new URLSearchParams();
     if (opts?.content_item_id) qs.set('content_item_id', opts.content_item_id);
     if (opts?.project_id) qs.set('project_id', opts.project_id);
     if (opts?.status) qs.set('status', opts.status);
     if (opts?.domain_id) qs.set('domain_id', opts.domain_id);
+    if (opts?.parent_task_id) qs.set('parent_task_id', opts.parent_task_id);
     const s = qs.toString();
     return api.get<{ tasks: Task[] }>(`/api/tasks${s ? `?${s}` : ''}`);
   },
