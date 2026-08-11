@@ -209,7 +209,7 @@ export default async function TodayPage() {
           briefing fits in one viewport without scrolling. Inbox above
           and Capture below stay full-width. Matches the design brief's
           BriefingDesktop pattern, with routines added to the right rail
-          per Jerad's daily check-off use case. */}
+          per the daily check-off use case. */}
       <div className="mt-7 lg:grid lg:grid-cols-[1.5fr_1fr] lg:gap-x-10 lg:items-start">
         {/* ─── Left: editorial body ───────────────────────────── */}
         <div>

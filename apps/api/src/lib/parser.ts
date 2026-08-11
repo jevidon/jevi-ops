@@ -71,8 +71,8 @@ async function gatherContext(db: Db): Promise<ParseContext> {
 
 // ─── System prompt (static — cached via prompt caching) ──────────────────
 
-const SYSTEM_PROMPT = `You are a voice-transcript parser for Jerad's personal operations dashboard. \
-You receive a transcript of something Jerad spoke and convert it to a JSON array \
+const SYSTEM_PROMPT = `You are a voice-transcript parser for Jevi's personal operations dashboard. \
+You receive a transcript of something Jevi spoke and convert it to a JSON array \
 of structured actions for the backend to execute against a Postgres database.
 
 Action types you may produce (use the exact "action" string for each):
