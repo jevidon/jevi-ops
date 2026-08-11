@@ -55,6 +55,29 @@ export default async function TasksPage({
     (t) => t.status === 'done' && isToday(tz, t.completed_at ?? null),
   );
 
+  // Subtask visibility: browse views (No date, Project) hide subtasks —
+  // their parent row carries a "▸ done / total" chip and the children
+  // live on the parent's detail page. Date views (Overdue/Today/
+  // Upcoming) keep due subtasks as their own rows — a deadline is a
+  // deadline — wearing a "↳ parent" crumb for context.
+  const childrenByParent = new Map<string, Task[]>();
+  for (const t of tasks) {
+    if (!t.parent_task_id) continue;
+    const list = childrenByParent.get(t.parent_task_id) ?? [];
+    list.push(t);
+    childrenByParent.set(t.parent_task_id, list);
+  }
+  const titleById = new Map(tasks.map((t) => [t.id, t.title]));
+  const isSubtask = (t: Task) => t.parent_task_id != null;
+  const badgeFor = (t: Task): string | null => {
+    const kids = childrenByParent.get(t.id);
+    if (!kids?.length) return null;
+    const done = kids.filter((k) => k.status === 'done').length;
+    return `▸ ${done} / ${kids.length}`;
+  };
+  const crumbFor = (t: Task): string | null =>
+    t.parent_task_id ? (titleById.get(t.parent_task_id) ?? null) : null;
+
   // Build the body groups based on the active filter.
   type Group = { label: string; tasks: Task[]; accent?: boolean; showProject?: boolean };
   let groups: Group[] = [];
@@ -63,7 +86,7 @@ export default async function TasksPage({
       { label: 'Overdue', tasks: sortByDueAsc(overdue), accent: true, showProject: true },
       { label: 'Today', tasks: sortByCreatedDesc(dueToday), showProject: true },
       { label: 'Upcoming', tasks: sortByDueAsc(upcoming), showProject: true },
-      { label: 'No date', tasks: sortByCreatedDesc(noDate), showProject: true },
+      { label: 'No date', tasks: sortByCreatedDesc(noDate.filter((t) => !isSubtask(t))), showProject: true },
     ];
   } else if (filter === 'today') {
     groups = [
@@ -74,7 +97,7 @@ export default async function TasksPage({
     groups = [{ label: 'Upcoming', tasks: sortByDueAsc(upcoming), showProject: true }];
   } else if (filter === 'project') {
     const byProject = new Map<string, Task[]>();
-    for (const t of open) {
+    for (const t of open.filter((t) => !isSubtask(t))) {
       const key = t.project?.name ?? '(no project)';
       const list = byProject.get(key) ?? [];
       list.push(t);
@@ -149,6 +172,8 @@ export default async function TasksPage({
                 accent={g.accent}
                 showProject={g.showProject !== false}
                 today={today}
+                badgeFor={badgeFor}
+                crumbFor={crumbFor}
               />
             ) : null,
           )
@@ -196,12 +221,16 @@ function TaskGroup({
   accent,
   showProject,
   today,
+  badgeFor,
+  crumbFor,
 }: {
   label: string;
   tasks: Task[];
   accent?: boolean;
   showProject: boolean;
   today: string;
+  badgeFor: (t: Task) => string | null;
+  crumbFor: (t: Task) => string | null;
 }) {
   return (
     <div className="mb-6">
@@ -216,7 +245,14 @@ function TaskGroup({
         <span className="font-mono text-[10px] text-ink-3">{tasks.length}</span>
       </div>
       {tasks.map((t) => (
-        <TaskRow key={t.id} task={t} showProject={showProject} today={today} />
+        <TaskRow
+          key={t.id}
+          task={t}
+          showProject={showProject}
+          today={today}
+          subtaskBadge={badgeFor(t)}
+          parentCrumb={crumbFor(t)}
+        />
       ))}
     </div>
   );
@@ -224,7 +260,19 @@ function TaskGroup({
 
 // Compact editorial task row. Whole row links to /tasks/[id]; the
 // checkbox is a separate form so tapping it doesn't navigate.
-function TaskRow({ task, showProject, today }: { task: Task; showProject: boolean; today: string }) {
+function TaskRow({
+  task,
+  showProject,
+  today,
+  subtaskBadge,
+  parentCrumb,
+}: {
+  task: Task;
+  showProject: boolean;
+  today: string;
+  subtaskBadge?: string | null;
+  parentCrumb?: string | null;
+}) {
   const dueLabel = formatDueLabel(task.due_date, today);
   const overdue = task.due_date != null && task.due_date < today;
   const flags = collectFlags(task);
@@ -247,6 +295,9 @@ function TaskRow({ task, showProject, today }: { task: Task; showProject: boolea
           {task.title}
         </div>
         <div className="mt-1 flex items-center gap-2 flex-wrap">
+          {parentCrumb && (
+            <span className="font-sans text-[11px] text-ink-3">↳ {parentCrumb}</span>
+          )}
           {showProject && (
             <span className="font-sans text-[11px] text-ink-3">
               {task.project?.name ?? '(no project)'}
@@ -265,8 +316,13 @@ function TaskRow({ task, showProject, today }: { task: Task; showProject: boolea
         </div>
       </Link>
 
-      {/* Right: due + priority dot */}
+      {/* Right: subtask chip + due + priority dot */}
       <div className="flex items-center gap-2.5 shrink-0 pt-0.5">
+        {subtaskBadge && (
+          <span className="bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] tracking-wider text-ink-2 tabular-nums">
+            {subtaskBadge}
+          </span>
+        )}
         {dueLabel && (
           <span
             className={`font-mono text-[10px] tabular-nums ${

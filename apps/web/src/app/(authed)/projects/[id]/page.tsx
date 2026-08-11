@@ -5,6 +5,7 @@ import { TaskItem } from '@/components/TaskItem';
 import {
   projectsApi,
   domainsApi,
+  tasksApi,
   ApiError,
   type ProjectDetail,
 } from '@/lib/api';
@@ -77,11 +78,12 @@ export default async function ProjectDetailPage({
     .sort((a, b) => (b.completed_at ?? '').localeCompare(a.completed_at ?? ''));
   const doneToday = doneTasks.filter((t) => isToday(tz, t.completed_at ?? null));
 
-  // Group open tasks by parent. parent_task_id has always been stored;
-  // this is where it finally renders. One level deep: an open parent
-  // becomes a collapsible group, its open children nest inside. Children
-  // whose parent is done (or missing from this project) fall back to the
-  // root so no task silently disappears.
+  // Group open tasks by parent (one level deep). Children group under
+  // their parent even when the parent is done or isn't attached to this
+  // project — parents missing from the project's task list are fetched
+  // by id and rendered as group headers, so subtasks never sit flat at
+  // the root. Only a parent that can't be fetched at all (deleted
+  // mid-request) drops its children back to the loose list.
   const taskById = new Map(tasks.map((t) => [t.id, t]));
   const childrenByParent = new Map<string, Task[]>();
   for (const t of tasks) {
@@ -90,11 +92,32 @@ export default async function ProjectDetailPage({
     list.push(t);
     childrenByParent.set(t.parent_task_id, list);
   }
-  const hasOpenParent = (t: Task) =>
-    t.parent_task_id != null && taskById.get(t.parent_task_id)?.status === 'open';
-  const openRoots = openTasks.filter((t) => !hasOpenParent(t));
-  const parentGroups = openRoots.filter((t) => (childrenByParent.get(t.id) ?? []).length > 0);
-  const looseTasks = openRoots.filter((t) => (childrenByParent.get(t.id) ?? []).length === 0);
+  const externalParentIds = [...childrenByParent.keys()].filter((pid) => !taskById.has(pid));
+  const externalParents = new Map<string, Task>();
+  if (externalParentIds.length > 0) {
+    const fetched = await Promise.allSettled(externalParentIds.map((pid) => tasksApi.get(pid)));
+    for (const r of fetched) {
+      if (r.status === 'fulfilled') externalParents.set(r.value.id, r.value);
+    }
+  }
+  const parentFor = (pid: string): Task | null =>
+    taskById.get(pid) ?? externalParents.get(pid) ?? null;
+  // Group order: open project parents first (list order), then done or
+  // external parents in order of their first open child's appearance.
+  const groupIds: string[] = [];
+  for (const t of openTasks) {
+    if (!t.parent_task_id && (childrenByParent.get(t.id)?.length ?? 0) > 0) groupIds.push(t.id);
+  }
+  for (const t of openTasks) {
+    const pid = t.parent_task_id;
+    if (!pid || groupIds.includes(pid)) continue;
+    if (parentFor(pid)) groupIds.push(pid);
+  }
+  const looseTasks = openTasks.filter(
+    (t) =>
+      (!t.parent_task_id && (childrenByParent.get(t.id)?.length ?? 0) === 0) ||
+      (t.parent_task_id != null && !parentFor(t.parent_task_id)),
+  );
 
   const hoursLogged = Number(project.hours_logged ?? 0);
   const quoted = project.quoted_hours != null ? Number(project.quoted_hours) : null;
@@ -216,12 +239,15 @@ export default async function ProjectDetailPage({
           <p className="font-sans text-[13px] text-ink-3 italic py-1">No open tasks.</p>
         ) : (
           <>
-            {parentGroups.map((p) => {
-              const kids = childrenByParent.get(p.id) ?? [];
+            {groupIds.map((pid) => {
+              const parent = parentFor(pid);
+              if (!parent) return null;
+              const kids = childrenByParent.get(pid) ?? [];
               const openKids = kids.filter((k) => k.status === 'open');
               const doneKidCount = kids.length - openKids.length;
+              const parentDone = parent.status === 'done';
               return (
-                <details key={p.id} className="group border-b border-line">
+                <details key={pid} className="group border-b border-line">
                   <summary className="cursor-pointer list-none flex items-start gap-3 py-2">
                     <span
                       className="flex h-5 w-5 shrink-0 items-center justify-center pt-0.5 font-mono text-[10px] text-ink-3 transition-transform group-open:rotate-90"
@@ -230,10 +256,14 @@ export default async function ProjectDetailPage({
                       ▶
                     </span>
                     <Link
-                      href={`/tasks/${p.id}`}
-                      className="flex-1 min-w-0 font-sans text-[14px] leading-snug text-ink hover:text-accent transition-colors pt-0.5"
+                      href={`/tasks/${parent.id}`}
+                      className={`flex-1 min-w-0 font-sans text-[14px] leading-snug transition-colors pt-0.5 ${
+                        parentDone
+                          ? 'text-ink-3 line-through decoration-ink-3/60 hover:text-ink-2'
+                          : 'text-ink hover:text-accent'
+                      }`}
                     >
-                      {p.title}
+                      {parent.title}
                     </Link>
                     <span className="shrink-0 mt-0.5 bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] tracking-wider text-ink-2">
                       {doneKidCount} / {kids.length}
