@@ -29,6 +29,11 @@ export const TaskSchema = z.object({
   completed_at: z.string().datetime({ offset: true }).nullable().optional(),
   updated_at: z.string().datetime({ offset: true }),
   // Optional joins — present when API returns linked entity metadata.
+  domain: z.object({
+    id: z.string().uuid(),
+    name: z.string(),
+    is_system: z.boolean().optional(),
+  }).nullable().optional(),
   project: z.object({
     id: z.string().uuid(),
     name: z.string(),

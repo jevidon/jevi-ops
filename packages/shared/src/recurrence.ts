@@ -11,6 +11,7 @@ export const RECURRENCE_PATTERNS = [
   'weekly',
   'biweekly',
   'monthly',
+  'quarterly',
   'semiannually',
   'yearly',
 ] as const;
@@ -22,6 +23,7 @@ export const RECURRENCE_LABELS: Record<RecurrencePattern, string> = {
   weekly: 'Weekly',
   biweekly: 'Every 2 weeks',
   monthly: 'Monthly',
+  quarterly: 'Every 3 months',
   semiannually: 'Every 6 months',
   yearly: 'Yearly',
 };
@@ -109,6 +111,8 @@ export function nextDueDate(params: {
         return addDays(from, 14);
       case 'monthly':
         return addMonthsClamped(from, 1);
+      case 'quarterly':
+        return addMonthsClamped(from, 3);
       case 'semiannually':
         return addMonthsClamped(from, 6);
       case 'yearly':
@@ -135,6 +139,7 @@ export function nextDueDate(params: {
 //   weekly      → most recent Monday at 00:00
 //   biweekly    → same as weekly but the period is 14 days
 //   monthly     → 1st of this month at 00:00
+//   quarterly   → 1st of this calendar quarter at 00:00
 //   yearly      → Jan 1 of this year at 00:00
 //
 // "now" is passed in so the caller controls the timezone interpretation;
@@ -175,6 +180,9 @@ export function periodStart(
     }
     case 'monthly':
       return Date.UTC(y, m, 1);
+    case 'quarterly':
+      // Calendar-quarter anchor: Jan/Apr/Jul/Oct 1st.
+      return Date.UTC(y, Math.floor(m / 3) * 3, 1);
     case 'semiannually':
       // Calendar half-year anchor: Jan 1 if we're in H1, Jul 1 if H2.
       // Keeps "done this half" feeling stable until the half flips.
