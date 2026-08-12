@@ -83,12 +83,14 @@ should sit inside a collapsible parent row, none flat at the root.
 
 ---
 
-## Repair 2 — Null out the import-stamped due dates
+## Repair 2 — Null out any import-stamped due dates (likely a no-op)
 
-**Symptom:** imported tasks show a due date/time they were never given
-(observed as "due today at 12:30 PM"). **Cause:** the import scripts
-stamped `due_date`/`due_time` on creation. The web UI renders stored
-values faithfully; the fix is data-side.
+**Update (Aug 2026):** the "due today at 12:30 PM" sighting turned out
+to be Safari painting today's date and a default time into **empty**
+native date/time inputs — fixed in the web UI by hiding the native
+inputs on desktop. The data is probably clean. Run the preview below
+anyway; **if no large shared-`due_time` cluster shows up, skip this
+repair entirely.**
 
 ### Preview
 
