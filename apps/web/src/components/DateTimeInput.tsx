@@ -74,8 +74,10 @@ export function DateTimeInput({
 
   return (
     <div className="flex flex-col gap-1">
-      {/* Native picker — primary UX. Value matches the
-          datetime-local format "YYYY-MM-DDTHH:MM". */}
+      {/* Native picker — mobile only (OS wheel UX). Hidden on desktop:
+          Safari paints an EMPTY datetime-local input with the current
+          date/time in the field, which reads as a phantom value. Value
+          matches the datetime-local format "YYYY-MM-DDTHH:MM". */}
       <input
         type="datetime-local"
         value={normalized}
@@ -88,10 +90,10 @@ export function DateTimeInput({
         disabled={disabled}
         aria-label={ariaLabel}
         title={title}
-        className={className}
+        className={`${className ?? ''} lg:hidden`}
       />
-      {/* Text fallback — for Safari desktop and anyone who'd rather
-          type "5/23/2026 5:30 PM" than fiddle with two spinners. */}
+      {/* Text input — the only field on desktop, typing fallback on
+          mobile ("5/23/2026 5:30 PM" instead of two spinners). */}
       <input
         type="text"
         value={text}
@@ -105,7 +107,7 @@ export function DateTimeInput({
         autoComplete="off"
         aria-label={ariaLabel ? `${ariaLabel} (type)` : 'type date and time'}
         title={title}
-        className={`${className ?? ''} text-[12px] opacity-70 focus:opacity-100`}
+        className={`${className ?? ''} text-[12px] opacity-70 focus:opacity-100 lg:text-[14px] lg:opacity-100`}
       />
       <input type="hidden" name={name} value={normalized} />
       {error && (
