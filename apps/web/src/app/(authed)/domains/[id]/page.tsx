@@ -7,6 +7,7 @@ import { EditDomainForm } from './edit-domain-form';
 import { CadenceEditor } from './cadence-editor';
 import { MarkShipped } from './mark-shipped';
 import { IllustrationControls } from './illustration-controls';
+import { TaskQuickAdd, ProjectQuickCreate } from './quick-create';
 import { DomainIllustration } from '../domain-illustration';
 import { PRIMARY_CADENCE_RULES, type CadenceRuleType } from './cadence-rules';
 import { getAppTimezone } from '@/lib/app-settings';
@@ -244,9 +245,21 @@ export default async function DomainDetailPage({
 
         {/* ─── Open tasks under this domain ───────────────────────────── */}
         <div className="mt-12">
-          <div className="eyebrow mb-3 pb-2 border-b border-line">
-            Open tasks · {openTasks.length}
+          <div className="flex items-baseline justify-between gap-3 mb-3 pb-2 border-b border-line">
+            <span className="eyebrow">Open tasks · {openTasks.length}</span>
+            {!isInbox && (
+              <Link
+                href={`/tasks/new?domain_id=${domain.id}`}
+                className="font-mono text-[10px] uppercase tracking-wider text-accent hover:text-ink transition-colors shrink-0"
+              >
+                Full editor →
+              </Link>
+            )}
           </div>
+          {/* Title-only quick capture straight into this domain; due
+              dates, priority, and project routing live in the full
+              editor linked above. */}
+          {!isInbox && <TaskQuickAdd domainId={domain.id} />}
           {openTasks.length === 0 ? (
             <p className="font-sans text-[13px] text-ink-3 italic">No open tasks here.</p>
           ) : (
@@ -282,6 +295,25 @@ export default async function DomainDetailPage({
             </>
           )}
         </div>
+
+        {/* ─── New project / area in this domain ──────────────────────
+            Quick create routes straight to the new project's page (via
+            the projects screen's own create action); the full editor
+            link opens /projects/new with this domain pre-selected. */}
+        {!isInbox && (
+          <div className="mt-12">
+            <div className="flex items-baseline justify-between gap-3 mb-3 pb-2 border-b border-line">
+              <span className="eyebrow">New project or area</span>
+              <Link
+                href={`/projects/new?domain_id=${domain.id}`}
+                className="font-mono text-[10px] uppercase tracking-wider text-accent hover:text-ink transition-colors shrink-0"
+              >
+                Full editor →
+              </Link>
+            </div>
+            <ProjectQuickCreate domainId={domain.id} />
+          </div>
+        )}
 
         {/* Cadence rule editor (hidden for Inbox — system domain). The
             briefing's "In brief" only reads `days_since_*` and

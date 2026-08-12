@@ -94,6 +94,10 @@ export async function createProjectAction(
   }
   revalidatePath('/projects');
   revalidatePath('/today');
+  // The Domains board shows per-domain project counts, and the domain
+  // detail page offers quick-create — keep both honest.
+  revalidatePath('/domains');
+  if (fields.domain_id) revalidatePath(`/domains/${fields.domain_id}`);
   redirect(`/projects/${created.id}`);
 }
 
