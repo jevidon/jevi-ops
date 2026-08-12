@@ -271,6 +271,9 @@ export const domainsApi = {
   list: () => api.get<{ domains: Domain[] }>('/api/domains'),
   get: (id: string) => api.get<Domain>(`/api/domains/${id}`),
   update: (id: string, body: DomainUpdate) => api.patch<Domain>(`/api/domains/${id}`, body),
+  // Server-side compose + sanitize + persist; illustration is never
+  // client-supplied (hence not part of DomainUpdate).
+  regenerateIllustration: (id: string) => api.post<Domain>(`/api/domains/${id}/illustration`),
 };
 
 export interface VoiceCaptureResponse {
@@ -1028,11 +1031,34 @@ export interface CadenceRow {
   unit: string;
   next: string;
   routeTo: { href: string; label: string };
+  // Stored engraved spot art (migration 0032); null = render the
+  // name-seeded procedural fallback. Matches DomainIllustrationSchema
+  // in @jevi-ops/shared.
+  illustration: {
+    svg: string;
+    style: 'engraved';
+    source: 'llm' | 'procedural';
+    generated_at: string;
+  } | null;
+}
+
+// Workload rollup attached to each Domains-pulse row. `next_due` is the
+// earliest dated open task in the domain, overdue included.
+export interface DomainStats {
+  projects: number;
+  open_tasks: number;
+  overdue: number;
+  due_soon: number;
+  next_due: { date: string; title: string } | null;
+}
+
+export interface DomainPulseRow extends CadenceRow {
+  stats: DomainStats;
 }
 
 export const briefingApi = {
   today: () => api.get<BriefingPayload>('/api/briefing/today'),
-  domains: () => api.get<{ domains: CadenceRow[] }>('/api/briefing/domains'),
+  domains: () => api.get<{ domains: DomainPulseRow[] }>('/api/briefing/domains'),
 };
 
 // ─── Notifications ───────────────────────────────────────────────────────

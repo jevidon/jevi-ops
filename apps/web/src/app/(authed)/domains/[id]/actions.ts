@@ -125,6 +125,40 @@ export async function setCadenceRuleAction(
 // etc.) can still keep a real cadence without logging every external
 // post as a content_items row.
 
+// ─── Regenerate illustration ─────────────────────────────────────────────
+//
+// Asks the API to redraw this domain's board illustration. The API owns
+// the whole pipeline (LLM compose → sanitize → persist); this action just
+// triggers it and reports which path produced the drawing so the button
+// can say "drawn by the model" vs "library motif" honestly.
+
+export type RegenerateIllustrationResult =
+  | { ok: true; source: 'llm' | 'procedural'; generated_at: string }
+  | { ok: false; error: string };
+
+export async function regenerateIllustrationAction(
+  _prev: RegenerateIllustrationResult | null,
+  formData: FormData,
+): Promise<RegenerateIllustrationResult> {
+  const id = String(formData.get('id') ?? '');
+  if (!id) return { ok: false, error: 'Missing id.' };
+
+  try {
+    const domain = await domainsApi.regenerateIllustration(id);
+    const ill = domain.illustration;
+    if (!ill) return { ok: false, error: 'No illustration returned.' };
+    revalidatePath(`/domains/${id}`);
+    revalidatePath('/domains');
+    return { ok: true, source: ill.source, generated_at: ill.generated_at };
+  } catch (err) {
+    if (err instanceof ApiError) {
+      const body = err.body as { error?: string } | null;
+      return { ok: false, error: body?.error ?? `API ${err.status}` };
+    }
+    return { ok: false, error: (err as Error).message };
+  }
+}
+
 export type MarkShippedResult = { ok: true; at: string } | { ok: false; error: string };
 
 export async function markShippedAction(
