@@ -35,6 +35,9 @@ export const DomainSchema = z.object({
   // Added by migration 0032. Server-generated engraved spot art for the
   // Domains board; see DomainIllustrationSchema above.
   illustration: DomainIllustrationSchema.nullable().optional(),
+  // Added by migration 0033. Candidate render awaiting Keep/Discard on
+  // the domain settings page — never shown on the board.
+  illustration_draft: DomainIllustrationSchema.nullable().optional(),
   created_at: z.string().datetime({ offset: true }),
   updated_at: z.string().datetime({ offset: true }),
 });

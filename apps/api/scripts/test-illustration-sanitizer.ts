@@ -31,7 +31,9 @@ const hostile: Array<[string, string]> = [
   ['mismatched close', '<g><line x1="0" y1="0" x2="1" y2="1"/></rect><line x1="2" y1="2" x2="3" y2="3"/><circle cx="5" cy="5" r="2"/>'],
   ['nested non-g children', '<rect x="0" y="0" width="4" height="4"><circle cx="1" cy="1" r="1"/></rect><line x1="2" y1="2" x2="3" y2="3"/><circle cx="5" cy="5" r="2"/>'],
   ['too few elements', '<line x1="0" y1="0" x2="1" y2="1"/>'],
-  ['too many elements', Array.from({ length: 61 }, (_, i) => `<line x1="${i}" y1="0" x2="${i}" y2="1"/>`).join('')],
+  ['too many elements', Array.from({ length: 121 }, (_, i) => `<line x1="${i}" y1="0" x2="${i}" y2="1"/>`).join('')],
+  ['oversize stroke-width', '<line x1="0" y1="0" x2="1" y2="1" stroke-width="9"/><line x1="2" y1="2" x2="3" y2="3"/><circle cx="5" cy="5" r="2"/>'],
+  ['stroke-width expression', '<line x1="0" y1="0" x2="1" y2="1" stroke-width="1px"/><line x1="2" y1="2" x2="3" y2="3"/><circle cx="5" cy="5" r="2"/>'],
   ['transform smuggle', '<circle cx="5" cy="5" r="2" transform="translate(1 1)"/><line x1="0" y1="0" x2="1" y2="1"/><line x1="2" y1="2" x2="3" y2="3"/>'],
   ['bad class', '<circle cx="5" cy="5" r="2" class="f x"/><line x1="0" y1="0" x2="1" y2="1"/><line x1="2" y1="2" x2="3" y2="3"/>'],
   ['empty', ''],
@@ -43,6 +45,8 @@ for (const [label, input] of hostile) {
 // ─── Valid contract output must pass ────────────────────────────────────
 const valid = '<ellipse cx="120" cy="45" rx="27" ry="5"/><path d="M 93 45 V 65 Q 93 74 102 74 H 138 Q 147 74 147 65 V 45"/><line class="f" x1="70" y1="80" x2="170" y2="80"/><path class="f" stroke-dasharray="3 4" d="M 34 68 Q 100 20 196 30"/><circle cx="187" cy="30" r="2.5" fill="#FBF8F2"/><g><line x1="99" y1="52" x2="95" y2="58"/><line x1="106" y1="52" x2="100" y2="61"/></g>';
 expect('accept: valid markup', sanitizeIllustration(valid) !== null);
+expect('accept: fine stroke-width', sanitizeIllustration('<line x1="0" y1="0" x2="1" y2="1" stroke-width="0.6"/><line x1="2" y1="2" x2="3" y2="3"/><circle cx="5" cy="5" r="2"/>') !== null);
+expect('accept: 100-element rich drawing', sanitizeIllustration(Array.from({ length: 100 }, (_, i) => `<line x1="${i}" y1="0" x2="${i}" y2="1"/>`).join('')) !== null);
 expect('accept: open/close shape pair', sanitizeIllustration('<rect x="0" y="0" width="4" height="4"></rect><line x1="2" y1="2" x2="3" y2="3"/><circle cx="5" cy="5" r="2"/>') !== null);
 expect('idempotent', sanitizeIllustration(sanitizeIllustration(valid)!) === sanitizeIllustration(valid));
 

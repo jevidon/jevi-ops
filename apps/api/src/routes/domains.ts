@@ -71,38 +71,82 @@ export const domainRoutes: FastifyPluginAsync = async (app) => {
     return row;
   });
 
-  // Regenerate the domain's board illustration. The LLM composes under
-  // the locked engraved-style contract and the result is sanitized before
-  // it touches the row; if the model is unconfigured/unreachable or its
-  // output fails validation, the procedural motif stands in. Either way
-  // this endpoint always writes a fresh illustration — the client can
-  // read `illustration.source` off the returned row to tell which.
-  // Deliberately NOT part of PATCH: clients never supply raw SVG.
-  app.post<{ Params: { id: string } }>('/api/domains/:id/illustration', async (req, reply) => {
-    const db = getDb();
-    const existing = await db.query.stewardship_domains.findFirst({
-      columns: { id: true, name: true, description: true, is_system: true },
-      where: eq(stewardship_domains.id, req.params.id),
+  // ─── Illustration candidate workflow ────────────────────────────────
+  //
+  // Redrawing never overwrites the saved art. A render lands in
+  // illustration_draft (the Candidate); commit copies it to illustration
+  // and clears the draft; discard just clears it. All three endpoints
+  // are the only writers of either column — they're deliberately NOT
+  // part of PATCH, so clients never supply raw SVG (the composer's
+  // sanitizer stays the single gate).
+
+  // Shared guard: the domain must exist and not be a system domain.
+  async function illustrationTarget(id: string, reply: { code: (n: number) => { send: (b: unknown) => unknown } }) {
+    const existing = await getDb().query.stewardship_domains.findFirst({
+      columns: { id: true, name: true, description: true, is_system: true, illustration_draft: true },
+      where: eq(stewardship_domains.id, id),
     });
-    if (!existing) return reply.code(404).send({ error: 'not_found' });
-    if (existing.is_system === true) {
-      return reply.code(400).send({ error: 'system_domain_protected' });
+    if (!existing) {
+      reply.code(404).send({ error: 'not_found' });
+      return null;
     }
+    if (existing.is_system === true) {
+      reply.code(400).send({ error: 'system_domain_protected' });
+      return null;
+    }
+    return existing;
+  }
+
+  // Draw a fresh candidate (overwrites any previous candidate; the saved
+  // illustration is untouched). LLM compose → sanitize, procedural
+  // fallback when the model can't deliver — always yields a drawing.
+  app.post<{ Params: { id: string } }>('/api/domains/:id/illustration/draft', async (req, reply) => {
+    const target = await illustrationTarget(req.params.id, reply);
+    if (!target) return;
 
     const { svg, source } = await composeDomainIllustration({
-      name: existing.name,
-      description: existing.description ?? null,
+      name: target.name,
+      description: target.description ?? null,
     });
-    const illustration: DomainIllustration = {
+    const illustration_draft: DomainIllustration = {
       svg,
       style: 'engraved',
       source,
       generated_at: new Date().toISOString(),
     };
 
-    const [row] = await db
+    const [row] = await getDb()
       .update(stewardship_domains)
-      .set({ illustration })
+      .set({ illustration_draft })
+      .where(eq(stewardship_domains.id, req.params.id))
+      .returning();
+    if (!row) return reply.code(404).send({ error: 'not_found' });
+    return row;
+  });
+
+  // Keep the candidate: draft becomes the saved illustration.
+  app.post<{ Params: { id: string } }>('/api/domains/:id/illustration/commit', async (req, reply) => {
+    const target = await illustrationTarget(req.params.id, reply);
+    if (!target) return;
+    if (!target.illustration_draft) return reply.code(400).send({ error: 'no_draft' });
+
+    const [row] = await getDb()
+      .update(stewardship_domains)
+      .set({ illustration: target.illustration_draft, illustration_draft: null })
+      .where(eq(stewardship_domains.id, req.params.id))
+      .returning();
+    if (!row) return reply.code(404).send({ error: 'not_found' });
+    return row;
+  });
+
+  // Discard the candidate: saved illustration stays as it was.
+  app.delete<{ Params: { id: string } }>('/api/domains/:id/illustration/draft', async (req, reply) => {
+    const target = await illustrationTarget(req.params.id, reply);
+    if (!target) return;
+
+    const [row] = await getDb()
+      .update(stewardship_domains)
+      .set({ illustration_draft: null })
       .where(eq(stewardship_domains.id, req.params.id))
       .returning();
     if (!row) return reply.code(404).send({ error: 'not_found' });

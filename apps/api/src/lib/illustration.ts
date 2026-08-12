@@ -20,19 +20,24 @@ const STYLE_SYSTEM = `You are an engraver drawing spot illustrations for a perso
 
 Canvas and composition:
 - The canvas is 240 wide by 100 tall. Keep all meaningful geometry inside x 24–216, y 20–80 (edges may be cropped).
-- Compose ONE recognizable pictorial subject for the given topic (an object or tiny scene), centered-ish, with a light touch of supporting detail: a ground line, a few hatch strokes of shading, one small prop. Standard density — roughly 15 to 45 strokes total. No busy backgrounds.
+- Compose ONE recognizable pictorial subject for the given topic (an object or small scene), centered-ish, and give it real engraving texture — rich density, roughly 35 to 80 strokes total:
+  · form shading: a band of parallel hatch strokes following the subject's shadowed side (short faint lines, slanted with the surface);
+  · a cast shadow under the subject: two rows of short horizontal faint strokes pooling toward one side;
+  · a ground line with a few grass/gravel ticks;
+  · one or two quiet background hints (a shelf line, a distant silhouette, a second ridge, a cloud) — background stays faint and sparse, never busy;
+  · one or two small props that belong to the scene.
 
 Technical contract (strict):
 - Output ONLY raw SVG element markup. No <svg> wrapper, no XML declaration, no code fences, no commentary.
 - Allowed elements: line, path, polyline, polygon, circle, ellipse, rect, g.
-- The renderer applies fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" to everything. Do not set colors or stroke-width yourself.
-- Two tones only: primary strokes are plain elements; secondary/shading strokes get class="f" (faint). Use faint for hatching, ground lines, and supporting detail; keep the subject's outline primary.
+- The renderer applies fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" to everything. Do not set colors. Main outlines stay at the default width (do not set stroke-width on them); fine shading/hatch strokes may set stroke-width="0.6" (allowed range 0.5–1.5).
+- Two tones only: primary strokes are plain elements; secondary/shading strokes get class="f" (faint). Use faint for hatching, shadows, ground lines, and background; keep the subject's outline primary.
 - fill is forbidden except fill="#FBF8F2" on a small shape that must knock out lines passing behind it, or fill="none".
 - stroke-dasharray like "3 4" is allowed for dotted routes or guide lines.
 - No text, no defs, no style, no script, no images, no transforms, no ids, no comments. Attribute values are plain numbers (or path/points data).
 
-Example of valid output (topic "sailing"):
-<path d="M 96 70 H 150 L 142 78 H 104 Z"/><line x1="122" y1="70" x2="122" y2="26"/><path d="M 122 28 Q 152 44 124 66"/><path class="f" d="M 122 32 L 100 66 H 120"/><line class="f" x1="60" y1="78" x2="186" y2="78"/><path class="f" d="M 52 34 q 4 -5 9 -2 q 5 -4 9 1"/>`;
+Example fragment of valid output (topic "sailing" — subject outline, then hatch shading, shadow, ground, background hint):
+<path d="M 96 70 H 150 L 142 78 H 104 Z"/><line x1="122" y1="70" x2="122" y2="26"/><path d="M 122 28 Q 152 44 124 66"/><path class="f" d="M 122 32 L 100 66 H 120"/><line class="f" stroke-width="0.6" x1="128" y1="34" x2="126" y2="44"/><line class="f" stroke-width="0.6" x1="133" y1="38" x2="131" y2="48"/><line class="f" stroke-width="0.6" x1="138" y1="43" x2="136" y2="53"/><line class="f" stroke-width="0.6" x1="98" y1="81" x2="118" y2="81"/><line class="f" stroke-width="0.6" x1="124" y1="81" x2="146" y2="81"/><line class="f" stroke-width="0.6" x1="104" y1="83" x2="138" y2="83"/><line class="f" x1="60" y1="78" x2="186" y2="78"/><path class="f" d="M 52 34 q 4 -5 9 -2 q 5 -4 9 1"/><path class="f" stroke-width="0.6" d="M 178 30 q 3 -4 7 -1 q 4 -3 7 1"/>`;
 
 function userPrompt(d: { name: string; description: string | null }): string {
   return [
@@ -56,11 +61,16 @@ const ATTR_RULES: Record<string, RegExp> = {
   points: /^[-\d.,\s]+$/,
   d: /^[MmLlHhVvQqCcSsTtAaZz\s\d.,+-]+$/,
   'stroke-dasharray': /^[\d.\s,]+$/,
+  // Fine shading strokes (Rich contract): 0.5–1.5. Regex admits 0–2 and
+  // the numeric bound below keeps values sane; the prompt pins the range.
+  'stroke-width': /^[0-2](\.\d+)?$/,
   class: /^f$/,
   fill: /^(none|#FBF8F2)$/,
 };
 
-const MAX_ELEMENTS = 60;
+// Rich tier (density study, Aug 2026): ~35–80 strokes expected; cap well
+// above so a slightly-over model drawing isn't wasted.
+const MAX_ELEMENTS = 120;
 const MIN_ELEMENTS = 3;
 // Generous bounds around the 240×100 canvas — reject runaway geometry.
 const COORD_MIN = -60;
@@ -188,7 +198,7 @@ export async function composeDomainIllustration(d: {
         const res = await chatComplete({
           system: STYLE_SYSTEM,
           messages: [{ role: 'user', content: userPrompt(d) }],
-          maxTokens: 2500,
+          maxTokens: 4000,
           effort: 'low',
         });
         const markup = extractMarkup(res.text);

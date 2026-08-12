@@ -125,37 +125,72 @@ export async function setCadenceRuleAction(
 // etc.) can still keep a real cadence without logging every external
 // post as a content_items row.
 
-// ─── Regenerate illustration ─────────────────────────────────────────────
+// ─── Illustration candidate workflow ─────────────────────────────────────
 //
-// Asks the API to redraw this domain's board illustration. The API owns
-// the whole pipeline (LLM compose → sanitize → persist); this action just
-// triggers it and reports which path produced the drawing so the button
-// can say "drawn by the model" vs "library motif" honestly.
+// Drawing a candidate never overwrites the saved art. The API owns the
+// whole pipeline (LLM compose → sanitize → persist to the draft slot);
+// these actions just trigger draft / keep / discard and revalidate.
+// Draft only refreshes the detail page; commit and discard also refresh
+// the board (commit changes what the grid shows, and both settle the
+// pending-candidate state).
 
-export type RegenerateIllustrationResult =
-  | { ok: true; source: 'llm' | 'procedural'; generated_at: string }
+export type IllustrationActionResult =
+  | { ok: true; source?: 'llm' | 'procedural' }
   | { ok: false; error: string };
 
-export async function regenerateIllustrationAction(
-  _prev: RegenerateIllustrationResult | null,
+function illustrationError(err: unknown): IllustrationActionResult {
+  if (err instanceof ApiError) {
+    const body = err.body as { error?: string } | null;
+    if (body?.error === 'no_draft') return { ok: false, error: 'No candidate to keep — draw one first.' };
+    return { ok: false, error: body?.error ?? `API ${err.status}` };
+  }
+  return { ok: false, error: (err as Error).message };
+}
+
+export async function draftIllustrationAction(
+  _prev: IllustrationActionResult | null,
   formData: FormData,
-): Promise<RegenerateIllustrationResult> {
+): Promise<IllustrationActionResult> {
   const id = String(formData.get('id') ?? '');
   if (!id) return { ok: false, error: 'Missing id.' };
-
   try {
-    const domain = await domainsApi.regenerateIllustration(id);
-    const ill = domain.illustration;
-    if (!ill) return { ok: false, error: 'No illustration returned.' };
+    const domain = await domainsApi.draftIllustration(id);
+    revalidatePath(`/domains/${id}`);
+    return { ok: true, source: domain.illustration_draft?.source };
+  } catch (err) {
+    return illustrationError(err);
+  }
+}
+
+export async function commitIllustrationAction(
+  _prev: IllustrationActionResult | null,
+  formData: FormData,
+): Promise<IllustrationActionResult> {
+  const id = String(formData.get('id') ?? '');
+  if (!id) return { ok: false, error: 'Missing id.' };
+  try {
+    await domainsApi.commitIllustration(id);
     revalidatePath(`/domains/${id}`);
     revalidatePath('/domains');
-    return { ok: true, source: ill.source, generated_at: ill.generated_at };
+    return { ok: true };
   } catch (err) {
-    if (err instanceof ApiError) {
-      const body = err.body as { error?: string } | null;
-      return { ok: false, error: body?.error ?? `API ${err.status}` };
-    }
-    return { ok: false, error: (err as Error).message };
+    return illustrationError(err);
+  }
+}
+
+export async function discardIllustrationAction(
+  _prev: IllustrationActionResult | null,
+  formData: FormData,
+): Promise<IllustrationActionResult> {
+  const id = String(formData.get('id') ?? '');
+  if (!id) return { ok: false, error: 'Missing id.' };
+  try {
+    await domainsApi.discardIllustrationDraft(id);
+    revalidatePath(`/domains/${id}`);
+    revalidatePath('/domains');
+    return { ok: true };
+  } catch (err) {
+    return illustrationError(err);
   }
 }
 

@@ -271,9 +271,13 @@ export const domainsApi = {
   list: () => api.get<{ domains: Domain[] }>('/api/domains'),
   get: (id: string) => api.get<Domain>(`/api/domains/${id}`),
   update: (id: string, body: DomainUpdate) => api.patch<Domain>(`/api/domains/${id}`, body),
-  // Server-side compose + sanitize + persist; illustration is never
-  // client-supplied (hence not part of DomainUpdate).
-  regenerateIllustration: (id: string) => api.post<Domain>(`/api/domains/${id}/illustration`),
+  // Illustration candidate workflow. All composition/sanitizing happens
+  // server-side — illustrations are never client-supplied (hence not part
+  // of DomainUpdate). Draft renders a candidate into illustration_draft;
+  // commit keeps it (draft → illustration); discard clears the draft.
+  draftIllustration: (id: string) => api.post<Domain>(`/api/domains/${id}/illustration/draft`),
+  commitIllustration: (id: string) => api.post<Domain>(`/api/domains/${id}/illustration/commit`),
+  discardIllustrationDraft: (id: string) => api.delete<Domain>(`/api/domains/${id}/illustration/draft`),
 };
 
 export interface VoiceCaptureResponse {

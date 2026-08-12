@@ -99,6 +99,8 @@ export const stewardship_domains = pgTable("stewardship_domains", {
 	is_system: boolean().default(false).notNull(),
 	last_shipped_at: timestamp({ withTimezone: true, mode: 'string' }),
 	illustration: jsonb().$type<DomainIllustration>(),
+	// Candidate awaiting Keep/Discard on the settings page (migration 0033).
+	illustration_draft: jsonb().$type<DomainIllustration>(),
 	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	updated_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [
