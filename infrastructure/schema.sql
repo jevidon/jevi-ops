@@ -51,6 +51,7 @@ create table if not exists stewardship_domains (
   is_system boolean not null default false,
   last_shipped_at timestamptz,
   illustration jsonb,
+  illustration_draft jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );

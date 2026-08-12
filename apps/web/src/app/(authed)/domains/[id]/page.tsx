@@ -6,7 +6,7 @@ import type { Domain, Task } from '@jevi-ops/shared';
 import { EditDomainForm } from './edit-domain-form';
 import { CadenceEditor } from './cadence-editor';
 import { MarkShipped } from './mark-shipped';
-import { RegenerateIllustration } from './regenerate-illustration';
+import { IllustrationControls } from './illustration-controls';
 import { DomainIllustration } from '../domain-illustration';
 import { PRIMARY_CADENCE_RULES, type CadenceRuleType } from './cadence-rules';
 import { getAppTimezone } from '@/lib/app-settings';
@@ -38,6 +38,24 @@ function advancedPatterns(patterns: unknown): unknown[] {
 
 function hasAdvancedPatterns(patterns: unknown): boolean {
   return advancedPatterns(patterns).length > 0;
+}
+
+// Provenance line under an illustration panel: who drew it and when.
+// Null = nothing stored yet, so the board is showing the name-seeded
+// library motif.
+function illustrationMeta(
+  ill: { source: 'llm' | 'procedural'; generated_at: string } | null,
+  tz: string,
+): string {
+  if (!ill) return 'library motif · not yet drawn';
+  const when = new Date(ill.generated_at).toLocaleString('en-US', {
+    timeZone: tz,
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+  return `${ill.source === 'llm' ? 'drawn by the model' : 'library motif'} · ${when}`;
 }
 
 // Header meta — show the active cadence rule + threshold when one is set;
@@ -174,30 +192,52 @@ export default async function DomainDetailPage({
         )}
 
         {/* ─── Board illustration ─────────────────────────────────────
-            The engraved spot art this domain shows on /domains. Stored
-            on the row (migration 0032); "Redraw" asks the configured
-            model for a fresh engraving, with the procedural library
-            standing in when the model can't deliver. */}
+            The engraved spot art this domain shows on /domains. Drawing
+            a candidate never overwrites the saved art: the render lands
+            in illustration_draft (migration 0033) and appears here as
+            Candidate until it's explicitly kept or discarded. */}
         {!isInbox && (
           <div className="mt-12 pt-6 border-t border-line">
             <div className="eyebrow mb-3">Board illustration</div>
-            <div className="border border-line max-w-sm">
-              <div className="h-[96px] overflow-hidden">
-                <DomainIllustration name={domain.name} svg={domain.illustration?.svg} />
-              </div>
+            <div className="flex flex-wrap gap-5 mb-3">
+              <figure className="m-0">
+                <div className="font-mono text-[9px] uppercase tracking-[0.06em] text-ink-3 mb-1.5">
+                  Current
+                </div>
+                <div className="border border-line w-[260px] max-w-full">
+                  <div className="h-[96px] overflow-hidden">
+                    <DomainIllustration name={domain.name} svg={domain.illustration?.svg} />
+                  </div>
+                </div>
+                <figcaption className="mt-1.5 font-mono text-[9px] uppercase tracking-[0.06em] text-ink-4">
+                  {illustrationMeta(domain.illustration ?? null, tz)}
+                </figcaption>
+              </figure>
+              {domain.illustration_draft && (
+                <figure className="m-0">
+                  <div className="font-mono text-[9px] uppercase tracking-[0.06em] text-accent mb-1.5">
+                    Candidate
+                  </div>
+                  <div className="border border-accent/40 w-[260px] max-w-full">
+                    <div className="h-[96px] overflow-hidden">
+                      <DomainIllustration name={domain.name} svg={domain.illustration_draft.svg} />
+                    </div>
+                  </div>
+                  <figcaption className="mt-1.5 font-mono text-[9px] uppercase tracking-[0.06em] text-ink-4">
+                    {illustrationMeta(domain.illustration_draft, tz)}
+                  </figcaption>
+                </figure>
+              )}
             </div>
-            <p className="font-sans text-[12px] text-ink-3 mt-3 mb-3 leading-relaxed">
-              Shown on the Domains board. Redrawing asks the model for a new
-              engraving of this domain&rsquo;s subject; if the model
-              isn&rsquo;t reachable, a drawing from the built-in library
-              stands in.
+            <p className="font-sans text-[12px] text-ink-3 mb-3 leading-relaxed">
+              Shown on the Domains board. Drawing a candidate asks the model
+              for a fresh engraving (the built-in library stands in if the
+              model isn&rsquo;t reachable) — the current art stays until you
+              keep the candidate.
             </p>
-            <RegenerateIllustration
+            <IllustrationControls
               domainId={domain.id}
-              current={domain.illustration
-                ? { source: domain.illustration.source, generated_at: domain.illustration.generated_at }
-                : null}
-              tz={tz}
+              hasDraft={Boolean(domain.illustration_draft)}
             />
           </div>
         )}
