@@ -146,6 +146,14 @@ export default async function TasksPage({
             </Link>
           );
         })}
+        {/* Doorway to the recurring-upkeep audit view — not a filter of
+            this list, so it sits apart on the right. */}
+        <Link
+          href="/tasks/maintenance"
+          className="ml-auto pb-1 font-mono text-[10px] uppercase tracking-[0.06em] text-ink-3 hover:text-ink-2 border-b border-transparent transition-colors"
+        >
+          Maintenance ↻
+        </Link>
       </div>
 
       <div className="hairline mt-3 mx-5 lg:mx-0" />

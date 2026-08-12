@@ -199,7 +199,7 @@ export const project_checklist_items = pgTable("project_checklist_items", {
 			foreignColumns: [projects.id],
 			name: "project_checklist_items_project_id_fkey"
 		}).onDelete("cascade"),
-	check("project_checklist_items_recurrence_rule_check", sql`recurrence_rule = ANY (ARRAY['daily'::text, 'weekdays'::text, 'weekly'::text, 'biweekly'::text, 'monthly'::text, 'yearly'::text])`),
+	check("project_checklist_items_recurrence_rule_check", sql`recurrence_rule = ANY (ARRAY['daily'::text, 'weekdays'::text, 'weekly'::text, 'biweekly'::text, 'monthly'::text, 'quarterly'::text, 'semiannually'::text, 'yearly'::text])`),
 ]);
 
 export const content_items = pgTable("content_items", {

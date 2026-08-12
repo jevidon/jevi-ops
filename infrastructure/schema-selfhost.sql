@@ -179,7 +179,7 @@ create table if not exists project_checklist_items (
   done boolean not null default false,
   done_at timestamptz,
   recurrence_rule text check (recurrence_rule in
-    ('daily','weekdays','weekly','biweekly','monthly','yearly')),
+    ('daily','weekdays','weekly','biweekly','monthly','quarterly','semiannually','yearly')),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
