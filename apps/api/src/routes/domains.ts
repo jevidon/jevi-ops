@@ -2,7 +2,8 @@ import type { FastifyPluginAsync } from 'fastify';
 import { asc, eq } from 'drizzle-orm';
 import { UpdateDomainSchema } from '@jevi-ops/shared/schemas';
 import { getDb } from '../lib/db.js';
-import { stewardship_domains } from '../db/schema.js';
+import { composeDomainIllustration } from '../lib/illustration.js';
+import { stewardship_domains, type DomainIllustration } from '../db/schema.js';
 
 // Domain CRUD. Single-user system, so we surface every active domain on
 // list. Editing happens via the /domains/[id] detail page on the web side.
@@ -64,6 +65,44 @@ export const domainRoutes: FastifyPluginAsync = async (app) => {
     const [row] = await db
       .update(stewardship_domains)
       .set(parsed.data)
+      .where(eq(stewardship_domains.id, req.params.id))
+      .returning();
+    if (!row) return reply.code(404).send({ error: 'not_found' });
+    return row;
+  });
+
+  // Regenerate the domain's board illustration. The LLM composes under
+  // the locked engraved-style contract and the result is sanitized before
+  // it touches the row; if the model is unconfigured/unreachable or its
+  // output fails validation, the procedural motif stands in. Either way
+  // this endpoint always writes a fresh illustration — the client can
+  // read `illustration.source` off the returned row to tell which.
+  // Deliberately NOT part of PATCH: clients never supply raw SVG.
+  app.post<{ Params: { id: string } }>('/api/domains/:id/illustration', async (req, reply) => {
+    const db = getDb();
+    const existing = await db.query.stewardship_domains.findFirst({
+      columns: { id: true, name: true, description: true, is_system: true },
+      where: eq(stewardship_domains.id, req.params.id),
+    });
+    if (!existing) return reply.code(404).send({ error: 'not_found' });
+    if (existing.is_system === true) {
+      return reply.code(400).send({ error: 'system_domain_protected' });
+    }
+
+    const { svg, source } = await composeDomainIllustration({
+      name: existing.name,
+      description: existing.description ?? null,
+    });
+    const illustration: DomainIllustration = {
+      svg,
+      style: 'engraved',
+      source,
+      generated_at: new Date().toISOString(),
+    };
+
+    const [row] = await db
+      .update(stewardship_domains)
+      .set({ illustration })
       .where(eq(stewardship_domains.id, req.params.id))
       .returning();
     if (!row) return reply.code(404).send({ error: 'not_found' });

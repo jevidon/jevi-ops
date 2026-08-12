@@ -68,3 +68,15 @@ body {
 [data-density='comfortable'] {
   --row-pad-y: 0.875rem;
 }
+
+/* Engraved domain illustrations (domain-illustration.tsx). Drawings are
+   two-tone: primary strokes inherit currentColor from the svg root;
+   secondary strokes carry class="f" and drop to the faint tone. The
+   accent variant re-inks faints to a washed rust so slipping cards read
+   warm without going loud. */
+.domain-ill .f {
+  color: #b8b0a2; /* ink-4 */
+}
+.domain-ill-accent .f {
+  color: rgba(156, 63, 38, 0.45); /* accent-slip, washed */
+}

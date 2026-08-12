@@ -5,6 +5,7 @@ import { computeDomainCadences, type CadenceRow } from '../lib/cadence.js';
 import { getDb } from '../lib/db.js';
 import {
   calendar_events,
+  projects,
   quotes,
   routine_completions,
   routines as routinesTable,
@@ -45,6 +46,17 @@ interface BriefLine {
   // The one specific next action this line offers.
   next: string;
   routeTo: { href: string; label: string };
+}
+
+// Per-domain workload attached to each Domains-pulse row. `next_due` is
+// the earliest dated open task — overdue included, since the most-overdue
+// item is exactly what the board should confess first.
+interface DomainStats {
+  projects: number;   // projects with status = 'active'
+  open_tasks: number; // tasks with status = 'open'
+  overdue: number;    // open tasks due before today
+  due_soon: number;   // open tasks due today through +7 days
+  next_due: { date: string; title: string } | null;
 }
 
 interface LatestQuote {
@@ -241,9 +253,65 @@ export const briefingRoutes: FastifyPluginAsync = async (app) => {
 
   // /api/briefing/domains — full cadence list for the Domains pulse
   // board. Returns every active non-system domain with its cadence row
-  // (slip / stale / ok / unconfigured), sorted worst-first.
+  // (slip / stale / ok / unconfigured), sorted worst-first, plus a
+  // per-domain workload rollup: active projects, open tasks, and the
+  // time-sensitive slice (overdue / due within 7 days). One tasks scan
+  // + one projects scan covers every domain — cheaper than N per-domain
+  // queries and always true at load time.
   app.get('/api/briefing/domains', async () => {
-    const rows = await computeDomainCadences(getDb());
-    return { domains: rows };
+    const db = getDb();
+    const tz = await getAppTz();
+    const today = new Intl.DateTimeFormat('en-CA', {
+      timeZone: tz,
+      year: 'numeric', month: '2-digit', day: '2-digit',
+    }).format(new Date());
+    // due_date is a plain ISO date string; UTC-anchored day math is safe.
+    const soonCutoff = new Date(new Date(`${today}T00:00:00Z`).getTime() + 7 * 86_400_000)
+      .toISOString()
+      .slice(0, 10);
+
+    const [rows, activeProjects, openTasks] = await Promise.all([
+      computeDomainCadences(db),
+      db.query.projects.findMany({
+        columns: { domain_id: true },
+        where: eq(projects.status, 'active'),
+      }),
+      db.query.tasks.findMany({
+        columns: { domain_id: true, due_date: true, title: true },
+        where: eq(tasks.status, 'open'),
+      }),
+    ]);
+
+    const stats = new Map<string, DomainStats>();
+    const statFor = (id: string): DomainStats => {
+      let s = stats.get(id);
+      if (!s) {
+        s = { projects: 0, open_tasks: 0, overdue: 0, due_soon: 0, next_due: null };
+        stats.set(id, s);
+      }
+      return s;
+    };
+    for (const p of activeProjects) {
+      if (p.domain_id) statFor(p.domain_id).projects += 1;
+    }
+    for (const t of openTasks) {
+      const s = statFor(t.domain_id);
+      s.open_tasks += 1;
+      if (!t.due_date) continue;
+      if (t.due_date < today) s.overdue += 1;
+      else if (t.due_date <= soonCutoff) s.due_soon += 1;
+      if (!s.next_due || t.due_date < s.next_due.date) {
+        s.next_due = { date: t.due_date, title: t.title };
+      }
+    }
+
+    return {
+      domains: rows.map((r) => ({
+        ...r,
+        stats: stats.get(r.id) ?? {
+          projects: 0, open_tasks: 0, overdue: 0, due_soon: 0, next_due: null,
+        },
+      })),
+    };
   });
 };

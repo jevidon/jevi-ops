@@ -5,6 +5,17 @@ export const FailurePatternSchema = z.object({
   value: z.unknown().optional(),
 }).passthrough();
 
+// Generated engraved illustration for the Domains board (migration 0032).
+// Written only by the API's composer/sanitizer pipeline — never accepted
+// from clients, which is why it appears on DomainSchema but deliberately
+// NOT on UpdateDomainSchema.
+export const DomainIllustrationSchema = z.object({
+  svg: z.string(),
+  style: z.literal('engraved'),
+  source: z.enum(['llm', 'procedural']),
+  generated_at: z.string(),
+});
+
 export const DomainSchema = z.object({
   id: z.string().uuid(),
   name: z.string().min(1),
@@ -21,6 +32,9 @@ export const DomainSchema = z.object({
   // cadence helper's days_since_publish rule reads MAX of this and the
   // latest content_items.published_at.
   last_shipped_at: z.string().datetime({ offset: true }).nullable().optional(),
+  // Added by migration 0032. Server-generated engraved spot art for the
+  // Domains board; see DomainIllustrationSchema above.
+  illustration: DomainIllustrationSchema.nullable().optional(),
   created_at: z.string().datetime({ offset: true }),
   updated_at: z.string().datetime({ offset: true }),
 });

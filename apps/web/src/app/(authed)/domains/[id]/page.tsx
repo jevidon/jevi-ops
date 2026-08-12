@@ -6,6 +6,8 @@ import type { Domain, Task } from '@jevi-ops/shared';
 import { EditDomainForm } from './edit-domain-form';
 import { CadenceEditor } from './cadence-editor';
 import { MarkShipped } from './mark-shipped';
+import { RegenerateIllustration } from './regenerate-illustration';
+import { DomainIllustration } from '../domain-illustration';
 import { PRIMARY_CADENCE_RULES, type CadenceRuleType } from './cadence-rules';
 import { getAppTimezone } from '@/lib/app-settings';
 
@@ -169,6 +171,35 @@ export default async function DomainDetailPage({
               active: domain.active,
             }}
           />
+        )}
+
+        {/* ─── Board illustration ─────────────────────────────────────
+            The engraved spot art this domain shows on /domains. Stored
+            on the row (migration 0032); "Redraw" asks the configured
+            model for a fresh engraving, with the procedural library
+            standing in when the model can't deliver. */}
+        {!isInbox && (
+          <div className="mt-12 pt-6 border-t border-line">
+            <div className="eyebrow mb-3">Board illustration</div>
+            <div className="border border-line max-w-sm">
+              <div className="h-[96px] overflow-hidden">
+                <DomainIllustration name={domain.name} svg={domain.illustration?.svg} />
+              </div>
+            </div>
+            <p className="font-sans text-[12px] text-ink-3 mt-3 mb-3 leading-relaxed">
+              Shown on the Domains board. Redrawing asks the model for a new
+              engraving of this domain&rsquo;s subject; if the model
+              isn&rsquo;t reachable, a drawing from the built-in library
+              stands in.
+            </p>
+            <RegenerateIllustration
+              domainId={domain.id}
+              current={domain.illustration
+                ? { source: domain.illustration.source, generated_at: domain.illustration.generated_at }
+                : null}
+              tz={tz}
+            />
+          </div>
         )}
 
         {/* ─── Open tasks under this domain ───────────────────────────── */}

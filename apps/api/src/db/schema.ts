@@ -24,6 +24,19 @@ export interface FailurePattern {
   [key: string]: unknown;
 }
 
+/**
+ * stewardship_domains.illustration (migration 0032) — server-generated
+ * engraved spot art for the Domains board. `svg` is sanitized inner-SVG
+ * markup (240×100 canvas); written only by lib/illustration.ts. Keep in
+ * sync with DomainIllustrationSchema in @jevi-ops/shared.
+ */
+export interface DomainIllustration {
+  svg: string;
+  style: 'engraved';
+  source: 'llm' | 'procedural';
+  generated_at: string;
+}
+
 /** One item in checklist_templates.items / checklist_instances.items. */
 export interface ChecklistItemJson {
   title: string;
@@ -85,6 +98,7 @@ export const stewardship_domains = pgTable("stewardship_domains", {
 	active: boolean().default(true).notNull(),
 	is_system: boolean().default(false).notNull(),
 	last_shipped_at: timestamp({ withTimezone: true, mode: 'string' }),
+	illustration: jsonb().$type<DomainIllustration>(),
 	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	updated_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [

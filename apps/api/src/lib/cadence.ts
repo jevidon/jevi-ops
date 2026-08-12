@@ -1,6 +1,12 @@
 import { and, desc, eq, isNotNull } from 'drizzle-orm';
 import type { Db } from './db.js';
-import { activity_log, content_items, journal_entries, stewardship_domains } from '../db/schema.js';
+import {
+  activity_log,
+  content_items,
+  journal_entries,
+  stewardship_domains,
+  type DomainIllustration,
+} from '../db/schema.js';
 
 // Per-domain cadence computation. Source of truth for the Briefing's
 // "X days since Y" facts and the Domains pulse board's worst-first sort.
@@ -29,6 +35,9 @@ export interface CadenceRow {
   unit: string;            // pre-formatted: "days since a journal entry"
   next: string;            // recommended next action
   routeTo: { href: string; label: string };
+  // Stored engraved spot art (migration 0032). Null = the web falls back
+  // to the name-seeded procedural motif.
+  illustration: DomainIllustration | null;
 }
 
 function daysBetween(isoA: string, isoB: string): number {
@@ -106,7 +115,7 @@ export async function computeDomainCadences(db: Db): Promise<CadenceRow[]> {
   // a real cadence by tapping the "Mark shipped" button.
   const [domains, lastJournalRows, publishes, activities] = await Promise.all([
     db.query.stewardship_domains.findMany({
-      columns: { id: true, name: true, failure_patterns: true, last_shipped_at: true },
+      columns: { id: true, name: true, failure_patterns: true, last_shipped_at: true, illustration: true },
       where: and(eq(stewardship_domains.active, true), eq(stewardship_domains.is_system, false)),
     }),
     db.query.journal_entries.findMany({
@@ -165,6 +174,7 @@ export async function computeDomainCadences(db: Db): Promise<CadenceRow[]> {
         unit: '',
         next: '',
         routeTo: { href: `/domains/${d.id}`, label: 'Open domain →' },
+        illustration: d.illustration ?? null,
       });
       continue;
     }
@@ -207,6 +217,7 @@ export async function computeDomainCadences(db: Db): Promise<CadenceRow[]> {
         unit: unitFor(hit.rule),
         next: '',
         routeTo: { href: `/domains/${d.id}`, label: 'Open domain →' },
+        illustration: d.illustration ?? null,
       });
       continue;
     }
@@ -228,6 +239,7 @@ export async function computeDomainCadences(db: Db): Promise<CadenceRow[]> {
       unit: unitFor(hit.rule),
       next,
       routeTo,
+      illustration: d.illustration ?? null,
     });
   }
 
