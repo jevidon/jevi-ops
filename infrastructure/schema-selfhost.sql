@@ -967,5 +967,45 @@ create table if not exists api_tokens (
 
 
 -- ─────────────────────────────────────────────────────────────────────────
+-- Attention Engine (migration 0035)
+-- ─────────────────────────────────────────────────────────────────────────
+-- Daily rule engine output — "what needs my attention right now?" items
+-- with a score → urgency and a snooze/dismiss/acted lifecycle. See
+-- apps/api/src/lib/attention.ts. source_type keeps the upstream vocabulary
+-- (company/conversation included) so a future CRM port needs no change.
+
+create table if not exists attention_items (
+  id uuid primary key default gen_random_uuid(),
+  rule_type text not null,
+  source_type text not null check (source_type in
+    ('person','company','domain','project','conversation','task','content')),
+  source_id uuid not null,
+  title text not null,
+  detail text,
+  suggested_action text,
+  score real not null default 0,
+  urgency text not null check (urgency in ('low','normal','high')),
+  first_surfaced_at timestamptz not null default now(),
+  last_surfaced_at timestamptz not null default now(),
+  surface_count integer not null default 1,
+  status text not null default 'active' check (status in
+    ('active','dismissed','snoozed','acted_on','expired')),
+  snoozed_until date,
+  dismissed_at timestamptz,
+  acted_on_at timestamptz,
+  acted_on_action text,
+  dedup_key text not null unique,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_attention_active
+  on attention_items(status, score desc) where status = 'active';
+create index if not exists idx_attention_snoozed
+  on attention_items(status, snoozed_until) where status = 'snoozed';
+create index if not exists idx_attention_source
+  on attention_items(source_type, source_id);
+
+
+-- ─────────────────────────────────────────────────────────────────────────
 -- Done.
 -- ─────────────────────────────────────────────────────────────────────────

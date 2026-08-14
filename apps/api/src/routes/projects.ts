@@ -10,6 +10,7 @@ import {
 } from '@jevi-ops/shared/schemas';
 import { getAppTz } from '../lib/app-settings.js';
 import { getDb } from '../lib/db.js';
+import { clearAttentionForSource } from '../lib/attention.js';
 import {
   activity_log,
   milestones,
@@ -341,6 +342,12 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
 
       const [row] = await db.insert(activity_log).values(insert).returning();
       if (!row) throw app.httpErrors.internalServerError('insert_returned_no_row');
+
+      // Logging activity clears the project's "stalled" attention item
+      // live. Best-effort.
+      try {
+        await clearAttentionForSource(db, 'project', req.params.id, ['project_stalled']);
+      } catch { /* best-effort */ }
 
       if (hours !== null && hours > 0) {
         try {

@@ -11,6 +11,7 @@ import {
 } from '../lib/content-checklist-templates.js';
 import type { ContentItemType, ContentItemStatus } from '@jevi-ops/shared';
 import { getDb } from '../lib/db.js';
+import { clearAttentionForSource } from '../lib/attention.js';
 import { content_checklist_items, content_items } from '../db/schema.js';
 
 // Content items CRUD — videos, articles, podcasts, etc. Joins domain on
@@ -120,6 +121,14 @@ export const contentRoutes: FastifyPluginAsync = async (app) => {
       .where(eq(content_items.id, req.params.id))
       .returning();
     if (!row) return reply.code(404).send({ error: 'not_found' });
+
+    // Moving out of 'editing' clears the stuck-in-editing attention item
+    // live. Best-effort.
+    if (incomingStatus && incomingStatus !== 'editing') {
+      try {
+        await clearAttentionForSource(db, 'content', req.params.id, ['content_stuck_in_editing']);
+      } catch { /* best-effort */ }
+    }
     return row;
   });
 

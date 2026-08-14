@@ -2,7 +2,9 @@ import type { FastifyPluginAsync } from 'fastify';
 import { and, desc, eq, type SQL } from 'drizzle-orm';
 import { CreateTaskSchema, UpdateTaskSchema } from '@jevi-ops/shared/schemas';
 import { INBOX_DOMAIN_ID, isRecurrencePattern, nextDueDate } from '@jevi-ops/shared';
+import { getAppTz } from '../lib/app-settings.js';
 import { getDb, type Db } from '../lib/db.js';
+import { clearAttentionForSource } from '../lib/attention.js';
 import { milestones, projects, tasks } from '../db/schema.js';
 
 // Tasks CRUD. Auth-gated.
@@ -247,13 +249,41 @@ export const taskRoutes: FastifyPluginAsync = async (app) => {
     }
     const [row] = await db.update(tasks).set(update).where(eq(tasks.id, req.params.id)).returning();
     if (!row) return reply.code(404).send({ error: 'not_found' });
+
+    // Live-reconcile the Attention Engine's task_due_soon item: if this edit
+    // means the task no longer qualifies (completed, or moved out of the
+    // 3-day window, or due date cleared — a recurring task's rollover pushes
+    // due_date far out too), delete its live attention item now instead of
+    // waiting for the 5am cron. If it still qualifies, the item stays and the
+    // cron refreshes it. Best-effort — never block the task update.
+    try {
+      const tz = await getAppTz();
+      const todayYmd = new Intl.DateTimeFormat('en-CA', {
+        timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
+      }).format(new Date());
+      const plus3Ymd = new Date(new Date(`${todayYmd}T12:00:00Z`).getTime() + 3 * 86_400_000)
+        .toISOString().slice(0, 10);
+      const stillDueSoon = row.status === 'open' && row.due_date != null && row.due_date <= plus3Ymd;
+      if (!stillDueSoon) {
+        await clearAttentionForSource(db, 'task', req.params.id, ['task_due_soon']);
+      }
+    } catch (err) {
+      req.log.warn({ err, taskId: req.params.id }, 'attention reconcile after task update failed');
+    }
+
     // Surface the rollover so the client can show a "Next: <date>" hint
     // if it wants to. Adds one field; existing consumers ignore it.
     return { ...row, recurred: rolledOver };
   });
 
   app.delete<{ Params: { id: string } }>('/api/tasks/:id', async (req, reply) => {
-    await getDb().delete(tasks).where(eq(tasks.id, req.params.id));
+    const db = getDb();
+    await db.delete(tasks).where(eq(tasks.id, req.params.id));
+    // Clear any Attention item for the now-gone task (source_id is a plain
+    // uuid, no FK cascade). Best-effort.
+    try {
+      await clearAttentionForSource(db, 'task', req.params.id, ['task_due_soon']);
+    } catch { /* best-effort */ }
     return reply.code(204).send();
   });
 };

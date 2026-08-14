@@ -1,4 +1,4 @@
-import { pgTable, index, foreignKey, check, uuid, text, numeric, date, timestamp, unique, jsonb, boolean, integer, time, smallint, bigint } from "drizzle-orm/pg-core"
+import { pgTable, index, foreignKey, check, uuid, text, numeric, date, timestamp, unique, jsonb, boolean, integer, real, time, smallint, bigint } from "drizzle-orm/pg-core"
 import { sql } from "drizzle-orm"
 
 // ─── Typed jsonb payload shapes ────────────────────────────────────────────
@@ -953,4 +953,34 @@ export const api_tokens = pgTable("api_tokens", {
 }, (table) => [
 	unique("api_tokens_token_hash_key").on(table.token_hash),
 	check("api_tokens_kind_check", sql`kind = ANY (ARRAY['agent'::text, 'device'::text])`),
+]);
+
+export const attention_items = pgTable("attention_items", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	rule_type: text().notNull(),
+	source_type: text().notNull(),
+	source_id: uuid().notNull(),
+	title: text().notNull(),
+	detail: text(),
+	suggested_action: text(),
+	score: real().default(0).notNull(),
+	urgency: text().notNull(),
+	first_surfaced_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	last_surfaced_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	surface_count: integer().default(1).notNull(),
+	status: text().default('active').notNull(),
+	snoozed_until: date(),
+	dismissed_at: timestamp({ withTimezone: true, mode: 'string' }),
+	acted_on_at: timestamp({ withTimezone: true, mode: 'string' }),
+	acted_on_action: text(),
+	dedup_key: text().notNull(),
+	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	index("idx_attention_active").using("btree", table.status.asc().nullsLast().op("text_ops"), table.score.desc().nullsFirst().op("float4_ops")).where(sql`(status = 'active'::text)`),
+	index("idx_attention_snoozed").using("btree", table.status.asc().nullsLast().op("text_ops"), table.snoozed_until.asc().nullsLast().op("date_ops")).where(sql`(status = 'snoozed'::text)`),
+	index("idx_attention_source").using("btree", table.source_type.asc().nullsLast().op("text_ops"), table.source_id.asc().nullsLast().op("uuid_ops")),
+	unique("attention_items_dedup_key_key").on(table.dedup_key),
+	check("attention_items_source_type_check", sql`source_type = ANY (ARRAY['person'::text, 'company'::text, 'domain'::text, 'project'::text, 'conversation'::text, 'task'::text, 'content'::text])`),
+	check("attention_items_urgency_check", sql`urgency = ANY (ARRAY['low'::text, 'normal'::text, 'high'::text])`),
+	check("attention_items_status_check", sql`status = ANY (ARRAY['active'::text, 'dismissed'::text, 'snoozed'::text, 'acted_on'::text, 'expired'::text])`),
 ]);
