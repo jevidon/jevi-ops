@@ -3,7 +3,7 @@ import { and, desc, eq, type SQL } from 'drizzle-orm';
 import { CreateTaskSchema, UpdateTaskSchema } from '@jevi-ops/shared/schemas';
 import { INBOX_DOMAIN_ID, isRecurrencePattern, nextDueDate } from '@jevi-ops/shared';
 import { getDb, type Db } from '../lib/db.js';
-import { projects, tasks } from '../db/schema.js';
+import { milestones, projects, tasks } from '../db/schema.js';
 
 // Tasks CRUD. Auth-gated.
 
@@ -65,6 +65,26 @@ async function resolveTaskDomain(
   return { ok: true, domain_id: INBOX_DOMAIN_ID };
 }
 
+// ─── Milestone link validation (migration 0034) ─────────────────────────
+//
+// A task may point at one of ITS OWN project's milestones (for the "group by
+// milestone" drill-in). This enforces that ownership: returns the milestone id
+// only when it belongs to `projectId`, else null ("General"). A projectless
+// task can never hold a milestone. Best-effort — any lookup failure parks the
+// task under General rather than blocking the save.
+async function resolveMilestone(
+  db: Db,
+  milestoneId: string,
+  projectId: string | null,
+): Promise<string | null> {
+  if (!projectId) return null;
+  const row = await db.query.milestones.findFirst({
+    columns: { project_id: true },
+    where: eq(milestones.id, milestoneId),
+  });
+  return row && row.project_id === projectId ? milestoneId : null;
+}
+
 export const taskRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', app.requireAuth);
 
@@ -114,6 +134,14 @@ export const taskRoutes: FastifyPluginAsync = async (app) => {
       return reply.code(400).send({ error: resolved.error });
     }
     const insert = { ...parsed.data, domain_id: resolved.domain_id };
+    // Only a milestone that belongs to this task's project survives (0034).
+    if (parsed.data.milestone_id) {
+      insert.milestone_id = await resolveMilestone(
+        db,
+        parsed.data.milestone_id,
+        parsed.data.project_id ?? null,
+      );
+    }
     const [row] = await db.insert(tasks).values(insert).returning();
     if (!row) throw app.httpErrors.internalServerError('insert_returned_no_row');
     return reply.code(201).send(row);
@@ -140,11 +168,11 @@ export const taskRoutes: FastifyPluginAsync = async (app) => {
     // status flips, title edits, etc. and shouldn't pay for a project
     // lookup. When project_id is being touched (set or cleared), we have
     // to recompute because the old domain_id might no longer be right.
-    if ('project_id' in parsed.data || 'domain_id' in parsed.data) {
-      // Pull the existing row so we know the current project/domain when
-      // the patch only changes one of them.
+    if ('project_id' in parsed.data || 'domain_id' in parsed.data || 'milestone_id' in parsed.data) {
+      // Pull the existing row so we know the current project/domain/milestone
+      // when the patch only changes one of them.
       const existing = await db.query.tasks.findFirst({
-        columns: { project_id: true, domain_id: true },
+        columns: { project_id: true, domain_id: true, milestone_id: true },
         where: eq(tasks.id, req.params.id),
       });
       if (!existing) return reply.code(404).send({ error: 'not_found' });
@@ -152,17 +180,33 @@ export const taskRoutes: FastifyPluginAsync = async (app) => {
       const nextProjectId = 'project_id' in parsed.data
         ? (parsed.data.project_id ?? null)
         : existing.project_id;
-      const nextDomainId = 'domain_id' in parsed.data
-        ? (parsed.data.domain_id ?? null)
-        : null; // explicit override only — don't keep the old domain when the project is changing
-      const resolved = await resolveTaskDomain(db, {
-        project_id: nextProjectId,
-        domain_id: nextDomainId,
-      });
-      if (!resolved.ok) {
-        return reply.code(400).send({ error: resolved.error });
+
+      // Domain routing only re-resolves when project/domain actually change —
+      // a milestone-only patch keeps the existing domain.
+      if ('project_id' in parsed.data || 'domain_id' in parsed.data) {
+        const nextDomainId = 'domain_id' in parsed.data
+          ? (parsed.data.domain_id ?? null)
+          : null; // explicit override only — don't keep the old domain when the project is changing
+        const resolved = await resolveTaskDomain(db, {
+          project_id: nextProjectId,
+          domain_id: nextDomainId,
+        });
+        if (!resolved.ok) {
+          return reply.code(400).send({ error: resolved.error });
+        }
+        update.domain_id = resolved.domain_id;
       }
-      update.domain_id = resolved.domain_id;
+
+      // Milestone link: re-validate against the effective project (0034). A
+      // project change re-checks the existing link even when the patch didn't
+      // touch milestone_id — a milestone from the old project is parked under
+      // General rather than silently pointing across projects.
+      const candidateMilestoneId = 'milestone_id' in parsed.data
+        ? (parsed.data.milestone_id ?? null)
+        : existing.milestone_id;
+      update.milestone_id = candidateMilestoneId
+        ? await resolveMilestone(db, candidateMilestoneId, nextProjectId)
+        : null;
     }
 
     if (parsed.data.status === 'done') {

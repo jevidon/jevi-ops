@@ -289,6 +289,7 @@ export const tasks = pgTable("tasks", {
 	project_id: uuid(),
 	parent_task_id: uuid(),
 	content_item_id: uuid(),
+	milestone_id: uuid(),
 	domain_id: uuid().notNull(),
 	recurrence_rule: text(),
 	reminder_offsets: jsonb().$type<number[]>().default([]).notNull(),
@@ -305,10 +306,16 @@ export const tasks = pgTable("tasks", {
 	index("idx_tasks_project").using("btree", table.project_id.asc().nullsLast().op("uuid_ops")),
 	index("idx_tasks_status_due").using("btree", table.status.asc().nullsLast().op("text_ops"), table.due_date.asc().nullsLast().op("text_ops")),
 	index("idx_tasks_top3").using("btree", table.top3_for_date.asc().nullsLast().op("date_ops")).where(sql`(top3_for_date IS NOT NULL)`),
+	index("tasks_milestone_id_idx").using("btree", table.milestone_id.asc().nullsLast().op("uuid_ops")),
 	foreignKey({
 			columns: [table.project_id],
 			foreignColumns: [projects.id],
 			name: "tasks_project_id_fkey"
+		}).onDelete("set null"),
+	foreignKey({
+			columns: [table.milestone_id],
+			foreignColumns: [milestones.id],
+			name: "tasks_milestone_id_fkey"
 		}).onDelete("set null"),
 	foreignKey({
 			columns: [table.parent_task_id],

@@ -12,10 +12,19 @@ import {
   type SaveResult,
 } from './[id]/actions';
 
+interface MilestoneOption {
+  id: string;
+  title: string;
+  status: 'open' | 'done';
+  position: number;
+}
 interface ProjectOption {
   id: string;
   name: string;
   domain_id: string | null;
+  // Present when the page's projects payload eager-loaded milestones —
+  // powers the milestone picker without an extra fetch.
+  milestones?: MilestoneOption[];
 }
 interface DomainOption {
   id: string;
@@ -39,6 +48,7 @@ interface InitialValues {
   due_time: string;
   priority: number;
   selection: string;            // domain:<id> | project:<id> | '' (= Inbox default on create)
+  milestone_id: string;         // '' = none ("General"); only valid with a project selection
   content_item_id: string;
   remind_minutes: number | '';  // '' = no reminder; only effective when due_time is set
   recurrence_rule: string;     // '' = no repeat
@@ -67,6 +77,18 @@ export function TaskForm({
   const [state, formAction] = useActionState<SaveResult | null, FormData>(action, null);
   // Auto-clear success messages so back-to-back saves each show fresh feedback.
   const display = useTransientSaveResult(state);
+
+  // Selection is controlled (not just defaultValue) so the milestone picker
+  // can react to it: picking a project reveals that project's milestones,
+  // switching away hides them. The server independently re-validates the
+  // link, so a stale value can never point across projects.
+  const [selection, setSelection] = useState(initial.selection);
+  const selectedProject = selection.startsWith('project:')
+    ? projects.find((p) => p.id === selection.slice('project:'.length))
+    : undefined;
+  const milestoneOptions = (selectedProject?.milestones ?? [])
+    .slice()
+    .sort((a, b) => a.position - b.position);
 
   return (
     <>
@@ -127,10 +149,31 @@ export function TaskForm({
             <DomainProjectPicker
               domains={domains}
               projects={projects}
-              defaultValue={initial.selection}
+              value={selection}
+              onChange={setSelection}
             />
           </Field>
         </div>
+
+        {milestoneOptions.length > 0 && (
+          <Field label="Milestone (groups this task on the project page)">
+            {/* key resets the DOM value when the project changes so a
+                milestone from the old project can't linger selected. */}
+            <select
+              key={selectedProject?.id}
+              name="milestone_id"
+              defaultValue={initial.milestone_id}
+              className="w-full bg-transparent border border-line focus:border-ink-2 focus:outline-none p-2 font-sans text-[14px] text-ink"
+            >
+              <option value="">General (no milestone)</option>
+              {milestoneOptions.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.title}{m.status === 'done' ? ' ✓' : ''}
+                </option>
+              ))}
+            </select>
+          </Field>
+        )}
 
         <Field label="Content item (optional — for video / article / podcast tasks)">
           <select
@@ -208,11 +251,13 @@ export function TaskForm({
 function DomainProjectPicker({
   domains,
   projects,
-  defaultValue,
+  value,
+  onChange,
 }: {
   domains: DomainOption[];
   projects: ProjectOption[];
-  defaultValue: string;
+  value: string;
+  onChange: (next: string) => void;
 }) {
   const inbox = domains.find((d) => d.is_system);
   const userDomains = domains.filter((d) => !d.is_system);
@@ -233,7 +278,8 @@ function DomainProjectPicker({
   return (
     <select
       name="selection"
-      defaultValue={defaultValue}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
       className="w-full bg-transparent border border-line focus:border-ink-2 focus:outline-none p-2 font-sans text-[14px] text-ink"
     >
       {inbox && (

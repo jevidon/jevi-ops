@@ -272,6 +272,8 @@ create table if not exists tasks (
   project_id uuid references projects(id) on delete set null,
   parent_task_id uuid references tasks(id) on delete cascade,
   content_item_id uuid references content_items(id) on delete set null,
+  -- App-enforced: must belong to the task's project (no cross-table CHECK).
+  milestone_id uuid references milestones(id) on delete set null,
   domain_id uuid not null references stewardship_domains(id),
   recurrence_rule text,
   reminder_offsets jsonb not null default '[]'::jsonb,
@@ -292,6 +294,7 @@ create index if not exists idx_tasks_top3 on tasks(top3_for_date)
   where top3_for_date is not null;
 create index if not exists idx_tasks_content_item on tasks(content_item_id)
   where content_item_id is not null;
+create index if not exists tasks_milestone_id_idx on tasks(milestone_id);
 
 drop trigger if exists trg_tasks_updated_at on tasks;
 create trigger trg_tasks_updated_at

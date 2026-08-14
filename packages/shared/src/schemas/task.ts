@@ -21,6 +21,8 @@ export const TaskSchema = z.object({
   domain_id: z.string().uuid(),
   content_item_id: z.string().uuid().nullable().optional(),
   parent_task_id: z.string().uuid().nullable().optional(),
+  // Must belong to the task's project — server nulls a cross-project link.
+  milestone_id: z.string().uuid().nullable().optional(),
   recurrence_rule: nullableString(),
   reminder_offsets: z.array(z.number()).default([]),
   source: TaskSourceSchema,
@@ -61,6 +63,7 @@ export const CreateTaskSchema = z.object({
   domain_id: z.string().uuid().nullable().optional(),
   content_item_id: z.string().uuid().nullable().optional(),
   parent_task_id: z.string().uuid().nullable().optional(),
+  milestone_id: z.string().uuid().nullable().optional(),
   recurrence_rule: nullableString(),
   reminder_offsets: z.array(z.number()).optional(),
   source: TaskSourceSchema.default('manual'),
