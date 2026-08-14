@@ -76,56 +76,71 @@ function addMonthsClamped(d: Date, n: number): Date {
 //
 // Behavior decisions worth flagging:
 //
-//   1. We advance from max(currentDue, today). If you complete a weekly
-//      task that was overdue by a month, we don't re-spawn it 7 days in
-//      the past — we move 7 days from today. Otherwise you'd immediately
-//      have to mark it done again, which defeats the purpose.
+//   1. The cadence is anchored to the ORIGINAL due date, not the completion
+//      date. A weekly task due Sunday that you check off on Monday still
+//      recurs on Sunday — we step from the original due date by whole
+//      recurrence increments. Completing late never shifts the schedule.
 //
-//   2. We never return a date in the past. If somehow the math lands on
-//      <= today we add another increment until we clear today.
+//   2. We never return a date in the past. If the task was overdue, we keep
+//      stepping (preserving the day-of-week / day-of-month) until the next
+//      occurrence lands strictly after today — so you don't immediately have
+//      to check it off again, but it stays on its original day.
 //
 //   3. For 'weekdays', we always land on Mon-Fri. Stepping to Sat/Sun
 //      pushes through to Monday.
+//
+//   4. With no currentDue (a recurring task that had no date), we anchor to
+//      today since there's no original day to preserve.
 export function nextDueDate(params: {
   currentDue: string | null | undefined;
   rule: RecurrencePattern;
   todayIso: string;
 }): string {
   const today = parseIsoDate(params.todayIso);
-  const baseFromCurrent = params.currentDue ? parseIsoDate(params.currentDue) : null;
-  // Start from whichever is later — current due, or today.
-  const start = baseFromCurrent && baseFromCurrent > today ? baseFromCurrent : today;
+  // Anchor to the original due date so the cadence / day-of-week is preserved
+  // even when completed late. No due date → anchor to today.
+  const base = params.currentDue ? parseIsoDate(params.currentDue) : today;
 
-  const step = (from: Date): Date => {
+  // N whole increments from the anchor. Month-based rules recompute from
+  // the anchor each time (never from the previous step) so day-clamping
+  // can't erode an anchored month-end day: quarterly on Jan 31, overdue
+  // past April's clamp to the 30th, still lands on Jul 31 — not Jul 30.
+  // Day-based rules are exact either way; 'weekdays' walks day by day.
+  const stepN = (n: number): Date => {
     switch (params.rule) {
       case 'daily':
-        return addDays(from, 1);
+        return addDays(base, n);
       case 'weekdays': {
-        let d = addDays(from, 1);
-        while (d.getUTCDay() === 0 || d.getUTCDay() === 6) d = addDays(d, 1);
+        let d = base;
+        for (let i = 0; i < n; i++) {
+          d = addDays(d, 1);
+          while (d.getUTCDay() === 0 || d.getUTCDay() === 6) d = addDays(d, 1);
+        }
         return d;
       }
       case 'weekly':
-        return addDays(from, 7);
+        return addDays(base, 7 * n);
       case 'biweekly':
-        return addDays(from, 14);
+        return addDays(base, 14 * n);
       case 'monthly':
-        return addMonthsClamped(from, 1);
+        return addMonthsClamped(base, n);
       case 'quarterly':
-        return addMonthsClamped(from, 3);
+        return addMonthsClamped(base, 3 * n);
       case 'semiannually':
-        return addMonthsClamped(from, 6);
+        return addMonthsClamped(base, 6 * n);
       case 'yearly':
-        return addMonthsClamped(from, 12);
+        return addMonthsClamped(base, 12 * n);
     }
   };
 
-  let next = step(start);
-  // Safety belt: if (somehow) we landed on or before today, step again.
-  // Capped at a few iterations so a buggy rule can't infinite-loop.
-  let safety = 8;
+  // Advance whole increments until strictly after today. Every increment
+  // moves at least one day, so this terminates; the cap is a generous
+  // backstop (covers a daily task overdue by years).
+  let n = 1;
+  let next = stepN(1);
+  let safety = 4000;
   while (next <= today && safety-- > 0) {
-    next = step(next);
+    next = stepN(++n);
   }
   return formatIsoDate(next);
 }
