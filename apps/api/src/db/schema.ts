@@ -16,6 +16,10 @@ export interface StoredAttachment {
   uploaded_at: string;
   gps?: { lat: number; lon: number } | null;
   location?: string | null;
+  // Set when the file was copied from Immich — dedupe + "attached" badges.
+  immich_asset_id?: string | null;
+  // EXIF DateTimeOriginal (ISO), best-effort at upload time.
+  taken_at?: string | null;
 }
 
 /** One rule in stewardship_domains.failure_patterns (see lib/observations.ts). */

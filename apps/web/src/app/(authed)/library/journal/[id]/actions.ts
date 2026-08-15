@@ -96,18 +96,45 @@ export interface AttachImmichResult {
   ok: boolean;
   attachments: Attachment[];
   failed: string[];
+  already_attached: string[];
+  // Final persisted entry_date from the API (changed or not).
+  entry_date?: string;
   error?: string;
 }
 
-export async function attachImmichAction(id: string, assetIds: string[]): Promise<AttachImmichResult> {
+export async function attachImmichAction(
+  id: string,
+  assetIds: string[],
+  // Pass only when the form's committed date differs from the saved
+  // entry_date — the attach then persists it too ("attach saves date").
+  entryDate?: string,
+): Promise<AttachImmichResult> {
   try {
-    const res = await immichApi.attachToJournal(id, assetIds);
-    return { ok: true, attachments: res.attachments, failed: res.failed };
+    const res = await immichApi.attachToJournal(
+      id,
+      assetIds,
+      entryDate ? { entry_date: entryDate } : undefined,
+    );
+    // The route writes attachments (and possibly entry_date) directly, so
+    // the reader page is stale until revalidated.
+    revalidatePath(`/library/journal/${id}`);
+    if (entryDate) {
+      revalidatePath('/library/journal');
+      revalidatePath('/library');
+    }
+    return {
+      ok: true,
+      attachments: res.attachments,
+      failed: res.failed,
+      already_attached: res.already_attached,
+      entry_date: res.entry_date,
+    };
   } catch (err) {
     return {
       ok: false,
       attachments: [],
       failed: assetIds,
+      already_attached: [],
       error: err instanceof Error ? err.message : 'unknown',
     };
   }

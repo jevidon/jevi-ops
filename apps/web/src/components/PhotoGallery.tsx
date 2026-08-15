@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import type { Attachment } from '@/lib/api';
+import { useAppTimezone } from './TimezoneProvider';
 
 // The library reading family's photo treatment (Detail Pages v2, Addendum 10
 // §10): large, composed layouts — a single hero, a 2-up, or a hero + grid for
@@ -14,7 +15,18 @@ function isImage(a: Attachment): boolean {
   return Boolean(a.url) && (!a.content_type || a.content_type.startsWith('image'));
 }
 
+function fmtTakenAt(iso: string, tz: string): string | null {
+  try {
+    return new Intl.DateTimeFormat('en-US', {
+      month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: tz,
+    }).format(new Date(iso));
+  } catch {
+    return null;
+  }
+}
+
 export function PhotoGallery({ attachments }: { attachments: Attachment[] }) {
+  const tz = useAppTimezone();
   const images = attachments.filter(isImage);
   const [openIdx, setOpenIdx] = useState<number | null>(null);
   const n = images.length;
@@ -92,17 +104,27 @@ export function PhotoGallery({ attachments }: { attachments: Attachment[] }) {
             )}
           </div>
 
-          {active.location && (
-            <div className="shrink-0 px-4 pb-4 pt-1 text-center" onClick={(e) => e.stopPropagation()}>
-              <a
-                href={active.gps
-                  ? `https://www.google.com/maps/search/?api=1&query=${active.gps.lat},${active.gps.lon}`
-                  : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(active.location)}`}
-                target="_blank" rel="noopener noreferrer"
-                className="font-mono text-[10px] uppercase tracking-wider text-bg/60 hover:text-bg transition-colors"
-              >
-                📍 {active.location}
-              </a>
+          {(active.location || active.taken_at) && (
+            <div
+              className="shrink-0 px-4 pb-4 pt-1 text-center flex items-center justify-center gap-4"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {active.taken_at && fmtTakenAt(active.taken_at, tz) && (
+                <span className="font-mono text-[10px] uppercase tracking-wider text-bg/60">
+                  Taken {fmtTakenAt(active.taken_at, tz)}
+                </span>
+              )}
+              {active.location && (
+                <a
+                  href={active.gps
+                    ? `https://www.google.com/maps/search/?api=1&query=${active.gps.lat},${active.gps.lon}`
+                    : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(active.location)}`}
+                  target="_blank" rel="noopener noreferrer"
+                  className="font-mono text-[10px] uppercase tracking-wider text-bg/60 hover:text-bg transition-colors"
+                >
+                  📍 {active.location}
+                </a>
+              )}
             </div>
           )}
         </div>

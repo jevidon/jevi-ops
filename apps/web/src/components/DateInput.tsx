@@ -32,6 +32,10 @@ interface DateInputProps {
   placeholder?: string;
   'aria-label'?: string;
   title?: string;
+  // Fires with the normalized YYYY-MM-DD whenever a valid date is committed
+  // (text blur/Enter parse success, or native picker change). Not fired on
+  // blank or parse failure, nor when the parent swaps defaultValue.
+  onCommit?: (iso: string) => void;
 }
 
 export function DateInput({
@@ -43,6 +47,7 @@ export function DateInput({
   placeholder = 'YYYY-MM-DD or 5/23/2026',
   'aria-label': ariaLabel,
   title,
+  onCommit,
 }: DateInputProps) {
   const tz = useAppTimezone();
   // What the user sees in the field. Initialized to a friendly format
@@ -71,6 +76,7 @@ export function DateInput({
       setNormalized(iso);
       setText(formatForDisplay(iso));
       setError(null);
+      onCommit?.(iso);
     } else {
       setError('Use YYYY-MM-DD, 5/23/2026, or "May 23 2026"');
       // Keep the raw text visible; clear the normalized value so the
@@ -93,6 +99,7 @@ export function DateInput({
           setNormalized(v);
           setText(v);
           setError(null);
+          if (v) onCommit?.(v);
         }}
         required={required}
         disabled={disabled}

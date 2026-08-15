@@ -1,5 +1,5 @@
 import type { FastifyPluginAsync } from 'fastify';
-import { and, asc, desc, eq, gt, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, lt, ne, or, sql, type SQL } from 'drizzle-orm';
 import { arrayContains } from 'drizzle-orm';
 import {
   CreateNoteSchema, UpdateNoteSchema,
@@ -282,11 +282,50 @@ export const libraryRoutes: FastifyPluginAsync = async (app) => {
   });
 
   app.get<{ Params: { id: string } }>('/api/journal-entries/:id', async (req, reply) => {
-    const row = await getDb().query.journal_entries.findFirst({
+    const db = getDb();
+    const row = await db.query.journal_entries.findFirst({
       where: eq(journal_entries.id, req.params.id),
     });
     if (!row) return reply.code(404).send({ error: 'not_found' });
-    return row;
+
+    // Prev/next-day neighbours for the reader's paging (prev = older,
+    // next = newer). Ordering mirrors the list route (entry_date, then
+    // created_at) so paging walks the same sequence the list shows. The
+    // ne(id) guard matters: created_at loses sub-millisecond precision on
+    // the JS round-trip, so a strict gt/lt can match the row itself.
+    const neighborColumns = { id: true, entry_date: true, transcription_text: true } as const;
+    const [prev, next] = await Promise.all([
+      db.query.journal_entries.findFirst({
+        columns: neighborColumns,
+        where: and(
+          ne(journal_entries.id, row.id),
+          or(
+            lt(journal_entries.entry_date, row.entry_date),
+            and(
+              eq(journal_entries.entry_date, row.entry_date),
+              lt(journal_entries.created_at, row.created_at),
+            ),
+          ),
+        ),
+        orderBy: [desc(journal_entries.entry_date), desc(journal_entries.created_at)],
+      }),
+      db.query.journal_entries.findFirst({
+        columns: neighborColumns,
+        where: and(
+          ne(journal_entries.id, row.id),
+          or(
+            gt(journal_entries.entry_date, row.entry_date),
+            and(
+              eq(journal_entries.entry_date, row.entry_date),
+              gt(journal_entries.created_at, row.created_at),
+            ),
+          ),
+        ),
+        orderBy: [asc(journal_entries.entry_date), asc(journal_entries.created_at)],
+      }),
+    ]);
+
+    return { entry: row, prev: prev ?? null, next: next ?? null };
   });
 
   app.patch<{

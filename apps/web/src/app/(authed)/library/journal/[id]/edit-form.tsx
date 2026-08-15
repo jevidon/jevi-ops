@@ -30,6 +30,11 @@ export function JournalEditForm({ initial }: { initial: JournalFormInitial }) {
   // Controlled transcription so the ImageUploader can pull the first
   // few words as the stored-filename hint at upload time.
   const [text, setText] = useState(initial.transcription_text);
+  // committedDate follows the date field live (DateInput onCommit) so the
+  // Immich strip refetches without a save; savedDate tracks what's actually
+  // persisted, so the strip knows when an attach must also save the date.
+  const [committedDate, setCommittedDate] = useState(initial.entry_date);
+  const [savedDate, setSavedDate] = useState(initial.entry_date);
 
   return (
     <>
@@ -41,6 +46,7 @@ export function JournalEditForm({ initial }: { initial: JournalFormInitial }) {
           <DateInput
             name="entry_date"
             defaultValue={initial.entry_date}
+            onCommit={setCommittedDate}
             className="bg-transparent border border-line focus:border-accent focus:outline-none p-2 font-sans text-[14px] text-ink w-48"
           />
         </label>
@@ -73,9 +79,13 @@ export function JournalEditForm({ initial }: { initial: JournalFormInitial }) {
           <span className="eyebrow">Photos from this day</span>
           <ImmichStrip
             entryId={initial.id}
-            entryDate={initial.entry_date}
+            entryDate={committedDate}
+            savedDate={savedDate}
             attachments={attachments}
-            onAttached={setAttachments}
+            onAttached={(all, persistedDate) => {
+              setAttachments(all);
+              setSavedDate(persistedDate);
+            }}
           />
         </div>
         <input type="hidden" name="attachments" value={JSON.stringify(attachments)} />

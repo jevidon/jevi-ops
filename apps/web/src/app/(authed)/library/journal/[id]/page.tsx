@@ -6,6 +6,7 @@ import { PhotoGallery } from '@/components/PhotoGallery';
 import { EditDrawer } from '@/components/detail/EditDrawer';
 import { BoostButton } from '@/components/BoostButton';
 import { JournalEditForm } from './edit-form';
+import { FromImmichSection } from './from-immich';
 
 // /library/journal/[id] — journal reader (Detail Pages v2, Addendum 10 §10).
 // A different job from the operational pages: no stat strip, no state chip. The
@@ -71,6 +72,14 @@ export default async function JournalEntryPage({ params }: { params: Promise<{ i
       {!body && entry.attachments.length === 0 && (
         <p className="mt-7 font-sans text-[14px] text-ink-3 italic">An empty entry — add a note or a photo from Edit.</p>
       )}
+
+      <FromImmichSection
+        entryId={entry.id}
+        entryDate={entry.entry_date}
+        attachedAssetIds={(entry.attachments ?? [])
+          .map((a) => a.immich_asset_id)
+          .filter((x): x is string => Boolean(x))}
+      />
 
       <footer className="mt-12 pt-5 border-t border-line flex items-center justify-between gap-4 flex-wrap">
         <div className="flex items-center gap-3">

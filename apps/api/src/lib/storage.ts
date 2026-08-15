@@ -117,6 +117,7 @@ export async function uploadImage(params: {
     uploaded_at: new Date().toISOString(),
     gps: location?.gps ?? null,
     location: location?.address ?? null,
+    taken_at: exifDate ? exifDate.toISOString() : null,
   };
 }
 

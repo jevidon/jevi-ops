@@ -24,6 +24,9 @@ import { isStorageConfigured, uploadImage } from '../lib/storage.js';
 
 const AttachSchema = z.object({
   asset_ids: z.array(z.string().min(1)).min(1).max(20),
+  // When the edit form's committed date differs from the saved entry_date,
+  // the attach also persists it ("attach saves date") — same UPDATE, atomic.
+  entry_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
 });
 
 export const immichRoutes: FastifyPluginAsync = async (app) => {
@@ -96,9 +99,21 @@ export const immichRoutes: FastifyPluginAsync = async (app) => {
       });
       if (!entry) return reply.code(404).send({ error: 'not_found' });
 
+      // Dedupe against assets already copied into this entry (stamped with
+      // immich_asset_id at attach time). Legacy attachments predate the
+      // stamp and can't be recognized — accepted for a single-user app.
+      const alreadyStamped = new Set(
+        (entry.attachments ?? []).map((a) => a.immich_asset_id).filter(Boolean),
+      );
+
       const added = [];
       const failed: string[] = [];
+      const already_attached: string[] = [];
       for (const assetId of parsed.data.asset_ids) {
+        if (alreadyStamped.has(assetId)) {
+          already_attached.push(assetId);
+          continue;
+        }
         try {
           const { bytes, contentType } = await fetchOriginal(assetId);
           const stored = await uploadImage({
@@ -107,7 +122,7 @@ export const immichRoutes: FastifyPluginAsync = async (app) => {
             prefix: 'journal',
             titleHint: `immich ${entry.entry_date}`,
           });
-          added.push(stored);
+          added.push({ ...stored, immich_asset_id: assetId });
         } catch (err) {
           req.log.warn({ err, assetId }, 'immich attach failed for asset');
           failed.push(assetId);
@@ -115,20 +130,31 @@ export const immichRoutes: FastifyPluginAsync = async (app) => {
       }
 
       const merged = [...(entry.attachments ?? []), ...added];
-      if (added.length > 0) {
+      // entry_date persists even when every download failed — it mirrors the
+      // user's committed date field, which shouldn't hinge on Immich health.
+      const dateChanged =
+        parsed.data.entry_date !== undefined && parsed.data.entry_date !== entry.entry_date;
+      if (added.length > 0 || dateChanged) {
         await db
           .update(journal_entries)
-          .set({ attachments: merged })
+          .set({
+            ...(added.length > 0 ? { attachments: merged } : {}),
+            ...(dateChanged ? { entry_date: parsed.data.entry_date } : {}),
+          })
           .where(eq(journal_entries.id, entry.id));
       }
 
       // Return the full post-attach list so the edit form can replace its
       // local attachment state without a refetch (avoids the stale-state
-      // overwrite on the next manual save).
-      return reply.code(added.length > 0 ? 200 : 502).send({
+      // overwrite on the next manual save). 502 only when nothing at all
+      // succeeded — an all-duplicates request is a 200 no-op, not an error.
+      const anySuccess = added.length > 0 || already_attached.length > 0 || dateChanged;
+      return reply.code(anySuccess ? 200 : 502).send({
         attached: added,
         attachments: merged,
         failed,
+        already_attached,
+        entry_date: dateChanged ? parsed.data.entry_date : entry.entry_date,
       });
     },
   );

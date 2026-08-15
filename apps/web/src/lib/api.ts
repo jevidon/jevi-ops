@@ -504,6 +504,10 @@ export interface Attachment {
   // Nominatim is unavailable.
   gps?: { lat: number; lon: number } | null;
   location?: string | null;
+  // Set when the file was copied from Immich — dedupe + "attached" badges.
+  immich_asset_id?: string | null;
+  // EXIF DateTimeOriginal (ISO), best-effort at upload time.
+  taken_at?: string | null;
 }
 
 export interface Note {
@@ -1444,11 +1448,14 @@ export const immichApi = {
     api.get<{ date: string; candidates: ImmichCandidate[] }>(
       `/api/library/journal/immich-candidates?date=${encodeURIComponent(date)}`,
     ),
-  attachToJournal: (id: string, asset_ids: string[]) =>
-    api.post<{ attached: Attachment[]; attachments: Attachment[]; failed: string[] }>(
-      `/api/library/journal/${id}/attach-immich`,
-      { asset_ids },
-    ),
+  attachToJournal: (id: string, asset_ids: string[], opts?: { entry_date?: string }) =>
+    api.post<{
+      attached: Attachment[];
+      attachments: Attachment[];
+      failed: string[];
+      already_attached: string[];
+      entry_date: string;
+    }>(`/api/library/journal/${id}/attach-immich`, { asset_ids, ...opts }),
 };
 
 // ─── Auth (API tokens for agents/devices) ────────────────────────────────
