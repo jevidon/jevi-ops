@@ -11,7 +11,8 @@
 #   scripts/db-migrate.sh --baseline               # mark ALL current files applied, run nothing
 #   scripts/db-migrate.sh --baseline-through 0035  # mark files ≤ prefix applied, run nothing
 #
-# Target resolution: --url beats $DATABASE_URL beats the dev-compose
+# Target resolution: --url beats $DATABASE_URL beats DATABASE_URL from the
+# repo-root .env (what the API itself connects to) beats the dev-compose
 # default (postgresql://jevi:jevi@localhost:54329/jeviops). The target is
 # printed before anything runs.
 #
@@ -27,7 +28,12 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 MIGRATIONS_DIR="$ROOT/infrastructure/migrations"
 
-URL="${DATABASE_URL:-postgresql://jevi:jevi@localhost:54329/jeviops}"
+# Repo-root .env is what the API reads — the natural default target.
+env_url=""
+if [ -f "$ROOT/.env" ]; then
+  env_url="$(sed -n 's/^DATABASE_URL=//p' "$ROOT/.env" | tail -1 | tr -d '"'"'"'')"
+fi
+URL="${DATABASE_URL:-${env_url:-postgresql://jevi:jevi@localhost:54329/jeviops}}"
 MODE="apply"
 BASELINE_THROUGH=""
 
@@ -46,11 +52,28 @@ echo "target: $(echo "$URL" | sed -E 's|//[^@]*@|//|')"
 
 DEV_URL_DEFAULT="postgresql://jevi:jevi@localhost:54329/jeviops"
 
-# psql resolution: a host binary if present; otherwise, for the default dev
-# database only, exec psql inside the dev-compose container (unix socket —
-# the host port mapping isn't visible from inside).
-if command -v psql >/dev/null 2>&1; then
-  run_psql() { PGOPTIONS='-c client_min_messages=warning' psql "$URL" "$@"; }
+# psql resolution: $PSQL_BIN override, then PATH, then common install
+# locations (Homebrew libpq/postgres, Postgres.app); otherwise, for the
+# default dev database only, exec psql inside the dev-compose container
+# (unix socket — the host port mapping isn't visible from inside).
+PSQL_BIN="${PSQL_BIN:-}"
+if [ -z "$PSQL_BIN" ]; then
+  if command -v psql >/dev/null 2>&1; then
+    PSQL_BIN=psql
+  else
+    for candidate in \
+      /opt/homebrew/opt/libpq/bin/psql \
+      /opt/homebrew/bin/psql \
+      /usr/local/opt/libpq/bin/psql \
+      /usr/local/bin/psql \
+      /Applications/Postgres.app/Contents/Versions/latest/bin/psql; do
+      if [ -x "$candidate" ]; then PSQL_BIN="$candidate"; break; fi
+    done
+  fi
+fi
+
+if [ -n "$PSQL_BIN" ]; then
+  run_psql() { PGOPTIONS='-c client_min_messages=warning' "$PSQL_BIN" "$URL" "$@"; }
 elif [ "$URL" = "$DEV_URL_DEFAULT" ] \
     && docker ps --format '{{.Names}}' 2>/dev/null | grep -qx jevi-ops-dev-pg; then
   run_psql() {
