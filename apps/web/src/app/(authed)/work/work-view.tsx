@@ -1,10 +1,10 @@
 'use client';
 
-import { useMemo, useState, useTransition } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState, useTransition } from 'react';
 import Link from 'next/link';
 import type { WorkPayload, WorkDomain, WorkProjectCard, WorkContentRow } from '@/lib/api';
 import type { Urgency } from '@jevi-ops/shared';
-import { URGENCY_LABEL } from '@jevi-ops/shared';
+import { URGENCY_LABEL, proceduralIllustration } from '@jevi-ops/shared';
 import { Pill } from '@/components/Pill';
 import { Icon } from '@/components/Icon';
 import { FacetRail, FacetGroup, FacetRow, FacetTag, FacetTags, FacetSep } from '@/components/FacetRail';
@@ -58,10 +58,14 @@ export function WorkView({
   payload,
   tomorrowFocus,
   tomorrowDate,
+  art = {},
 }: {
   payload: WorkPayload;
   tomorrowFocus: { title: string; href: string } | null;
   tomorrowDate: string;
+  // Fork: committed domain engravings (domain id → inner-SVG), rendered as
+  // muted spot art in section headers. Absent entries render no art.
+  art?: Record<string, string>;
 }) {
   const [attention, setAttention] = useState(false);
   const [dsel, setDsel] = useState<Set<string>>(new Set());
@@ -251,7 +255,7 @@ export function WorkView({
           </div>
         ) : (
           visibleDomains.map((d) => (
-            <DomainSection key={d.id} domain={d} kinds={kinds} collapsed={collapsed.has(d.id)} onToggle={() => toggle(setCollapsed, d.id)} />
+            <DomainSection key={d.id} domain={d} kinds={kinds} artSvg={art[d.id]} collapsed={collapsed.has(d.id)} onToggle={() => toggle(setCollapsed, d.id)} />
           ))
         )}
 
@@ -273,7 +277,7 @@ export function WorkView({
                   .map(applyFacets)
                   .filter((d): d is WorkDomain => d !== null)
                   .map((d) => (
-                    <DomainSection key={d.id} domain={d} kinds={kinds} collapsed={collapsed.has(d.id)} onToggle={() => toggle(setCollapsed, d.id)} />
+                    <DomainSection key={d.id} domain={d} kinds={kinds} artSvg={art[d.id]} collapsed={collapsed.has(d.id)} onToggle={() => toggle(setCollapsed, d.id)} />
                   ))}
               </div>
             )}
@@ -284,11 +288,62 @@ export function WorkView({
   );
 }
 
+// Header art, fitted to its ink. Motifs frame themselves differently inside
+// the 240×100 canvas (strokes typically live in y 20–80, x varies per
+// drawing), so a fixed viewBox leaves arbitrary dead margins — the art
+// looked detached from the title. This measures the rendered strokes
+// (getBBox) and tightens the viewBox to the actual drawing, so every
+// motif — procedural or committed — hugs the title and rests on the rule.
+// First paint uses the contract band (0 14 240 72); the fit lands before
+// the browser paints (useLayoutEffect), and the box has a fixed height so
+// nothing shifts.
+function FittedArt({ name, svg, tone }: { name: string; svg?: string | null; tone: 'ink' | 'accent' }) {
+  const gRef = useRef<SVGGElement>(null);
+  const [viewBox, setViewBox] = useState('0 14 240 72');
+  const inner = svg && svg.trim() ? svg : proceduralIllustration(name);
+
+  useLayoutEffect(() => {
+    const g = gRef.current;
+    if (!g) return;
+    try {
+      const b = g.getBBox();
+      if (b.width > 4 && b.height > 4) {
+        const pad = 2.5;
+        setViewBox(`${b.x - pad} ${b.y - pad} ${b.width + pad * 2} ${b.height + pad * 2}`);
+      }
+    } catch {
+      /* detached/unsupported — keep the contract band */
+    }
+  }, [inner]);
+
+  return (
+    <svg
+      viewBox={viewBox}
+      preserveAspectRatio="xMinYMax meet"
+      aria-hidden="true"
+      className={`domain-ill h-full w-auto ${
+        tone === 'accent' ? 'domain-ill-accent text-accent-slip/80' : 'text-ink-3'
+      }`}
+    >
+      <g
+        ref={gRef}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1"
+        strokeLinecap="round"
+        dangerouslySetInnerHTML={{ __html: inner }}
+      />
+    </svg>
+  );
+}
+
 function DomainSection({
-  domain, kinds, collapsed, onToggle,
+  domain, kinds, artSvg, collapsed, onToggle,
 }: {
   domain: WorkDomain;
   kinds: Set<Kind>;
+  // Fork: committed engraving (inner-SVG) shown as muted header spot art.
+  artSvg?: string;
   collapsed: boolean;
   onToggle: () => void;
 }) {
@@ -300,15 +355,33 @@ function DomainSection({
 
   return (
     <section className="mb-8">
-      {/* Sticky header — colour chip · name · urgency pill · counts · toggle,
-          with a 2px ink rule under it. Sticks below the 60px topbar. */}
-      <div className="sticky top-0 lg:top-[60px] z-20 flex items-center gap-3 py-3 bg-bg border-b-2 border-ink">
-        <span className="w-[11px] h-[11px] rounded-[3px] shrink-0" style={{ background: color }} aria-hidden />
-        <span className="font-serif text-[21px] font-medium leading-none tracking-[-0.015em] text-ink truncate shrink min-w-0">
+      {/* Sticky header — colour chip · name · engraving, then counts ·
+          toggle · urgency pill as the right bookend, with a 2px ink rule
+          under it. Sticks below the 60px topbar. The fork's engraving
+          (committed art or the name-seeded procedural motif) hangs off the
+          title and rests its strokes on the rule; accent-inked when
+          slipping. */}
+      {/* items-end + a small bottom standoff: chip, title baseline, art
+          ground-line, counts, toggle, and pill all settle onto the same
+          shelf just above the 2px rule instead of floating mid-row. */}
+      <div className="sticky top-0 lg:top-[60px] z-20 flex items-end gap-3 pt-2 pb-[9px] bg-bg border-b-2 border-ink">
+        <span className="w-[11px] h-[11px] rounded-[3px] shrink-0 mb-[4px]" style={{ background: color }} aria-hidden />
+        {/* Name links to the domain detail page — settings, cadence rule, and
+            the illustration panel live there. Previously the only doorway was
+            the Direct-tasks chip, which not every domain renders. */}
+        <Link
+          href={`/domains/${domain.id}`}
+          className="font-serif text-[21px] font-medium leading-none tracking-[-0.015em] text-ink truncate shrink min-w-0 hover:text-accent transition-colors"
+        >
           {domain.name}
+        </Link>
+        <span
+          className="hidden lg:block h-[48px] max-w-[190px] shrink-0 overflow-hidden opacity-80"
+          aria-hidden
+        >
+          <FittedArt name={domain.name} svg={artSvg} tone={domain.urgency === 'over' ? 'accent' : 'ink'} />
         </span>
-        <Pill state={domain.urgency} />
-        <div className="flex items-center gap-3 ml-auto min-w-0 overflow-hidden font-mono text-[11px] font-medium text-ink-3">
+        <div className="flex items-baseline gap-3 ml-auto mb-[2px] min-w-0 overflow-hidden font-mono text-[11px] font-medium text-ink-3">
           <span className="whitespace-nowrap">{r.open} open</span>
           {r.overdue > 0 && <span className="whitespace-nowrap text-accent">{r.overdue} overdue</span>}
           {r.waiting > 0 && <span className="whitespace-nowrap">{r.waiting} waiting</span>}
@@ -321,6 +394,7 @@ function DomainSection({
         >
           <Icon name="chev" size={15} style={{ transform: `rotate(${collapsed ? 0 : 90}deg)`, transition: 'transform .15s' }} />
         </button>
+        <Pill state={domain.urgency} />
       </div>
 
       {!collapsed && (

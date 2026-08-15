@@ -1,4 +1,4 @@
-import { workApi, focusApi } from '@/lib/api';
+import { workApi, focusApi, domainsApi } from '@/lib/api';
 import { getAppTimezone } from '@/lib/app-settings';
 import { tomorrowIsoDate } from '@/lib/today';
 import { WorkView } from './work-view';
@@ -18,11 +18,21 @@ export default async function WorkPage() {
   // Resolve the target day ONCE and thread it through to the control, so the
   // day being read is the same day a later click writes (see work/actions.ts).
   const tomorrowDate = tomorrowIsoDate(tz);
-  const [payload, focusRes] = await Promise.all([
+  const [payload, focusRes, domainsRes] = await Promise.all([
     workApi.get(),
     // Unset is normal, and a focus failure must never take the map down.
     focusApi.get(tomorrowDate).catch(() => ({ focus: null })),
+    // Committed engravings become section art in the domain headers.
+    // Fork feature; a failure just means headers render without art.
+    domainsApi.list().catch(() => ({ domains: [] })),
   ]);
+
+  // Only committed art rides along — the procedural fallback on every header
+  // would read as clutter, not identity.
+  const art: Record<string, string> = {};
+  for (const d of domainsRes.domains) {
+    if (d.illustration?.svg) art[d.id] = d.illustration.svg;
+  }
 
   const f = focusRes.focus;
   const tomorrowFocus = f
@@ -33,6 +43,6 @@ export default async function WorkPage() {
     : null;
 
   return (
-    <WorkView payload={payload} tomorrowFocus={tomorrowFocus} tomorrowDate={tomorrowDate} />
+    <WorkView payload={payload} tomorrowFocus={tomorrowFocus} tomorrowDate={tomorrowDate} art={art} />
   );
 }
