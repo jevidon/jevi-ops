@@ -14,7 +14,7 @@ import {
   type AttentionItem,
 } from '@/lib/api';
 import { AttentionItemRow } from '@/components/attention/AttentionItemRow';
-import type { Task } from '@jerad-ops/shared';
+import type { Task } from '@jevi-ops/shared';
 import { getAppTimezone, getFeatureFlag } from '@/lib/app-settings';
 import { todayIsoDate } from '@/lib/today';
 import { Pill } from '@/components/Pill';

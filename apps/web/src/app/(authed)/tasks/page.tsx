@@ -1,7 +1,7 @@
 import { tasksApi, ApiError } from '@/lib/api';
 import { todayIsoDate } from '@/lib/today';
 import { getAppTimezone } from '@/lib/app-settings';
-import type { Task } from '@jerad-ops/shared';
+import type { Task } from '@jevi-ops/shared';
 import { TasksView } from './tasks-view';
 
 // /tasks — the full task list (v2 redesign). A thin server shell: fetch the

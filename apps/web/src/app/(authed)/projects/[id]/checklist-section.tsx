@@ -13,7 +13,7 @@ import {
   isRecurrencePattern,
   RECURRENCE_LABELS,
   type RecurrencePattern,
-} from '@jerad-ops/shared';
+} from '@jevi-ops/shared';
 
 // Project sub-step checklist. Each row is its own form (toggle, delete)
 // so submissions stay scoped per item.

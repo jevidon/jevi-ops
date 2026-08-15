@@ -3,8 +3,8 @@
 import { useMemo, useState, useTransition } from 'react';
 import Link from 'next/link';
 import type { WorkPayload, WorkDomain, WorkProjectCard, WorkContentRow } from '@/lib/api';
-import type { Urgency } from '@jerad-ops/shared';
-import { URGENCY_LABEL } from '@jerad-ops/shared';
+import type { Urgency } from '@jevi-ops/shared';
+import { URGENCY_LABEL } from '@jevi-ops/shared';
 import { Pill } from '@/components/Pill';
 import { Icon } from '@/components/Icon';
 import { FacetRail, FacetGroup, FacetRow, FacetTag, FacetTags, FacetSep } from '@/components/FacetRail';

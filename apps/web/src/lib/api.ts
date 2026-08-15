@@ -63,7 +63,7 @@ export const api = {
 export { ApiError };
 
 // Typed helpers — one per known route. Add as new routes ship.
-import type { Task, Project, Domain, RecurrencePattern } from '@jerad-ops/shared';
+import type { Task, Project, Domain, RecurrencePattern } from '@jevi-ops/shared';
 
 // Project list/detail include relations the bare Project type doesn't.
 export interface Milestone {
@@ -156,16 +156,16 @@ export const tasksApi = {
 // ported. Only Tomorrow's Focus survives from that addendum series.
 
 // The Work page's computed map (Addendum 08).
-import type { WorkPayload } from '@jerad-ops/shared';
-export type { WorkPayload, WorkDomain, WorkProjectCard, WorkContentRow, WorkDirect, WorkRollup } from '@jerad-ops/shared';
+import type { WorkPayload } from '@jevi-ops/shared';
+export type { WorkPayload, WorkDomain, WorkProjectCard, WorkContentRow, WorkDirect, WorkRollup } from '@jevi-ops/shared';
 
 export const workApi = {
   get: () => api.get<WorkPayload>('/api/work'),
 };
 
 // ─── Tomorrow's Focus (Addendum 09) ──────────────────────────────────────
-import type { ResolvedFocus, FocusTargetType } from '@jerad-ops/shared';
-export type { ResolvedFocus, FocusTargetType } from '@jerad-ops/shared';
+import type { ResolvedFocus, FocusTargetType } from '@jevi-ops/shared';
+export type { ResolvedFocus, FocusTargetType } from '@jevi-ops/shared';
 
 export const focusApi = {
   // date omitted → today (app tz), server-side.

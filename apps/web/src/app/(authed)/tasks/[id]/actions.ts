@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
 import { tasksApi, ApiError } from '@/lib/api';
-import { isRecurrencePattern } from '@jerad-ops/shared';
+import { isRecurrencePattern } from '@jevi-ops/shared';
 
 export type SaveResult = { ok: true } | { ok: false; error: string };
 

@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { projectsApi, contentApi, domainsApi, ApiError } from '@/lib/api';
-import { INBOX_DOMAIN_ID } from '@jerad-ops/shared';
+import { INBOX_DOMAIN_ID } from '@jevi-ops/shared';
 import { TaskForm } from '../task-form';
 
 // /tasks/new — full-editor task creation. The /today page still has the

@@ -2,8 +2,8 @@
 
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
-import type { Task } from '@jerad-ops/shared';
-import { isRecurrencePattern } from '@jerad-ops/shared';
+import type { Task } from '@jevi-ops/shared';
+import { isRecurrencePattern } from '@jevi-ops/shared';
 import { Icon } from '@/components/Icon';
 import { FacetRail, FacetGroup, FacetRow, FacetTag, FacetTags, FacetSep } from '@/components/FacetRail';
 import { domainColor } from '@/lib/domain-colors';

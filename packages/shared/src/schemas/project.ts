@@ -42,6 +42,8 @@ export const ProjectSchema = z.object({
   color: HexColorSchema.nullable().optional(),
   engagement_type: EngagementTypeSchema.default('project'),
   kind: ProjectKindSchema.default('project'),
+  // Retainer billing-cycle anchor day-of-month (1-31; migration 0038).
+  retainer_anchor_day: z.number().int().min(1).max(31).nullable().optional(),
   completed_at: z.string().datetime({ offset: true }).nullable().optional(),
   created_at: z.string().datetime({ offset: true }),
   updated_at: z.string().datetime({ offset: true }),
@@ -63,6 +65,7 @@ export const CreateProjectSchema = z.object({
   color: HexColorSchema.nullable().optional(),
   engagement_type: EngagementTypeSchema.optional(),
   kind: ProjectKindSchema.optional(),
+  retainer_anchor_day: z.number().int().min(1).max(31).nullable().optional(),
 });
 
 export const UpdateProjectSchema = CreateProjectSchema.partial().extend({

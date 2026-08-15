@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import type { RoutineListItem, TimeOfDayBucket } from '@/lib/api';
-import { recentDaysGrid } from '@jerad-ops/shared';
+import { recentDaysGrid } from '@jevi-ops/shared';
 import { RoutineHeatmap } from '@/components/RoutineHeatmap';
 import { toggleCompletionAction } from './actions';
 

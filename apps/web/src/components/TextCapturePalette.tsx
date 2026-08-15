@@ -142,7 +142,7 @@ export function TextCapturePalette() {
             onChange={(e) => setText(e.target.value)}
             onKeyDown={onTextareaKeyDown}
             disabled={phase.kind === 'submitting'}
-            placeholder="Add a task to Tech With Jerad: ship the new intro &mdash; due tomorrow.&#10;Save a quote from Atomic Habits by James Clear: &ldquo;You do not rise to the level of your goals…&rdquo;"
+            placeholder="Add a task to My Domain: ship the new post &mdash; due tomorrow.&#10;Save a quote from Atomic Habits by James Clear: &ldquo;You do not rise to the level of your goals…&rdquo;"
             rows={4}
             className="w-full bg-transparent border border-line focus:border-accent focus:outline-none p-3 font-sans text-[15px] text-ink placeholder:text-ink-3 leading-snug resize-none"
             spellCheck

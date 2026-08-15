@@ -159,7 +159,7 @@ export function IconRail({
               Operations
             </span>
             <span className="block font-mono text-[9px] leading-[1.4] tracking-[0.1em] uppercase text-ink-3">
-              jeradhill.com
+              jevi-ops
             </span>
           </span>
         </div>

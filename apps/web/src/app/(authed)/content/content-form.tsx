@@ -4,7 +4,7 @@ import { useActionState, useState } from 'react';
 import { useFormStatus } from 'react-dom';
 import { createContentAction, updateContentAction, deleteContentAction, type SaveResult } from './actions';
 import type { ContentItem, ContentItemStatus, ContentItemType, ContentPlatform } from '@/lib/api';
-import { CONTENT_PLATFORMS, CONTENT_PLATFORM_LABELS } from '@jerad-ops/shared';
+import { CONTENT_PLATFORMS, CONTENT_PLATFORM_LABELS } from '@jevi-ops/shared';
 import { useTransientSaveResult } from '@/lib/use-transient-save-result';
 import { DateInput } from '@/components/DateInput';
 import { RichComposer } from '@/components/RichComposer';

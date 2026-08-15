@@ -1,4 +1,4 @@
-import { type Urgency, URGENCY_LABEL } from '@jerad-ops/shared';
+import { type Urgency, URGENCY_LABEL } from '@jevi-ops/shared';
 
 // v2 status pill (design handoff, Jul 2026). The one place the palette leaves
 // monochrome: four urgency states, each a colour + soft fill + border, plus two

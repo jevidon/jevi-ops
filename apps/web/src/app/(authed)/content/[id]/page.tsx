@@ -7,8 +7,8 @@ import {
 } from '@/components/detail/DetailShell';
 import { EditDrawer } from '@/components/detail/EditDrawer';
 import { contentApi, domainsApi, tasksApi, ApiError, type ContentItem, type ContentItemStatus } from '@/lib/api';
-import { contentUrgency, moveVerb, type Urgency } from '@jerad-ops/shared';
-import type { Task } from '@jerad-ops/shared';
+import { contentUrgency, moveVerb, type Urgency } from '@jevi-ops/shared';
+import type { Task } from '@jevi-ops/shared';
 import { getAppTimezone } from '@/lib/app-settings';
 import { todayIsoDate } from '@/lib/today';
 import { ContentForm } from '../content-form';

@@ -10,7 +10,7 @@ import { EditDrawer } from '@/components/detail/EditDrawer';
 import { projectsApi, domainsApi, ApiError, type ProjectDetail } from '@/lib/api';
 import { isToday, todayIsoDate } from '@/lib/today';
 import { getAppTimezone } from '@/lib/app-settings';
-import type { Task } from '@jerad-ops/shared';
+import type { Task } from '@jevi-ops/shared';
 import type { Milestone } from '@/lib/api';
 import { ProjectForm } from '../project-form';
 import { MilestonesSection } from './milestones-section';

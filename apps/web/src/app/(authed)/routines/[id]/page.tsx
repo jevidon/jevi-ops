@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { routinesApi, ApiError, type RoutineDetail } from '@/lib/api';
-import { recentDaysGrid } from '@jerad-ops/shared';
+import { recentDaysGrid } from '@jevi-ops/shared';
 import { RoutineForm } from '../routine-form';
 import { toggleCompletionAction } from '../actions';
 import { RoutineHeatmap } from '@/components/RoutineHeatmap';

@@ -3,7 +3,7 @@
 import { useMemo, useState, useTransition } from 'react';
 import Link from 'next/link';
 import type { ContentItem } from '@/lib/api';
-import { contentUrgency } from '@jerad-ops/shared';
+import { contentUrgency } from '@jevi-ops/shared';
 import { Pill } from '@/components/Pill';
 import { Icon } from '@/components/Icon';
 import { FacetRail, FacetGroup, FacetRow, FacetTag, FacetTags, FacetSep } from '@/components/FacetRail';
