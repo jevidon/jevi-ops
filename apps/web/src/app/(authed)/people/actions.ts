@@ -10,14 +10,7 @@ const VALID_RELATIONSHIPS: readonly RelationshipType[] = [
   'client', 'family', 'church', 'friend', 'team', 'vendor', 'other',
 ];
 
-function readFields(formData: FormData): {
-  name: string;
-  relationship_type: RelationshipType | null;
-  email: string | null;
-  phone: string | null;
-  company: string | null;
-  notes: string | null;
-} {
+function readFields(formData: FormData): PersonCreate {
   const name = String(formData.get('name') ?? '').trim();
   const rawRelationship = String(formData.get('relationship_type') ?? '').trim();
   const relationship_type = (VALID_RELATIONSHIPS as readonly string[]).includes(rawRelationship)
@@ -25,9 +18,30 @@ function readFields(formData: FormData): {
     : null;
   const email = String(formData.get('email') ?? '').trim() || null;
   const phone = String(formData.get('phone') ?? '').trim() || null;
-  const company = String(formData.get('company') ?? '').trim() || null;
+  const company_id = String(formData.get('company_id') ?? '').trim() || null;
+  const role_at_company = String(formData.get('role_at_company') ?? '').trim() || null;
+  const birthday = String(formData.get('birthday') ?? '').trim() || null;
+  const anniversary = String(formData.get('anniversary') ?? '').trim() || null;
+  // Checkbox with a hidden 'false' companion — getAll returns ['false'] when
+  // unchecked, ['false','on'] when checked (never absent since the form
+  // always renders it), so presence of 'on' means true.
+  const is_primary_contact = formData.getAll('is_primary_contact').map(String).includes('on');
   const notes = String(formData.get('notes') ?? '').trim() || null;
-  return { name, relationship_type, email, phone, company, notes };
+  // If no company is selected, a primary-contact flag is meaningless — force
+  // it false so we never trip the one-primary-per-company partial index with
+  // a null company_id edge case.
+  return {
+    name,
+    relationship_type,
+    email,
+    phone,
+    company_id,
+    role_at_company,
+    is_primary_contact: company_id ? is_primary_contact : false,
+    birthday,
+    anniversary,
+    notes,
+  };
 }
 
 function shapeApiError(err: unknown): SaveResult {

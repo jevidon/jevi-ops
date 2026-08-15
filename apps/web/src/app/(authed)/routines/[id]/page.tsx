@@ -2,10 +2,12 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { routinesApi, ApiError, type RoutineDetail } from '@/lib/api';
-import { recentDaysGrid } from '@jevi-ops/shared';
+import { recentDaysGrid } from '@jerad-ops/shared';
 import { RoutineForm } from '../routine-form';
 import { toggleCompletionAction } from '../actions';
 import { RoutineHeatmap } from '@/components/RoutineHeatmap';
+import { Pill } from '@/components/Pill';
+import { PART_LABEL } from '../routines-data';
 
 // /routines/[id] — single routine view. Lifetime stats at the top, a
 // 30-day heatmap, then the edit/archive/delete form collapsed below.
@@ -75,12 +77,20 @@ export default async function RoutineDetailPage({
         </Link>
       </div>
 
-      <ScreenHeader
-        eyebrow={routine.active ? 'Routine' : 'Routine · Archived'}
-        title={routine.name}
-        meta={stats.done_today ? '✓ Done today' : 'Not done yet today'}
-      />
-      <div className="hairline" />
+      <div className="px-5 lg:px-0 pt-2 flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
+        <div>
+          <div className="eyebrow mb-2">
+            {routine.active ? `Routine · ${PART_LABEL[routine.time_of_day]}` : 'Routine · Archived'}
+          </div>
+          <h1 className="font-serif text-[40px] font-medium leading-[1.02] tracking-[-0.022em] text-ink">{routine.name}</h1>
+        </div>
+        {routine.active && (
+          <div className="pb-1">
+            <Pill state={stats.done_today ? 'ok' : 'due'}>{stats.done_today ? 'Done today' : 'Not done yet today'}</Pill>
+          </div>
+        )}
+      </div>
+      <div className="hairline mt-4" />
 
       {routine.description && (
         <div className="px-5 lg:px-0 mt-4 max-w-2xl">

@@ -13,7 +13,7 @@ import {
   isRecurrencePattern,
   RECURRENCE_LABELS,
   type RecurrencePattern,
-} from '@jevi-ops/shared';
+} from '@jerad-ops/shared';
 
 // Project sub-step checklist. Each row is its own form (toggle, delete)
 // so submissions stay scoped per item.
@@ -32,7 +32,6 @@ const RECURRENCE_OPTIONS: Array<{ value: '' | RecurrencePattern; label: string }
   { value: 'weekly', label: 'Weekly' },
   { value: 'biweekly', label: 'Every 2 weeks' },
   { value: 'monthly', label: 'Monthly' },
-  { value: 'quarterly', label: 'Every 3 months' },
   { value: 'semiannually', label: 'Every 6 months' },
   { value: 'yearly', label: 'Yearly' },
 ];
@@ -64,7 +63,7 @@ export function ChecklistSection({
   const doneCount = decorated.filter((d) => d.done).length;
 
   return (
-    <section className="px-5 lg:px-0 pt-6">
+    <section className="mt-6 first:mt-0">
       <div className="flex items-baseline justify-between mb-3 border-b border-line pb-2">
         <div className="eyebrow">
           Checklist {items.length > 0 ? `· ${doneCount}/${items.length}` : ''}

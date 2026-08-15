@@ -78,11 +78,8 @@ export function TimeInput({
 
   return (
     <div className="flex flex-col gap-1">
-      {/* Native picker — mobile only (the OS wheel is the best UX
-          there). Hidden on desktop: Safari renders an EMPTY time input
-          with placeholder content (e.g. "12:30 PM") painted in the
-          field, which reads as a phantom due time. Value is always the
-          normalized HH:MM. */}
+      {/* Native picker — primary UX everywhere it works. Value is
+          always the normalized HH:MM. */}
       <input
         type="time"
         value={normalized}
@@ -97,10 +94,10 @@ export function TimeInput({
         disabled={disabled}
         aria-label={ariaLabel}
         title={title}
-        className={`${className ?? ''} lg:hidden`}
+        className={className}
       />
-      {/* Text input — the only field on desktop, typing fallback on
-          mobile ("5:30 PM" instead of HH:MM). */}
+      {/* Text fallback — for Safari desktop (broken time picker) and
+          anyone who prefers typing "5:30 PM" instead of HH:MM. */}
       <input
         type="text"
         value={text}
@@ -117,7 +114,7 @@ export function TimeInput({
         autoComplete="off"
         aria-label={ariaLabel ? `${ariaLabel} (type)` : 'type time'}
         title={title}
-        className={`${className ?? ''} text-[12px] opacity-70 focus:opacity-100 lg:text-[14px] lg:opacity-100`}
+        className={`${className ?? ''} text-[12px] opacity-70 focus:opacity-100`}
       />
       <input type="hidden" name={name} value={normalized} />
       {error && (

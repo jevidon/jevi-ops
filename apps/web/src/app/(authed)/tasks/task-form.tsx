@@ -12,19 +12,10 @@ import {
   type SaveResult,
 } from './[id]/actions';
 
-interface MilestoneOption {
-  id: string;
-  title: string;
-  status: 'open' | 'done';
-  position: number;
-}
 interface ProjectOption {
   id: string;
   name: string;
   domain_id: string | null;
-  // Present when the page's projects payload eager-loaded milestones —
-  // powers the milestone picker without an extra fetch.
-  milestones?: MilestoneOption[];
 }
 interface DomainOption {
   id: string;
@@ -48,11 +39,15 @@ interface InitialValues {
   due_time: string;
   priority: number;
   selection: string;            // domain:<id> | project:<id> | '' (= Inbox default on create)
-  milestone_id: string;         // '' = none ("General"); only valid with a project selection
+  milestone_id: string;         // '' = General (no milestone); else a milestone of the selected project
   content_item_id: string;
   remind_minutes: number | '';  // '' = no reminder; only effective when due_time is set
   recurrence_rule: string;     // '' = no repeat
 }
+
+// Milestones the picker can offer, keyed by project id. Only the selected
+// project's list is shown; changing projects clears any stale selection.
+type ProjectMilestones = Record<string, { id: string; title: string }[]>;
 
 // Shared form used by /tasks/new (create) and /tasks/[id] (edit). The
 // difference is just which server action it submits to + whether the
@@ -62,15 +57,13 @@ export function TaskForm({
   domains,
   projects,
   contentItems,
-  subtaskCount = 0,
+  projectMilestones = {},
 }: {
   initial: InitialValues;
   domains: DomainOption[];
   projects: ProjectOption[];
   contentItems: ContentItemOption[];
-  // Children of this task (edit mode only). Deleting a parent cascade-
-  // deletes its subtasks at the DB level, so the confirm step says so.
-  subtaskCount?: number;
+  projectMilestones?: ProjectMilestones;
 }) {
   const isEdit = Boolean(initial.id);
   const action = isEdit ? updateTaskAction : createTaskFullAction;
@@ -78,17 +71,23 @@ export function TaskForm({
   // Auto-clear success messages so back-to-back saves each show fresh feedback.
   const display = useTransientSaveResult(state);
 
-  // Selection is controlled (not just defaultValue) so the milestone picker
-  // can react to it: picking a project reveals that project's milestones,
-  // switching away hides them. The server independently re-validates the
-  // link, so a stale value can never point across projects.
-  const [selection, setSelection] = useState(initial.selection);
-  const selectedProject = selection.startsWith('project:')
-    ? projects.find((p) => p.id === selection.slice('project:'.length))
-    : undefined;
-  const milestoneOptions = (selectedProject?.milestones ?? [])
-    .slice()
-    .sort((a, b) => a.position - b.position);
+  // Track the selected project so the milestone picker can offer just that
+  // project's milestones (Addendum 08). Changing to a different project clears
+  // the milestone — a milestone only belongs to one project.
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
+    initial.selection.startsWith('project:')
+      ? initial.selection.slice('project:'.length)
+      : null,
+  );
+  const [milestoneId, setMilestoneId] = useState(initial.milestone_id);
+  function handleSelectionChange(value: string) {
+    const pid = value.startsWith('project:') ? value.slice('project:'.length) : null;
+    if (pid !== selectedProjectId) {
+      setSelectedProjectId(pid);
+      setMilestoneId('');
+    }
+  }
+  const milestoneOptions = selectedProjectId ? (projectMilestones[selectedProjectId] ?? []) : [];
 
   return (
     <>
@@ -149,27 +148,30 @@ export function TaskForm({
             <DomainProjectPicker
               domains={domains}
               projects={projects}
-              value={selection}
-              onChange={setSelection}
+              defaultValue={initial.selection}
+              onChange={handleSelectionChange}
             />
           </Field>
         </div>
 
+        {/* Milestone — only when the selected project actually has milestones.
+            UI select drives state; a hidden field carries the value so the
+            server can clear it (empty) when the task leaves a project. */}
+        <input
+          type="hidden"
+          name="milestone_id"
+          value={selectedProjectId ? milestoneId : ''}
+        />
         {milestoneOptions.length > 0 && (
-          <Field label="Milestone (groups this task on the project page)">
-            {/* key resets the DOM value when the project changes so a
-                milestone from the old project can't linger selected. */}
+          <Field label="Milestone (groups this task under a project milestone)">
             <select
-              key={selectedProject?.id}
-              name="milestone_id"
-              defaultValue={initial.milestone_id}
+              value={milestoneId}
+              onChange={(e) => setMilestoneId(e.target.value)}
               className="w-full bg-transparent border border-line focus:border-ink-2 focus:outline-none p-2 font-sans text-[14px] text-ink"
             >
               <option value="">General (no milestone)</option>
               {milestoneOptions.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.title}{m.status === 'done' ? ' ✓' : ''}
-                </option>
+                <option key={m.id} value={m.id}>{m.title}</option>
               ))}
             </select>
           </Field>
@@ -215,7 +217,6 @@ export function TaskForm({
             <option value="weekly">Weekly</option>
             <option value="biweekly">Every 2 weeks</option>
             <option value="monthly">Monthly</option>
-            <option value="quarterly">Every 3 months</option>
             <option value="semiannually">Every 6 months</option>
             <option value="yearly">Yearly</option>
           </select>
@@ -237,7 +238,7 @@ export function TaskForm({
       </form>
 
       {isEdit && initial.id && (
-        <DeleteRow taskId={initial.id} title={initial.title} subtaskCount={subtaskCount} />
+        <DeleteRow taskId={initial.id} title={initial.title} />
       )}
     </>
   );
@@ -251,13 +252,13 @@ export function TaskForm({
 function DomainProjectPicker({
   domains,
   projects,
-  value,
+  defaultValue,
   onChange,
 }: {
   domains: DomainOption[];
   projects: ProjectOption[];
-  value: string;
-  onChange: (next: string) => void;
+  defaultValue: string;
+  onChange?: (value: string) => void;
 }) {
   const inbox = domains.find((d) => d.is_system);
   const userDomains = domains.filter((d) => !d.is_system);
@@ -278,8 +279,8 @@ function DomainProjectPicker({
   return (
     <select
       name="selection"
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
+      defaultValue={defaultValue}
+      onChange={onChange ? (e) => onChange(e.target.value) : undefined}
       className="w-full bg-transparent border border-line focus:border-ink-2 focus:outline-none p-2 font-sans text-[14px] text-ink"
     >
       {inbox && (
@@ -329,15 +330,7 @@ function SaveButton({ isEdit }: { isEdit: boolean }) {
   );
 }
 
-function DeleteRow({
-  taskId,
-  title,
-  subtaskCount = 0,
-}: {
-  taskId: string;
-  title: string;
-  subtaskCount?: number;
-}) {
+function DeleteRow({ taskId, title }: { taskId: string; title: string }) {
   const [confirming, setConfirming] = useState(false);
   return (
     <div className="mt-12 pt-6 border-t border-line">
@@ -351,18 +344,10 @@ function DeleteRow({
           Delete task…
         </button>
       ) : (
-        <form action={deleteTaskAction} className="flex items-center gap-3 flex-wrap">
+        <form action={deleteTaskAction} className="flex items-center gap-3">
           <input type="hidden" name="taskId" value={taskId} />
           <span className="font-sans text-[13px] text-ink-2">
             Delete &ldquo;{title}&rdquo; permanently?
-            {subtaskCount > 0 && (
-              <>
-                {' '}
-                <span className="text-accent">
-                  This also deletes its {subtaskCount} subtask{subtaskCount === 1 ? '' : 's'}.
-                </span>
-              </>
-            )}
           </span>
           <button
             type="submit"

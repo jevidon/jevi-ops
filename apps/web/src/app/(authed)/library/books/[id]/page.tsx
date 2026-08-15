@@ -1,24 +1,30 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { ScreenHeader } from '@/components/ScreenHeader';
 import { libraryApi, ApiError, type Book, type Quote } from '@/lib/api';
+import { getAppTimezone } from '@/lib/app-settings';
+import { EditDrawer } from '@/components/detail/EditDrawer';
 import { BookForm } from '../book-form';
 
-// /library/books/[id] — book cover + metadata + every imported highlight,
-// ordered by Kindle Location number (page_number column). Each highlight
-// is just the quote text + location + tags + annotation count.
+// /library/books/[id] — a book shrine (Detail Pages v2, Addendum 10 §10). Cover
+// art leads, the read-only metadata + my-summary sit beside it, and every
+// harvested highlight links out to its own quote page. Config lives behind Edit.
 
-export default async function BookDetailPage({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
+const STATUS_LABELS: Record<string, string> = {
+  reading: 'Reading', finished: 'Finished', abandoned: 'Abandoned', want_to_read: 'Want to read',
+};
+const FORMAT_LABELS: Record<string, string> = { physical: 'Physical', kindle: 'Kindle', audiobook: 'Audiobook' };
+
+function fmtDate(ymd: string, tz: string): string {
+  return new Date(`${ymd}T12:00:00Z`).toLocaleDateString('en-US', { timeZone: tz, month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+export default async function BookDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
+  const tz = await getAppTimezone();
 
   let book: Book | null = null;
   let quotes: Quote[] = [];
   let errorMessage: string | null = null;
-
   try {
     const res = await libraryApi.books.get(id);
     book = res.book;
@@ -30,107 +36,110 @@ export default async function BookDetailPage({
 
   if (!book) {
     return (
-      <div>
-        <ScreenHeader eyebrow="Book" title="—" />
-        <div className="hairline" />
-        <div className="px-5 lg:px-0 mt-6 font-sans text-[13px] text-ink-3">
-          {errorMessage ?? 'Book not found.'}
-        </div>
+      <div className="mx-auto max-w-3xl px-5 lg:px-8 pt-10">
+        <h1 className="font-serif text-[32px] font-medium tracking-[-0.02em] text-ink">—</h1>
+        <p className="mt-4 font-sans text-[13px] text-ink-3">{errorMessage ?? 'Book not found.'}</p>
       </div>
     );
   }
 
+  const dateRange = [
+    book.started_at ? `Started ${fmtDate(book.started_at, tz)}` : null,
+    book.finished_at ? `Finished ${fmtDate(book.finished_at, tz)}` : null,
+  ].filter(Boolean).join(' · ');
+
   return (
-    <div>
-      <div className="px-5 lg:px-0 pt-4 pb-1 font-mono text-[10px] uppercase tracking-wider text-ink-3">
-        <Link href="/library/books" className="hover:text-ink-2 transition-colors">
-          ← Books
-        </Link>
+    <div className="mx-auto max-w-3xl px-5 lg:px-8 pt-4 pb-24">
+      <div className="pb-1 font-mono text-[10px] uppercase tracking-wider text-ink-3">
+        <Link href="/library/books" className="hover:text-ink-2 transition-colors">← Books</Link>
       </div>
 
-      <ScreenHeader
-        eyebrow={book.author ? `By ${book.author}` : 'Book'}
-        title={book.title}
-        meta={`${quotes.length} highlight${quotes.length === 1 ? '' : 's'}`}
-      />
-      <div className="hairline mb-6" />
+      <div className="mt-3 flex flex-col sm:flex-row gap-6 sm:gap-8">
+        {book.cover_image_url ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={book.cover_image_url} alt={book.title} className="w-36 sm:w-44 h-auto border border-line shrink-0 self-start shadow-[0_10px_30px_-16px_rgba(18,16,14,0.5)]" />
+        ) : (
+          <div className="w-36 sm:w-44 aspect-[2/3] border border-line bg-surface-2 flex items-center justify-center p-4 shrink-0 self-start">
+            <span className="font-serif text-[15px] text-ink-3 text-center leading-tight">{book.title}</span>
+          </div>
+        )}
 
-      <div className="px-5 lg:px-0 max-w-3xl">
-        {/* Cover + edit form. Cover sits to the left on desktop, above on
-            mobile. The form holds every editable field (status, format,
-            dates, rating, summary). */}
-        <div className="flex flex-col md:flex-row gap-6 mb-10">
-          {book.cover_image_url && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={book.cover_image_url}
-              alt={book.title}
-              className="w-32 h-auto border border-line shrink-0 self-start"
-            />
+        <div className="flex-1 min-w-0">
+          <div className="font-mono text-[10px] uppercase tracking-[0.11em] text-ink-3">Book</div>
+          <h1 className="mt-2 font-serif text-[30px] leading-[1.08] tracking-[-0.02em] font-medium text-ink text-balance">{book.title}</h1>
+          {book.author && <div className="mt-1.5 font-serif text-[16px] italic text-ink-2">{book.author}</div>}
+
+          <div className="mt-4 flex flex-col gap-1.5 font-mono text-[10px] uppercase tracking-wider text-ink-3">
+            <div>{STATUS_LABELS[book.status] ?? book.status}{book.format ? ` · ${FORMAT_LABELS[book.format] ?? book.format}` : ''}</div>
+            {dateRange && <div>{dateRange}</div>}
+            {book.rating != null && (
+              <div className="text-ink-2 tracking-[0.15em]">
+                <span className="text-accent">{'★'.repeat(book.rating)}</span>{'☆'.repeat(Math.max(0, 5 - book.rating))}
+              </div>
+            )}
+          </div>
+
+          {book.my_summary && (
+            <div className="mt-6">
+              <div className="eyebrow mb-2">My summary</div>
+              <p className="font-serif text-[16px] leading-[1.6] text-ink-2 whitespace-pre-wrap">{book.my_summary}</p>
+            </div>
           )}
-          <div className="flex-1 min-w-0">
-            <BookForm
-              initial={{
-                id: book.id,
-                title: book.title,
-                author: book.author ?? '',
-                isbn: book.isbn ?? '',
-                cover_image_url: book.cover_image_url ?? '',
-                status: book.status,
-                format: book.format ?? '',
-                started_at: book.started_at ?? '',
-                finished_at: book.finished_at ?? '',
-                rating: book.rating ?? '',
-                my_summary: book.my_summary ?? '',
-              }}
-            />
+
+          <div className="mt-6">
+            <EditDrawer title="Edit book" triggerVariant="quiet">
+              <BookForm
+                initial={{
+                  id: book.id,
+                  title: book.title,
+                  author: book.author ?? '',
+                  isbn: book.isbn ?? '',
+                  cover_image_url: book.cover_image_url ?? '',
+                  status: book.status,
+                  format: book.format ?? '',
+                  started_at: book.started_at ?? '',
+                  finished_at: book.finished_at ?? '',
+                  rating: book.rating ?? '',
+                  my_summary: book.my_summary ?? '',
+                }}
+              />
+            </EditDrawer>
           </div>
         </div>
+      </div>
 
-        {/* Highlights */}
-        <div className="flex items-baseline justify-between mb-4">
-          <div className="eyebrow">Highlights</div>
-          <Link
-            href={`/library/quotes/new?book_id=${book.id}`}
-            className="font-mono text-[10px] uppercase tracking-wider text-ink-3 hover:text-accent transition-colors"
-          >
+      <section className="mt-12 pt-6 border-t border-line">
+        <div className="flex items-baseline justify-between gap-3 mb-5">
+          <div className="eyebrow">Highlights {quotes.length > 0 ? `· ${quotes.length}` : ''}</div>
+          <Link href={`/library/quotes/new?book_id=${book.id}`} className="font-mono text-[10px] uppercase tracking-wider text-ink-3 hover:text-accent transition-colors">
             + Add highlight
           </Link>
         </div>
         {quotes.length === 0 ? (
-          <div className="font-sans text-[13px] text-ink-3 italic">
-            No highlights for this book yet.
-          </div>
+          <p className="font-sans text-[13px] text-ink-3 italic">No highlights harvested from this book yet.</p>
         ) : (
-          <div>
-            <ul className="space-y-6">
-              {quotes.map((q) => (
+          <ul className="space-y-6">
+            {quotes.map((q) => {
+              const parts: string[] = [];
+              if (q.page_number != null && String(q.page_number).trim() !== '') parts.push(`Location ${q.page_number}`);
+              if (q.tags?.length > 0) parts.push(q.tags.map((t) => `#${t}`).join(' '));
+              if (q.annotation_count && q.annotation_count > 0) parts.push(`${q.annotation_count} thought${q.annotation_count === 1 ? '' : 's'}`);
+              return (
                 <li key={q.id} className="border-l-2 border-line pl-4">
-                  <Link
-                    href={`/library/quotes/${q.id}`}
-                    className="block hover:opacity-80 transition-opacity"
-                  >
-                    <p className="font-serif text-[15px] text-ink leading-relaxed italic">
-                      &ldquo;{q.text}&rdquo;
-                    </p>
-                    <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[10px] uppercase tracking-wider text-ink-3">
-                      {q.page_number != null && <span>Location {q.page_number}</span>}
-                      {q.tags?.length > 0 && (
-                        <span>· {q.tags.map((t) => `#${t}`).join(' ')}</span>
-                      )}
-                      {q.annotation_count !== undefined && q.annotation_count > 0 && (
-                        <span>
-                          · {q.annotation_count} thought{q.annotation_count === 1 ? '' : 's'}
-                        </span>
-                      )}
-                    </div>
+                  <Link href={`/library/quotes/${q.id}`} className="block hover:opacity-80 transition-opacity">
+                    <p className="font-serif text-[16px] text-ink leading-relaxed italic">&ldquo;{q.text}&rdquo;</p>
+                    {parts.length > 0 && (
+                      <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-[10px] uppercase tracking-wider text-ink-3">
+                        {parts.map((p, i) => <span key={i}>{i > 0 ? '· ' : ''}{p}</span>)}
+                      </div>
+                    )}
                   </Link>
                 </li>
-              ))}
-            </ul>
-          </div>
+              );
+            })}
+          </ul>
         )}
-      </div>
+      </section>
     </div>
   );
 }

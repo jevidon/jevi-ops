@@ -3,7 +3,7 @@
 import { useActionState } from 'react';
 import { useFormStatus } from 'react-dom';
 import { triageTaskAction, type TriageResult } from './actions';
-import type { Task } from '@jevi-ops/shared';
+import type { Task } from '@jerad-ops/shared';
 
 interface ProjectOption {
   id: string;

@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { projectsApi, ApiError } from '@/lib/api';
-import { isRecurrencePattern } from '@jevi-ops/shared';
+import { isRecurrencePattern } from '@jerad-ops/shared';
 
 // Server actions for the per-project ad-hoc checklist. Mirrors the
 // content-checklist actions in shape so the client section can use the

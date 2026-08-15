@@ -6,7 +6,7 @@
 // the maskable-safe inner 80% (radius 40% of canvas) so iOS's rounded-
 // square clip and Android's circle clip both leave the mark intact.
 //
-// Run: pnpm -F @jevi-ops/web exec node scripts/generate-icons.mjs
+// Run: pnpm -F @jerad-ops/web exec node scripts/generate-icons.mjs
 
 import sharp from 'sharp';
 import { mkdir, writeFile } from 'node:fs/promises';

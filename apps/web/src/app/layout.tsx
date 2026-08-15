@@ -2,10 +2,10 @@ import type { Metadata, Viewport } from 'next';
 import '../styles/globals.css';
 
 export const metadata: Metadata = {
-  title: 'Jevi · Ops',
+  title: 'Jerad · Ops',
   description: 'Personal Operations Dashboard',
   manifest: '/manifest.webmanifest',
-  applicationName: 'Jevi Ops',
+  applicationName: 'Jerad Ops',
   // Icons split by purpose:
   //   - icon (any): browser tab + bookmark
   //   - apple-touch-icon: iOS Add to Home Screen
@@ -25,12 +25,11 @@ export const metadata: Metadata = {
   appleWebApp: {
     capable: true,
     // 'black-translucent' lets the app content render under the iOS status
-    // bar — together with our cream theme_color the bar disappears into
-    // the warm-linen body. 'default' (was) gave a grey bar that fought
-    // the brand. The CSS env(safe-area-inset-top) padding still applies
-    // so content doesn't get clipped by the notch.
+    // bar; with the v2 white canvas the bar's dark glyphs sit on white.
+    // The CSS env(safe-area-inset-top) padding still applies so content
+    // isn't clipped by the notch.
     statusBarStyle: 'black-translucent',
-    title: 'Jevi Ops',
+    title: 'Jerad Ops',
   },
   formatDetection: {
     telephone: false,
@@ -38,6 +37,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
+  // Linen canvas (Addendum 10 §4) — the browser/PWA chrome matches the body.
   themeColor: '#F6F2EA',
   width: 'device-width',
   initialScale: 1,

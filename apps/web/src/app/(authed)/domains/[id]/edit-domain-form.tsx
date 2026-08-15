@@ -15,6 +15,11 @@ interface InitialValues {
   description: string;
   fruit_definition: string;
   active: boolean;
+  stale_enabled: boolean;
+  stale_days: number | null;
+  // True when a cadence rule already tracks staleness (Observations owns it),
+  // so the Attention stale control below is informational only.
+  cadence_tracked: boolean;
 }
 
 export function EditDomainForm({ initial }: { initial: InitialValues }) {
@@ -68,6 +73,40 @@ export function EditDomainForm({ initial }: { initial: InitialValues }) {
         />
         Active (uncheck to hide this domain from lists and observations)
       </label>
+
+      {/* Attention staleness (Addendum 06). Skipped when a cadence rule already
+          tracks the domain — Observations owns those. */}
+      <div className="border-t border-line pt-4 flex flex-col gap-2">
+        <span className="eyebrow block">Attention staleness</span>
+        <label className="flex items-center gap-2 font-sans text-[13px] text-ink-2 cursor-pointer">
+          <input
+            type="checkbox"
+            name="stale_enabled"
+            defaultChecked={initial.stale_enabled}
+            className="accent-accent"
+          />
+          Flag in Attention when nothing ships for a while
+        </label>
+        <label className="flex items-center gap-2 font-sans text-[13px] text-ink-2">
+          Stale after
+          <input
+            type="number"
+            name="stale_days"
+            min={1}
+            defaultValue={initial.stale_days ?? 21}
+            className="w-20 bg-transparent border-b border-line focus:border-ink-2 focus:outline-none py-1 font-sans text-[14px] text-ink text-center"
+          />
+          days
+        </label>
+        {initial.cadence_tracked && (
+          <p className="font-sans text-[12px] text-ink-3 leading-relaxed">
+            A cadence rule already tracks this domain, so Observations surfaces
+            its staleness (see the cadence editor below). Attention skips it to
+            avoid double-flagging — these settings apply only if you remove that
+            rule.
+          </p>
+        )}
+      </div>
 
       {display && (
         <div

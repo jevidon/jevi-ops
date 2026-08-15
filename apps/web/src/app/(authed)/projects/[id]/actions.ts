@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { api, ApiError } from '@/lib/api';
-import type { Project } from '@jevi-ops/shared';
+import type { Project } from '@jerad-ops/shared';
 
 export async function setProjectColorAction(formData: FormData) {
   const projectId = String(formData.get('projectId') ?? '');

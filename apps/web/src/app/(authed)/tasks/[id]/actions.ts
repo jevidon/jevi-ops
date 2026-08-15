@@ -4,9 +4,35 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
 import { tasksApi, ApiError } from '@/lib/api';
-import { isRecurrencePattern } from '@jevi-ops/shared';
+import { isRecurrencePattern } from '@jerad-ops/shared';
 
 export type SaveResult = { ok: true } | { ok: false; error: string };
+
+// Complete / reopen a task from its detail page. Setting status='done' also
+// triggers the API's recurring-task rollover (open + advance due_date) when a
+// recurrence_rule is set. Void return so it can be a plain <form action>.
+// Revalidates /attention too so a completed task_due_soon item clears once the
+// engine next runs (and the badge count stays roughly in sync).
+export async function setTaskStatusAction(formData: FormData): Promise<void> {
+  const taskId = String(formData.get('taskId') ?? '');
+  const raw = String(formData.get('status') ?? '');
+  const next = raw === 'done' ? 'done' : raw === 'waiting' ? 'waiting' : 'open';
+  if (!taskId) return;
+  // Entering waiting carries an optional "waiting on" note; the API stamps
+  // waiting_since and clears both when leaving waiting (Addendum 08).
+  const payload: { status: 'open' | 'waiting' | 'done'; waiting_on?: string | null } = { status: next };
+  if (next === 'waiting') payload.waiting_on = String(formData.get('waiting_on') ?? '').trim() || null;
+  try {
+    await tasksApi.update(taskId, payload);
+  } catch {
+    /* best-effort; revalidate resyncs */
+  }
+  revalidatePath(`/tasks/${taskId}`);
+  revalidatePath('/tasks');
+  revalidatePath('/today');
+  revalidatePath('/attention');
+  revalidatePath('/work');
+}
 
 // Form schema — captures every field the shared TaskForm posts. The
 // `selection` field encodes either "domain:<uuid>" or "project:<uuid>";
@@ -19,8 +45,6 @@ const TaskFormSchema = z.object({
   due_time: z.string(),
   priority: z.coerce.number().int().min(1).max(4),
   selection: z.string(),
-  // Optional — the form only renders the picker when the selected project
-  // has milestones, so the field may be absent entirely.
   milestone_id: z.string(),
   content_item_id: z.string(),
   // Single-offset reminder picker on the form. Multi-offset reminders
@@ -75,6 +99,10 @@ function toApiPayload(parsed: z.infer<typeof TaskFormSchema>) {
     ? parsed.recurrence_rule
     : null;
   const { domain_id, project_id } = decodeSelection(parsed.selection);
+  // A milestone only makes sense inside a project. Sent explicitly (null when
+  // General or when the task isn't in a project) so the API can clear a stale
+  // link on every save — the server re-validates project ownership.
+  const milestone_id = project_id ? (parsed.milestone_id || null) : null;
   return {
     title: parsed.title,
     notes: parsed.notes || null,
@@ -83,9 +111,7 @@ function toApiPayload(parsed: z.infer<typeof TaskFormSchema>) {
     priority: parsed.priority,
     domain_id,
     project_id,
-    // Server-validated: a milestone that doesn't belong to the task's
-    // project is parked back to null ("General") by the API.
-    milestone_id: parsed.milestone_id || null,
+    milestone_id,
     content_item_id: parsed.content_item_id || null,
     reminder_offsets,
     recurrence_rule,
@@ -116,6 +142,7 @@ export async function updateTaskAction(
   revalidatePath('/tasks');
   revalidatePath('/projects');
   revalidatePath('/content');
+  revalidatePath('/attention');
   revalidatePath(`/tasks/${taskId}`);
   return { ok: true };
 }
@@ -156,43 +183,6 @@ export async function createTaskFullAction(
   redirect(`/tasks/${createdId}`);
 }
 
-// Quick-add from the Subtasks ledger on a parent task's detail page.
-// The child inherits the parent's project (or direct domain) via hidden
-// fields so it lands in the same place without another resolver
-// round-trip.
-const SubtaskFormSchema = z.object({
-  parentId: z.string().uuid(),
-  title: z.string().trim().min(1),
-  projectId: z.string().uuid().optional(),
-  domainId: z.string().uuid().optional(),
-});
-
-export async function createSubtaskAction(formData: FormData): Promise<void> {
-  const parsed = SubtaskFormSchema.safeParse({
-    parentId: formData.get('parentId'),
-    title: formData.get('title'),
-    projectId: formData.get('projectId') || undefined,
-    domainId: formData.get('domainId') || undefined,
-  });
-  if (!parsed.success) return;
-  try {
-    await tasksApi.create({
-      title: parsed.data.title,
-      parent_task_id: parsed.data.parentId,
-      project_id: parsed.data.projectId ?? null,
-      domain_id: parsed.data.domainId ?? null,
-      priority: 4,
-      source: 'manual',
-    });
-  } catch {
-    /* best-effort; the page re-renders and reflects reality */
-  }
-  revalidatePath(`/tasks/${parsed.data.parentId}`);
-  revalidatePath('/tasks');
-  revalidatePath('/today');
-  revalidatePath('/projects');
-}
-
 export async function deleteTaskAction(formData: FormData): Promise<void> {
   const taskId = String(formData.get('taskId') ?? '');
   if (!taskId) return;
@@ -205,5 +195,6 @@ export async function deleteTaskAction(formData: FormData): Promise<void> {
   revalidatePath('/tasks');
   revalidatePath('/projects');
   revalidatePath('/content');
+  revalidatePath('/attention');
   redirect('/today');
 }

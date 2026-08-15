@@ -14,6 +14,15 @@ export function todayIsoDate(timezone: string, d: Date = new Date()): string {
   }).format(d);
 }
 
+// Tomorrow's date in the configured app timezone, yyyy-mm-dd. Mirrors the
+// API's addDays(todayInTz(tz), 1): the local date is anchored at UTC midnight
+// and formatted back in UTC, so a west-of-UTC zone can't roll the date back.
+export function tomorrowIsoDate(timezone: string, d: Date = new Date()): string {
+  const today = todayIsoDate(timezone, d);
+  const next = new Date(new Date(`${today}T00:00:00Z`).getTime() + 86_400_000);
+  return next.toISOString().slice(0, 10);
+}
+
 // True if the given ISO timestamp falls on today's date in the
 // configured timezone. Null/undefined returns false.
 export function isToday(timezone: string, isoTimestamp: string | null | undefined): boolean {

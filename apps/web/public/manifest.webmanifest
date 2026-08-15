@@ -1,6 +1,6 @@
 {
-  "name": "Jevi Ops",
-  "short_name": "Jevi Ops",
+  "name": "Jerad Ops",
+  "short_name": "Jerad Ops",
   "description": "Personal Operations Dashboard",
   "start_url": "/today",
   "scope": "/",
@@ -9,6 +9,14 @@
   "background_color": "#F6F2EA",
   "theme_color": "#F6F2EA",
   "categories": ["productivity"],
+  "shortcuts": [
+    {
+      "name": "Work",
+      "short_name": "Work",
+      "description": "Where everything stands — projects, domains, content",
+      "url": "/work"
+    }
+  ],
   "icons": [
     {
       "src": "/icon-192.png",

@@ -5,14 +5,20 @@ import {
   notificationsApi,
   routinesApi,
   tasksApi,
+  attentionApi,
+  focusApi,
   ApiError,
   type BriefingPayload,
   type ResurfacingItem,
   type RoutineListItem,
+  type AttentionItem,
 } from '@/lib/api';
-import type { Task } from '@jevi-ops/shared';
-import { getAppTimezone } from '@/lib/app-settings';
+import { AttentionItemRow } from '@/components/attention/AttentionItemRow';
+import type { Task } from '@jerad-ops/shared';
+import { getAppTimezone, getFeatureFlag } from '@/lib/app-settings';
 import { todayIsoDate } from '@/lib/today';
+import { Pill } from '@/components/Pill';
+import { silenceUrgency, silenceLabel } from '@/lib/silence';
 import { BriefLineRow } from './brief-line';
 import { RoutinesTodayList } from '@/app/(authed)/routines/routines-today-list';
 import { TaskItem } from '@/components/TaskItem';
@@ -20,35 +26,28 @@ import {
   getResurfacingSeen,
   skipResurfacingAction,
   resetResurfacingAction,
+  logCheckInAction,
 } from './actions';
 
-// The Briefing — editorial home screen (Jun 2026 redesign).
+// The Briefing — editorial home screen (v2 redesign, Jul 2026).
 //
-// Lead with state, not a checklist. The page reads like a newspaper:
-// masthead → commitments anchor line → Inbox triage (when active) → "In
-// brief" lines (one per slipping domain, with a fact and a routing label)
-// → resurfaced pull-quote → today's events + "Doing today" + "Routines
-// today" strips → capture chips.
-//
-// Tone is strict: facts only. "23 days since a journal entry." never
-// "you should journal." Discomfort comes from size and prominence of
-// facts, never from alert colors or nudge copy.
+// Lead with state, not a checklist. Masthead carries a derived summary pillrow
+// (overdue · open · waiting · routines). Two columns: a ledger left (Needs a
+// move slip cards → Silent clients → Attention → Reflection → Latest quote) and
+// an ambient, sticky rail right (events · Doing · Routines). Everything the
+// Addendum-09 route surfaced survives — Focus line, Inbox triage, Reflection,
+// Latest quote. "Silent clients" is the company_silent attention rule pulled
+// into its own section (so it isn't shown twice), with an inline Log check-in.
 
-function mastheadDate(tz: string): { day: string; meta: string } {
+const SILENT_CAP = 6;
+
+function mastheadDate(tz: string): string {
   const d = new Date();
-  const day = d.toLocaleDateString('en-US', {
-    timeZone: tz,
-    weekday: 'long',
-    month: 'long',
-    day: 'numeric',
-  });
-  // Editorial "WEEK 26" style dateline. ISO week-of-year not in
-  // Intl.DateTimeFormat — compute manually using the standard ISO formula.
   const isoWeek = computeIsoWeek(d, tz);
-  const meta = d
-    .toLocaleDateString('en-US', { timeZone: tz, weekday: 'short', month: 'short', day: '2-digit' })
-    .toUpperCase() + ` · WEEK ${isoWeek}`;
-  return { day, meta };
+  return (
+    d.toLocaleDateString('en-US', { timeZone: tz, weekday: 'short', month: 'short', day: '2-digit' }).toUpperCase()
+    + ` · WEEK ${isoWeek}`
+  );
 }
 
 function computeIsoWeek(now: Date, tz: string): number {
@@ -56,39 +55,71 @@ function computeIsoWeek(now: Date, tz: string): number {
     timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
   }).format(now);
   const d = new Date(isoDate + 'T00:00:00Z');
-  // Standard ISO week computation per Wikipedia.
   d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
   const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
   return Math.ceil(((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
 }
 
+// Days-silent parsed out of the company_silent detail ("No conversation in N
+// days" | "No conversation logged yet") — feeds the shared silence pill.
+function silentDays(detail: string | null): number | null {
+  if (!detail) return null;
+  const m = detail.match(/(\d+)\s*day/);
+  return m ? Number(m[1]) : null;
+}
+
 export default async function TodayPage() {
   const tz = await getAppTimezone();
   const today = todayIsoDate(tz);
+  const routinesEnabled = await getFeatureFlag('routines_module_enabled');
   let briefing: BriefingPayload | null = null;
   let resurface: ResurfacingItem | null = null;
   let routines: RoutineListItem[] = [];
   let unreadCount = 0;
   let errorMessage: string | null = null;
 
-  // Read the "skipped today" cookie before kicking off the resurfacing
-  // fetch so the API can filter those IDs from the pool. Awaiting one
-  // small cookie read before the parallel fan-out is cheaper than re-
-  // architecting around a second round trip.
   const resurfacingSkip = await getResurfacingSeen();
 
   let allTasks: Task[] = [];
   let resurfaceExhausted = false;
-  const [briefingRes, resurfaceRes, countRes, routinesRes, tasksRes] = await Promise.allSettled([
+  let attentionItems: AttentionItem[] = [];
+  let silentClients: AttentionItem[] = [];
+  let attentionActiveCount = 0;
+  let focus: { href: string; title: string; note: string | null } | null = null;
+
+  const [briefingRes, resurfaceRes, countRes, routinesRes, tasksRes, attentionRes, attentionCountRes, focusRes] = await Promise.allSettled([
     briefingApi.today(),
     libraryApi.resurfacing({ skip: resurfacingSkip }),
     notificationsApi.count(),
     routinesApi.list(),
     tasksApi.list(),
+    attentionApi.list({ status: 'active', limit: 50 }),
+    attentionApi.count(),
+    focusApi.get(today),
   ]);
   if (tasksRes.status === 'fulfilled') allTasks = tasksRes.value.tasks;
+  if (focusRes.status === 'fulfilled' && focusRes.value.focus) {
+    const f = focusRes.value.focus;
+    focus = {
+      href: f.target_type === 'project' ? `/projects/${f.target_id}` : `/content/${f.target_id}`,
+      title: f.title,
+      note: f.note ?? null,
+    };
+  }
+  if (attentionCountRes.status === 'fulfilled') attentionActiveCount = attentionCountRes.value.active;
+  if (attentionRes.status === 'fulfilled') {
+    const active = attentionRes.value.items;
+    // Silent clients (company_silent) get their own section below — pull them
+    // out of the general Attention list so they're never shown twice.
+    silentClients = active.filter((i) => i.rule_type === 'company_silent').slice(0, SILENT_CAP);
+    attentionItems = active
+      .filter((i) => i.rule_type !== 'company_silent')
+      .filter((i) => i.urgency === 'high' || i.urgency === 'normal')
+      .slice(0, 5);
+  }
   if (resurfaceRes.status === 'fulfilled') {
     resurfaceExhausted = Boolean(resurfaceRes.value.exhausted);
+    resurface = resurfaceRes.value.item;
   }
   if (briefingRes.status === 'fulfilled') {
     briefing = briefingRes.value;
@@ -96,20 +127,12 @@ export default async function TodayPage() {
     const err = briefingRes.reason;
     errorMessage = err instanceof ApiError ? `API ${err.status}` : (err as Error).message;
   }
-  if (resurfaceRes.status === 'fulfilled') resurface = resurfaceRes.value.item;
   if (countRes.status === 'fulfilled') unreadCount = countRes.value.unread;
   if (routinesRes.status === 'fulfilled') {
-    // Only show active, non-archived routines on the Briefing — the
-    // /routines page is the full management view.
     routines = routinesRes.value.routines.filter((r) => r.active && !r.archived_at);
   }
 
-  // Today's actionable tasks for the right rail. Order:
-  //   1. Top-3 starred for today (user's explicit picks come first)
-  //   2. Overdue (oldest first)
-  //   3. Due today (newest created first)
-  // Anything else (no date, future, completed) stays on /tasks — the
-  // rail is "what I'm working on right now," not the full list.
+  // Right-rail actionable tasks: Top-3 for today, then overdue, then due today.
   const openTasks = allTasks.filter((t) => t.status === 'open');
   const top3 = openTasks
     .filter((t) => t.top3_for_date === today)
@@ -121,52 +144,63 @@ export default async function TodayPage() {
   const dueToday = openTasks
     .filter((t) => !top3Ids.has(t.id) && t.due_date === today)
     .sort((a, b) => b.created_at.localeCompare(a.created_at));
-  // Cap at 10 in the rail so a runaway todo list doesn't dominate the
-  // viewport. Anything past the cap surfaces via the "+ N more" link.
   const RAIL_CAP = 10;
   const railTasksAll = [...top3, ...overdue, ...dueToday];
   const railTasks = railTasksAll.slice(0, RAIL_CAP);
   const railOverflow = Math.max(0, railTasksAll.length - RAIL_CAP);
-  const emptyTop3Slots = Math.max(0, 3 - top3.length);
-  // Subtasks earn a rail slot like any other due task, but wear a
-  // "↳ parent" crumb so they carry their context.
-  const titleById = new Map(allTasks.map((t) => [t.id, t.title]));
-  const crumbFor = (t: (typeof railTasks)[number]) =>
-    t.parent_task_id ? (titleById.get(t.parent_task_id) ?? null) : null;
 
-  const { day, meta } = mastheadDate(tz);
+  // Masthead summary pills — all derived, no backend change.
+  const overdueCount = briefing?.doing_today.overdue_count ?? 0;
+  const openCount = briefing?.doing_today.open_count ?? openTasks.length;
+  const waitingCount = allTasks.filter((t) => t.status === 'waiting').length;
+  const rDone = briefing?.routines_today.done ?? routines.filter((r) => r.stats.done_today).length;
+  const rTotal = briefing?.routines_today.total ?? routines.length;
 
-  // The commitments anchor: "4 events today — next 10:30 X. 3 tasks set."
-  // Built from briefing.events + doing_today.open_count.
+  const meta = mastheadDate(tz);
   const anchorLine = buildAnchorLine(briefing);
 
   return (
     <div className="pb-32">
       {/* ─── Masthead ──────────────────────────────────────────────── */}
-      <div className="px-5 lg:px-0 pt-5">
-        <div className="flex items-baseline justify-between gap-3">
+      <div className="px-5 lg:px-0 pt-6">
+        <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
           <div>
-            <div className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3 mb-2">
+            <div className="eyebrow mb-2">
               {meta}
+              {unreadCount > 0 && (
+                <>
+                  {' · '}
+                  <Link href="/notifications" className="text-accent hover:underline">
+                    {unreadCount} unread
+                  </Link>
+                </>
+              )}
             </div>
-            <h1 className="font-serif text-[26px] font-semibold leading-none tracking-[-0.5px] text-ink">
-              The Briefing
-            </h1>
+            <h1 className="font-serif text-[40px] font-medium leading-[1.02] tracking-[-0.022em] text-ink">The Briefing</h1>
           </div>
-          <Link
-            href="/notifications"
-            aria-label={`${unreadCount} unread notifications`}
-            className="flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-wider text-ink-3 hover:text-ink-2 transition-colors"
-          >
-            {unreadCount > 0 && <span className="h-2 w-2 rounded-full bg-accent" aria-hidden />}
-            <span>{unreadCount}</span>
-          </Link>
-        </div>
-        <div className="mt-1 font-mono text-[10px] uppercase tracking-wider text-ink-3">
-          {day}
+          <div className="flex items-center gap-2 pb-1 flex-wrap">
+            {overdueCount > 0 && <Pill state="over">{overdueCount} overdue</Pill>}
+            {openCount > 0 && <Pill state="due">{openCount} open</Pill>}
+            {waitingCount > 0 && <Pill state="quiet">{waitingCount} waiting</Pill>}
+            {routinesEnabled && rTotal > 0 && (
+              <Pill state={rDone >= rTotal ? 'ok' : 'quiet'}>Routines {rDone}/{rTotal}</Pill>
+            )}
+          </div>
         </div>
       </div>
-      <div className="hairline-strong mt-3 mx-5 lg:mx-0" />
+      <div className="hairline-strong mt-4 mx-5 lg:mx-0" />
+
+      {/* ─── Today's focus (Addendum 09) ────────────────────────────── */}
+      {focus && (
+        <div className="px-5 lg:px-0 mt-4">
+          <Link href={focus.href} className="group inline-flex items-baseline gap-2 hover:text-accent transition-colors">
+            <span className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3">Focus</span>
+            <span className="font-sans text-[15px] text-ink group-hover:text-accent transition-colors">{focus.title}</span>
+            <span className="font-mono text-[11px] text-ink-3 group-hover:text-accent transition-colors">→</span>
+          </Link>
+          {focus.note && <div className="mt-0.5 font-sans text-[12px] text-ink-3">{focus.note}</div>}
+        </div>
+      )}
 
       {errorMessage && (
         <div className="px-5 lg:px-0 mt-6 font-sans text-[13px] text-ink-3">
@@ -174,112 +208,116 @@ export default async function TodayPage() {
         </div>
       )}
 
-      {/* ─── Commitments anchor line ─────────────────────────────── */}
       {anchorLine && (
-        <div className="px-5 lg:px-0 mt-3 font-sans text-[12px] text-ink-2 leading-snug">
-          {anchorLine}
-        </div>
+        <div className="px-5 lg:px-0 mt-3 font-sans text-[12px] text-ink-2 leading-snug">{anchorLine}</div>
       )}
 
-      {/* ─── Inbox triage strip ──────────────────────────────────── */}
+      {/* ─── Inbox triage ────────────────────────────────────────── */}
       {briefing && briefing.inbox_triage_count > 0 && (
         <Link
           href="/inbox"
           className="mt-5 mx-5 lg:mx-0 flex items-baseline justify-between gap-3 border-l-2 border-accent pl-3 py-2 hover:bg-accent/[0.04] transition-colors"
         >
           <div>
-            <div className="font-mono text-[10px] uppercase tracking-[0.08em] text-accent">
-              Inbox
-            </div>
+            <div className="font-mono text-[10px] uppercase tracking-[0.08em] text-accent">Inbox</div>
             <div className="font-sans text-[13px] text-ink mt-0.5">
               {briefing.inbox_triage_count}{' '}
               {briefing.inbox_triage_count === 1 ? 'task needs' : 'tasks need'} a home.
             </div>
           </div>
-          <span className="font-mono text-[10px] uppercase tracking-wider text-accent shrink-0">
-            Triage →
-          </span>
+          <span className="font-mono text-[10px] uppercase tracking-wider text-accent shrink-0">Triage →</span>
         </Link>
       )}
 
-      {/* ─── Two-column grid on desktop ─────────────────────────────
-          Mobile keeps the original vertical flow (single column).
-          Desktop splits into editorial (in brief + resurfaced) on the
-          left and commitments + routines on the right so the whole
-          briefing fits in one viewport without scrolling. Inbox above
-          and Capture below stay full-width. Matches the design brief's
-          BriefingDesktop pattern, with routines added to the right rail
-          per the daily check-off use case. */}
-      <div className="mt-7 lg:grid lg:grid-cols-[1.5fr_1fr] lg:gap-x-10 lg:items-start">
-        {/* ─── Left: editorial body ───────────────────────────── */}
-        <div>
-          {/* In brief */}
+      {/* ─── Two columns ────────────────────────────────────────────
+          Left ledger (flexible), right ambient rail (fixed 348px, sticky). */}
+      <div className="mt-7 lg:grid lg:grid-cols-[minmax(0,1fr)_348px] lg:gap-x-10 lg:items-start">
+        {/* ─── Left ───────────────────────────────────────────── */}
+        <div className="min-w-0">
+          {/* Needs a move — cadence slip cards */}
           <section className="px-5 lg:px-0">
-            <div className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3 mb-3">
-              In brief
+            <div className="flex items-baseline justify-between mb-3">
+              <div className="eyebrow">
+                Needs a move{briefing && briefing.brief_lines.length > 0 ? ` · ${briefing.brief_lines.length}` : ''}
+              </div>
+              <Link href="/work" className="font-mono text-[10px] uppercase tracking-wider text-ink-3 hover:text-accent transition-colors">
+                All work →
+              </Link>
             </div>
             {briefing && briefing.brief_lines.length === 0 ? (
               <p className="font-serif text-[15px] text-ink-2 italic leading-relaxed">
-                Nothing past cadence. Every domain is within its rhythm —
-                rare and worth noticing.
+                Nothing past cadence. Every domain is within its rhythm — rare and worth noticing.
               </p>
             ) : (
-              briefing?.brief_lines.map((line) => (
-                <BriefLineRow key={line.id} line={line} />
-              ))
+              <div className="flex flex-col gap-3">
+                {briefing?.brief_lines.map((line) => <BriefLineRow key={line.id} line={line} />)}
+              </div>
             )}
           </section>
 
-          {/* Resurfaced */}
+          {/* Silent clients — company_silent, pulled out of Attention */}
+          {silentClients.length > 0 && (
+            <section className="mt-9 px-5 lg:px-0">
+              <div className="flex items-baseline justify-between mb-2">
+                <div className="eyebrow">Silent clients · {silentClients.length}</div>
+                <Link href="/companies" className="font-mono text-[10px] uppercase tracking-wider text-ink-3 hover:text-accent transition-colors">
+                  Companies →
+                </Link>
+              </div>
+              <ul>
+                {silentClients.map((c) => (
+                  <SilentClientRow key={c.id} item={c} />
+                ))}
+              </ul>
+            </section>
+          )}
+
+          {/* Attention — remaining rules (waiting / content / ideas …) */}
+          {attentionItems.length > 0 && (
+            <section className="mt-9 px-5 lg:px-0">
+              <div className="flex items-baseline justify-between mb-2">
+                <div className="eyebrow">
+                  Attention{attentionActiveCount > 0 ? ` · ${attentionActiveCount} active` : ''}
+                </div>
+                {attentionActiveCount > attentionItems.length && (
+                  <Link href="/attention" className="font-mono text-[10px] uppercase tracking-wider text-ink-3 hover:text-accent transition-colors">
+                    See all →
+                  </Link>
+                )}
+              </div>
+              <ul>
+                {attentionItems.map((it) => <AttentionItemRow key={it.id} item={it} />)}
+              </ul>
+            </section>
+          )}
+
+          {/* Reflection — resurfacing pull-quote */}
           {(resurface || resurfaceExhausted) && (
             <section className="mt-9 mx-5 lg:mx-0 bg-surface border-y border-line py-6 px-5">
-              <div className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3 mb-3">
-                Resurfaced
-              </div>
-
+              <div className="eyebrow mb-3">Reflection</div>
               {resurface ? (
                 <>
                   <blockquote className="font-serif text-[19px] italic leading-snug text-ink">
                     &ldquo;{resurface.excerpt}&rdquo;
                   </blockquote>
                   {resurface.source && (
-                    <div className="mt-3 font-mono text-[11px] uppercase tracking-wider text-ink-3">
-                      — {resurface.source}
-                    </div>
+                    <div className="mt-3 font-mono text-[11px] uppercase tracking-wider text-ink-3">— {resurface.source}</div>
                   )}
-
-                  {/* Actions row — Open / Next / Reset.
-                      Next stamps the current id into a cookie so the
-                      picker skips it on the next render. Reset clears
-                      the whole "seen today" list — useful if the user
-                      wants to start the rotation over without waiting
-                      for midnight. Reset only renders when at least one
-                      item has been skipped. */}
                   <div className="mt-3 flex items-center gap-4 flex-wrap">
                     {resurface.href && (
-                      <Link
-                        href={resurface.href}
-                        className="font-mono text-[10px] uppercase tracking-wider text-accent hover:text-accent-ink transition-colors"
-                      >
+                      <Link href={resurface.href} className="font-mono text-[10px] uppercase tracking-wider text-accent hover:text-accent-ink transition-colors">
                         Open in {resurface.kind === 'quote' ? 'Quotes' : 'Journal'} →
                       </Link>
                     )}
                     <form action={skipResurfacingAction}>
                       <input type="hidden" name="id" value={resurface.id} />
-                      <button
-                        type="submit"
-                        className="font-mono text-[10px] uppercase tracking-wider text-ink-3 hover:text-accent transition-colors"
-                      >
+                      <button type="submit" className="font-mono text-[10px] uppercase tracking-wider text-ink-3 hover:text-accent transition-colors">
                         Next →
                       </button>
                     </form>
                     {resurfacingSkip.length > 0 && (
                       <form action={resetResurfacingAction}>
-                        <button
-                          type="submit"
-                          className="font-mono text-[10px] uppercase tracking-wider text-ink-3 hover:text-accent transition-colors"
-                          title={`${resurfacingSkip.length} skipped today`}
-                        >
+                        <button type="submit" className="font-mono text-[10px] uppercase tracking-wider text-ink-3 hover:text-accent transition-colors" title={`${resurfacingSkip.length} skipped today`}>
                           Reset
                         </button>
                       </form>
@@ -287,20 +325,12 @@ export default async function TodayPage() {
                   </div>
                 </>
               ) : (
-                // Exhausted state — user has cycled past every weighted
-                // item in the pool today. Same card frame so the page
-                // doesn't shift; copy invites either "wait for tomorrow"
-                // or an explicit Reset.
                 <>
                   <p className="font-serif text-[17px] italic text-ink-2 leading-snug">
-                    You&rsquo;ve seen every item in today&rsquo;s rotation.
-                    Tomorrow&rsquo;s pick will come from the same pool, fresh.
+                    You&rsquo;ve seen every item in today&rsquo;s rotation. Tomorrow&rsquo;s pick will come from the same pool, fresh.
                   </p>
                   <form action={resetResurfacingAction} className="mt-3">
-                    <button
-                      type="submit"
-                      className="font-mono text-[10px] uppercase tracking-wider text-accent hover:text-accent-ink transition-colors"
-                    >
+                    <button type="submit" className="font-mono text-[10px] uppercase tracking-wider text-accent hover:text-accent-ink transition-colors">
                       Reset rotation now →
                     </button>
                   </form>
@@ -309,41 +339,24 @@ export default async function TodayPage() {
             </section>
           )}
 
-          {/* Latest quote — newest by created_at, sticks until a newer
-              one shows up. Distinct from Resurfaced (which date-seeded-
-              rotates daily). When the two would land on the same item
-              (e.g. you just added the only quote in your library), we
-              hide this section to avoid showing it twice in the same
-              column. */}
+          {/* Latest quote */}
           {briefing?.latest_quote && briefing.latest_quote.id !== resurface?.id && (
             <section className="mt-6 mx-5 lg:mx-0 border border-line py-5 px-5">
-              <div className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3 mb-3">
-                Latest quote
-              </div>
+              <div className="eyebrow mb-3">Latest quote</div>
               <blockquote className="font-serif text-[17px] italic leading-snug text-ink">
                 &ldquo;{briefing.latest_quote.text}&rdquo;
               </blockquote>
               {(briefing.latest_quote.source_author || briefing.latest_quote.source_reference) && (
                 <div className="mt-3 font-mono text-[11px] uppercase tracking-wider text-ink-3">
-                  — {[briefing.latest_quote.source_author, briefing.latest_quote.source_reference]
-                      .filter(Boolean)
-                      .join(' · ')}
+                  — {[briefing.latest_quote.source_author, briefing.latest_quote.source_reference].filter(Boolean).join(' · ')}
                 </div>
               )}
               <div className="mt-3 flex items-center gap-4 flex-wrap">
-                <Link
-                  href={briefing.latest_quote.href}
-                  className="font-mono text-[10px] uppercase tracking-wider text-accent hover:text-accent-ink transition-colors"
-                >
+                <Link href={briefing.latest_quote.href} className="font-mono text-[10px] uppercase tracking-wider text-accent hover:text-accent-ink transition-colors">
                   Open quote →
                 </Link>
                 {briefing.latest_quote.source_url && (
-                  <a
-                    href={briefing.latest_quote.source_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="font-mono text-[10px] uppercase tracking-wider text-ink-3 hover:text-accent transition-colors"
-                  >
+                  <a href={briefing.latest_quote.source_url} target="_blank" rel="noopener noreferrer" className="font-mono text-[10px] uppercase tracking-wider text-ink-3 hover:text-accent transition-colors">
                     Open source ↗
                   </a>
                 )}
@@ -352,107 +365,65 @@ export default async function TodayPage() {
           )}
         </div>
 
-        {/* ─── Right: commitments rail ────────────────────────── */}
-        <div className="mt-9 lg:mt-0">
-          {/* Today: events. Whole section is a doorway to /calendar so
-              tapping the next-event row jumps straight to the day view. */}
+        {/* ─── Right: ambient rail (sticky) ───────────────────── */}
+        <div className="mt-9 lg:mt-0 lg:sticky lg:top-[76px]">
           {briefing && briefing.events_today_count > 0 && (
             <section className="px-5 lg:px-0">
               <div className="flex items-baseline justify-between mb-3">
-                <div className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3">
-                  Today · {briefing.events_today_count}{' '}
-                  {briefing.events_today_count === 1 ? 'event' : 'events'}
+                <div className="eyebrow">
+                  Today · {briefing.events_today_count} {briefing.events_today_count === 1 ? 'event' : 'events'}
                 </div>
-                <Link
-                  href="/calendar"
-                  className="font-mono text-[10px] uppercase tracking-wider text-ink-3 hover:text-accent transition-colors"
-                >
+                <Link href="/calendar" className="font-mono text-[10px] uppercase tracking-wider text-ink-3 hover:text-accent transition-colors">
                   Open →
                 </Link>
               </div>
               {briefing.next_event && (
-                <Link
-                  href="/calendar"
-                  className="flex items-baseline gap-4 py-1.5 border-b border-line hover:opacity-80 transition-opacity"
-                >
-                  <span className="font-mono text-[12px] text-ink tabular-nums shrink-0 w-12">
-                    {briefing.next_event.time}
-                  </span>
-                  <span className="font-sans text-[13px] text-ink-2 truncate">
-                    {briefing.next_event.title}
-                  </span>
+                <Link href="/calendar" className="flex items-baseline gap-4 py-1.5 border-b border-line hover:opacity-80 transition-opacity">
+                  <span className="font-mono text-[12px] text-ink tabular-nums shrink-0 w-12">{briefing.next_event.time}</span>
+                  <span className="font-sans text-[13px] text-ink-2 truncate">{briefing.next_event.title}</span>
                 </Link>
               )}
               {briefing.events_today_count > 1 && (
-                <Link
-                  href="/calendar"
-                  className="mt-2 inline-block font-mono text-[10px] uppercase tracking-wider text-ink-3 hover:text-accent transition-colors"
-                >
+                <Link href="/calendar" className="mt-2 inline-block font-mono text-[10px] uppercase tracking-wider text-ink-3 hover:text-accent transition-colors">
                   + {briefing.events_today_count - 1} more →
                 </Link>
               )}
             </section>
           )}
 
-          {/* Doing today — real, interactive task rows so the user can
-              check things off and re-pick Top 3 without leaving Today.
-              Rendered as a list of TaskItems (checkbox + Top-3 star +
-              meta). Empty Top-3 slots render as placeholder rows so the
-              user remembers there's room to pin three for the day. */}
-          {(railTasks.length > 0 || briefing?.doing_today.open_count) && (
+          {(railTasks.length > 0 || (briefing?.doing_today.open_count ?? 0) > 0) && (
             <section className="px-5 lg:px-0 mt-6">
               <div className="flex items-baseline justify-between mb-1">
-                <div className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3">
+                <div className="eyebrow">
                   Doing
                   {briefing && (
                     <>
-                      {' · '}
-                      {briefing.doing_today.open_count} open
+                      {' · '}{briefing.doing_today.open_count} open
                       {briefing.doing_today.overdue_count > 0 && (
-                        <span className="text-accent ml-1">
-                          · {briefing.doing_today.overdue_count} overdue
-                        </span>
+                        <span className="text-accent ml-1">· {briefing.doing_today.overdue_count} overdue</span>
                       )}
                     </>
                   )}
                 </div>
-                <Link
-                  href="/tasks"
-                  className="font-mono text-[10px] uppercase tracking-wider text-ink-3 hover:text-accent transition-colors"
-                >
+                <Link href="/tasks" className="font-mono text-[10px] uppercase tracking-wider text-ink-3 hover:text-accent transition-colors">
                   All tasks →
                 </Link>
               </div>
-
-              {top3.length === 0 && emptyTop3Slots > 0 && (
-                <div className="mt-1 mb-2 font-mono text-[10px] uppercase tracking-wider text-ink-3">
-                  Top 3 for today
-                </div>
-              )}
-
               <div className="mt-1">
                 {railTasks.length === 0 ? (
                   <p className="font-sans text-[13px] text-ink-3 italic py-2">
-                    No tasks overdue or due today. Star one below to pin it
-                    as Top 3.
+                    No tasks overdue or due today. Star one below to pin it as Top 3.
                   </p>
                 ) : (
-                  railTasks.map((t) => <TaskItem key={t.id} task={t} parentCrumb={crumbFor(t)} />)
+                  railTasks.map((t) => <TaskItem key={t.id} task={t} />)
                 )}
-                {/* Render empty placeholders so the missing-Top-3 slots
-                    visually invite the user to pick. Only show when
-                    fewer than 3 are pinned AND there are other tasks
-                    on screen — otherwise the list reads as cluttered. */}
                 {top3.length < 3 && railTasks.length > 0 && (
                   <p className="mt-2 font-mono text-[10px] uppercase tracking-wider text-ink-3">
                     {3 - top3.length} Top 3 {3 - top3.length === 1 ? 'slot' : 'slots'} open · tap ☆ on a row to pin
                   </p>
                 )}
                 {railOverflow > 0 && (
-                  <Link
-                    href="/tasks"
-                    className="mt-2 inline-block font-mono text-[10px] uppercase tracking-wider text-ink-3 hover:text-accent transition-colors"
-                  >
+                  <Link href="/tasks" className="mt-2 inline-block font-mono text-[10px] uppercase tracking-wider text-ink-3 hover:text-accent transition-colors">
                     + {railOverflow} more →
                   </Link>
                 )}
@@ -460,42 +431,55 @@ export default async function TodayPage() {
             </section>
           )}
 
-          {/* Routines (inline check-off). Header renders even when the
-              fetch returns empty so a silent failure (auth, network,
-              server) is told apart from a real empty state. */}
-          <section className="px-5 lg:px-0 mt-7">
-            <div className="flex items-baseline justify-between mb-3">
-              <div className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3">
-                Routines · {briefing?.routines_today.done ?? 0} of{' '}
-                {briefing?.routines_today.total ?? routines.length} today
+          {routinesEnabled && (
+            <section className="px-5 lg:px-0 mt-7">
+              <div className="flex items-baseline justify-between mb-3">
+                <div className="eyebrow">Routines · {rDone} of {rTotal} today</div>
+                <Link href="/routines" className="font-mono text-[10px] uppercase tracking-wider text-ink-3 hover:text-accent transition-colors">
+                  All →
+                </Link>
               </div>
-              <Link
-                href="/routines"
-                className="font-mono text-[10px] uppercase tracking-wider text-ink-3 hover:text-accent transition-colors"
-              >
-                All →
-              </Link>
-            </div>
-            {routines.length > 0 ? (
-              <RoutinesTodayList routines={routines} compact today={today} />
-            ) : (
-              <Link
-                href="/routines"
-                className="block font-sans text-[13px] text-ink-3 italic hover:text-ink-2 transition-colors"
-              >
-                {routinesRes.status === 'rejected'
-                  ? 'Couldn’t load routines — open /routines to check.'
-                  : 'No active routines. Add one →'}
-              </Link>
-            )}
-          </section>
+              {routines.length > 0 ? (
+                <RoutinesTodayList routines={routines} compact today={today} />
+              ) : (
+                <Link href="/routines" className="block font-sans text-[13px] text-ink-3 italic hover:text-ink-2 transition-colors">
+                  {routinesRes.status === 'rejected'
+                    ? 'Couldn’t load routines — open /routines to check.'
+                    : 'No active routines. Add one →'}
+                </Link>
+              )}
+            </section>
+          )}
         </div>
       </div>
 
-
-      {/* ─── Capture chips ───────────────────────────────────────── */}
       <CaptureChips />
     </div>
+  );
+}
+
+function SilentClientRow({ item }: { item: AttentionItem }) {
+  const name = item.title.replace(/^Silent client:\s*/i, '');
+  const days = silentDays(item.detail);
+  return (
+    <li className="flex items-center gap-3.5 py-3 border-b border-line">
+      <Link href={`/companies/${item.source_id}`} className="flex-1 min-w-0 group">
+        <div className="font-serif text-[15px] font-medium text-ink group-hover:text-accent transition-colors truncate">{name}</div>
+        {item.detail && <div className="mt-0.5 font-mono text-[11px] text-ink-3">{item.detail}</div>}
+      </Link>
+      {/* Every silent client is already past the rule's cadence; a never-
+          contacted one (days null) is the most urgent, not calm. */}
+      <Pill state={days == null ? 'over' : silenceUrgency(days)}>{silenceLabel(days)}</Pill>
+      <form action={logCheckInAction} className="shrink-0">
+        <input type="hidden" name="company_id" value={item.source_id} />
+        <button
+          type="submit"
+          className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-2 border border-line-strong rounded px-2.5 py-1.5 hover:border-ink-3 hover:text-ink transition-colors whitespace-nowrap"
+        >
+          Log check-in
+        </button>
+      </form>
+    </li>
   );
 }
 
@@ -505,17 +489,10 @@ function buildAnchorLine(briefing: BriefingPayload | null): React.ReactNode {
   const tasksOpen = briefing.doing_today.open_count;
   if (eventsCount === 0 && tasksOpen === 0) return null;
 
-  // Each clause is a Link so the user can tap the count to jump straight
-  // to the calendar or task list. Underline on hover is the editorial
-  // convention here — chip styling would feel too heavy in this row.
   const parts: React.ReactNode[] = [];
   if (eventsCount > 0) {
     parts.push(
-      <Link
-        key="ev"
-        href="/calendar"
-        className="hover:text-ink hover:underline underline-offset-2 transition-colors"
-      >
+      <Link key="ev" href="/calendar" className="hover:text-ink hover:underline underline-offset-2 transition-colors">
         {eventsCount} {eventsCount === 1 ? 'event' : 'events'} today
         {briefing.next_event && (
           <>
@@ -530,11 +507,7 @@ function buildAnchorLine(briefing: BriefingPayload | null): React.ReactNode {
   }
   if (tasksOpen > 0) {
     parts.push(
-      <Link
-        key="tk"
-        href="/tasks"
-        className="hover:text-ink hover:underline underline-offset-2 transition-colors"
-      >
+      <Link key="tk" href="/tasks" className="hover:text-ink hover:underline underline-offset-2 transition-colors">
         {' '}
         {tasksOpen} {tasksOpen === 1 ? 'task' : 'tasks'} open
         {briefing.doing_today.overdue_count > 0 && (
@@ -547,11 +520,6 @@ function buildAnchorLine(briefing: BriefingPayload | null): React.ReactNode {
   return parts;
 }
 
-// Capture chip strip — in-flow at the bottom of the Briefing (the
-// floating MicFAB occupies the bottom-right corner; a fixed strip would
-// collide). Each chip routes to a compose surface; voice handles the
-// same actions via the FAB. The full CaptureMenu bottom-sheet (per
-// Section 6 of the brief) is a later phase.
 function CaptureChips() {
   const chips = [
     { label: 'Journal', href: '/library/journal/new' },
@@ -561,22 +529,14 @@ function CaptureChips() {
   ];
   return (
     <section className="px-5 lg:px-0 mt-9">
-      <div className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3 mb-2">
-        Capture
-      </div>
+      <div className="eyebrow mb-2">Capture</div>
       <div className="flex items-center gap-2 flex-wrap">
         {chips.map((c) => (
-          <Link
-            key={c.label}
-            href={c.href}
-            className="font-sans text-[12px] font-medium text-ink-2 hover:text-ink px-3 py-1.5 border border-line whitespace-nowrap transition-colors"
-          >
+          <Link key={c.label} href={c.href} className="font-sans text-[12px] font-medium text-ink-2 hover:text-ink px-3 py-1.5 border border-line rounded whitespace-nowrap transition-colors">
             {c.label}
           </Link>
         ))}
-        <span className="font-mono text-[10px] uppercase tracking-wider text-ink-3 ml-1">
-          — or hold the mic.
-        </span>
+        <span className="font-mono text-[10px] uppercase tracking-wider text-ink-3 ml-1">— or hold the mic.</span>
       </div>
     </section>
   );

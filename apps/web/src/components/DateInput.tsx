@@ -81,10 +81,8 @@ export function DateInput({
 
   return (
     <div className="flex flex-col gap-1">
-      {/* Native picker — mobile only (the OS wheel/calendar is the best
-          UX there). Hidden on desktop: Safari renders an EMPTY date
-          input with today's date painted in the field, which reads as a
-          phantom due date. Value is always the normalized YYYY-MM-DD. */}
+      {/* Native picker — primary UX on mobile + Chrome/Firefox/modern
+          Safari. Value is always the normalized YYYY-MM-DD. */}
       <input
         type="date"
         value={normalized}
@@ -98,10 +96,11 @@ export function DateInput({
         disabled={disabled}
         aria-label={ariaLabel}
         title={title}
-        className={`${className ?? ''} lg:hidden`}
+        className={className}
       />
-      {/* Text input — the only field on desktop, typing fallback on
-          mobile. Permissive parser accepts a wide range of formats. */}
+      {/* Text fallback — for Safari desktop (no reliable picker in
+          PWA mode) and anyone who prefers typing. Permissive parser
+          accepts a wide range of formats. */}
       <input
         type="text"
         value={text}
@@ -115,7 +114,7 @@ export function DateInput({
         autoComplete="off"
         aria-label={ariaLabel ? `${ariaLabel} (type)` : 'type date'}
         title={title}
-        className={`${className ?? ''} text-[12px] opacity-70 focus:opacity-100 lg:text-[14px] lg:opacity-100`}
+        className={`${className ?? ''} text-[12px] opacity-70 focus:opacity-100`}
       />
       {/* Hidden field actually submitted to the form action — always
           the normalized YYYY-MM-DD (or blank). */}

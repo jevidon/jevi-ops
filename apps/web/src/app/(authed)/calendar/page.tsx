@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { calendarApi, tasksApi, ApiError, type CalendarEvent } from '@/lib/api';
 import { getAppTimezone } from '@/lib/app-settings';
-import type { Task } from '@jevi-ops/shared';
+import type { Task } from '@jerad-ops/shared';
 
 // /calendar — full event list, grouped by day. Tasks with a due_date are
 // interleaved into the same day groups so you see "what's happening today"

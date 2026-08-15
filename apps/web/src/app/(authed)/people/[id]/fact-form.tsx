@@ -5,14 +5,15 @@ import { addFactAction, type SaveResult } from './fact-actions';
 import { DateInput } from '@/components/DateInput';
 
 // Inline "+ add a fact" form on the person detail page. Fact type =
-// dropdown of birthday/anniversary/kid_name/etc.; value = freeform text;
-// optional date (used for birthday/anniversary recurrence + upcoming).
-// Recurring checkbox flips the DB flag so daily-summary scans can pick
-// up "X turns 40 next Tuesday".
+// dropdown of kid_name/shared/follow_up/other; value = freeform text.
+//
+// Birthday + anniversary are intentionally NOT here (Addendum 05): they're
+// promoted to real people.birthday / people.anniversary columns, set via
+// the "Edit person" form, because the Attention Engine queries those
+// columns directly. Keeping them out of Facts avoids two divergent stores
+// for the same date.
 
 const FACT_TYPES: Array<{ value: string; label: string }> = [
-  { value: 'birthday', label: 'Birthday' },
-  { value: 'anniversary', label: 'Anniversary' },
   { value: 'kid_name', label: 'Kid' },
   { value: 'shared', label: 'Shared interest' },
   { value: 'follow_up', label: 'Follow-up' },
@@ -40,7 +41,7 @@ export function FactForm({ personId }: { personId: string }) {
       <div className="flex flex-wrap gap-2">
         <select
           name="fact_type"
-          defaultValue="birthday"
+          defaultValue="kid_name"
           disabled={pending}
           className="bg-transparent border-b border-line focus:border-accent focus:outline-none py-1.5 font-sans text-[13px] text-ink"
         >
@@ -53,7 +54,7 @@ export function FactForm({ personId }: { personId: string }) {
           type="text"
           name="fact_value"
           required
-          placeholder="e.g. May 3, or 'Henry, age 4'"
+          placeholder="e.g. 'Henry, age 4'"
           disabled={pending}
           autoComplete="off"
           className="flex-1 min-w-[160px] bg-transparent border-b border-line focus:border-accent focus:outline-none py-1.5 font-sans text-[13px] text-ink placeholder:text-ink-3/60"

@@ -20,6 +20,7 @@ function readFields(formData: FormData): {
   engagement_type: 'project' | 'retainer';
   kind: 'project' | 'area';
   quoted_hours: number | null;
+  retainer_anchor_day: number | null;
   start_date: string | null;
   target_date: string | null;
   color: string | null;
@@ -47,11 +48,17 @@ function readFields(formData: FormData): {
   const quoted_hours = quotedRaw && !Number.isNaN(parseFloat(quotedRaw))
     ? parseFloat(quotedRaw)
     : null;
+  const anchorRaw = parseInt(String(formData.get('retainer_anchor_day') ?? '').trim(), 10);
+  // Only meaningful for retainers; clamp to 1–31, else null.
+  const retainer_anchor_day =
+    engagement_type === 'retainer' && Number.isFinite(anchorRaw) && anchorRaw >= 1 && anchorRaw <= 31
+      ? anchorRaw
+      : null;
   const start_date = String(formData.get('start_date') ?? '').trim() || null;
   const target_date = String(formData.get('target_date') ?? '').trim() || null;
   const color = String(formData.get('color') ?? '').trim() || null;
 
-  return { name, description, domain_id, type, status, engagement_type, kind, quoted_hours, start_date, target_date, color };
+  return { name, description, domain_id, type, status, engagement_type, kind, quoted_hours, retainer_anchor_day, start_date, target_date, color };
 }
 
 export async function createProjectAction(
@@ -75,6 +82,7 @@ export async function createProjectAction(
     // Project-only fields collapse to null for areas so we don't
     // store stale dates/quotes that the UI won't render anyway.
     quoted_hours: isArea ? null : fields.quoted_hours,
+    retainer_anchor_day: isArea ? null : fields.retainer_anchor_day,
     start_date: isArea ? null : fields.start_date,
     target_date: isArea ? null : fields.target_date,
     color: fields.color,
@@ -94,10 +102,6 @@ export async function createProjectAction(
   }
   revalidatePath('/projects');
   revalidatePath('/today');
-  // The Domains board shows per-domain project counts, and the domain
-  // detail page offers quick-create — keep both honest.
-  revalidatePath('/domains');
-  if (fields.domain_id) revalidatePath(`/domains/${fields.domain_id}`);
   redirect(`/projects/${created.id}`);
 }
 
@@ -118,6 +122,7 @@ export async function updateProjectAction(
     engagement_type: isArea ? 'project' : fields.engagement_type,
     kind: fields.kind,
     quoted_hours: isArea ? null : fields.quoted_hours,
+    retainer_anchor_day: isArea ? null : fields.retainer_anchor_day,
     start_date: isArea ? null : fields.start_date,
     target_date: isArea ? null : fields.target_date,
     color: fields.color,
