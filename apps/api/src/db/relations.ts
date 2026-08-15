@@ -2,17 +2,22 @@
 // db.query.<table>.findMany({ with: { <key>: ... } }) surfaces them verbatim
 // in JSON responses the web app consumes. Renaming a key changes the API shape.
 import { relations } from "drizzle-orm/relations";
-import { stewardship_domains, projects, people, person_facts, person_interactions, milestones, activity_log, project_checklist_items, content_items, content_checklist_items, tasks, checklist_templates, checklist_instances, books, quotes, quote_annotations, journal_books, journal_entries, notes, observations, routines, routine_completions, health_visits, health_metrics, lab_panels, lab_results, health_documents } from "./schema.js";
+import { stewardship_domains, projects, people, person_facts, person_interactions, milestones, activity_log, project_checklist_items, content_items, content_checklist_items, tasks, checklist_templates, checklist_instances, books, quotes, quote_annotations, journal_books, journal_entries, notes, observations, routines, routine_completions, health_visits, health_metrics, lab_panels, lab_results, health_documents, companies, conversations, project_contacts } from "./schema.js";
 
 export const projectsRelations = relations(projects, ({one, many}) => ({
 	domain: one(stewardship_domains, {
 		fields: [projects.domain_id],
 		references: [stewardship_domains.id]
 	}),
-	client: one(people, {
-		fields: [projects.client_id],
+	primary_contact: one(people, {
+		fields: [projects.primary_contact_id],
 		references: [people.id]
 	}),
+	company: one(companies, {
+		fields: [projects.company_id],
+		references: [companies.id]
+	}),
+	contacts: many(project_contacts),
 	milestones: many(milestones),
 	activity_log: many(activity_log),
 	project_checklist_items: many(project_checklist_items),
@@ -29,11 +34,58 @@ export const stewardship_domainsRelations = relations(stewardship_domains, ({man
 	observations: many(observations),
 }));
 
-export const peopleRelations = relations(people, ({many}) => ({
+export const peopleRelations = relations(people, ({one, many}) => ({
 	projects: many(projects),
 	facts: many(person_facts),
 	interactions: many(person_interactions),
+	conversations: many(conversations),
+	company_ref: one(companies, {
+		fields: [people.company_id],
+		references: [companies.id]
+	}),
 	notes: many(notes),
+}));
+
+// ─── CRM module (0041-0043) ──────────────────────────────────────────────
+
+export const companiesRelations = relations(companies, ({one, many}) => ({
+	domain: one(stewardship_domains, {
+		fields: [companies.domain_id],
+		references: [stewardship_domains.id]
+	}),
+	contacts: many(people),
+	projects: many(projects),
+	conversations: many(conversations),
+}));
+
+export const conversationsRelations = relations(conversations, ({one}) => ({
+	company: one(companies, {
+		fields: [conversations.company_id],
+		references: [companies.id]
+	}),
+	person: one(people, {
+		fields: [conversations.person_id],
+		references: [people.id]
+	}),
+	project: one(projects, {
+		fields: [conversations.project_id],
+		references: [projects.id]
+	}),
+	task: one(tasks, {
+		fields: [conversations.task_id],
+		references: [tasks.id]
+	}),
+}));
+
+export const project_contactsRelations = relations(project_contacts, ({one}) => ({
+	project: one(projects, {
+		fields: [project_contacts.project_id],
+		references: [projects.id]
+	}),
+	person: one(people, {
+		fields: [project_contacts.person_id],
+		references: [people.id]
+	}),
 }));
 
 export const person_factsRelations = relations(person_facts, ({one}) => ({
