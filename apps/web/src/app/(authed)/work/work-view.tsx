@@ -9,7 +9,7 @@ import { Pill } from '@/components/Pill';
 import { Icon } from '@/components/Icon';
 import { FacetRail, FacetGroup, FacetRow, FacetTag, FacetTags, FacetSep } from '@/components/FacetRail';
 import { domainColor } from '@/lib/domain-colors';
-import { DomainFrieze } from '../domains/domain-illustration';
+import { DomainIllustration } from '../domains/domain-illustration';
 import { flipHolderAction } from './actions';
 import { FocusControl, type FocusOption } from './focus-control';
 
@@ -338,19 +338,12 @@ function DomainSection({
 
       {!collapsed && (
         <div className="pt-3.5">
-          {/* Fork: engraved frieze banner — the domain's committed art (or its
-              name-seeded procedural motif) tiled under the sticky header,
-              fading out right. Scrolls away with the section; accent-inked
+          {/* Fork: the domain's engraving — committed art, or the name-seeded
+              procedural motif — shown once at near-full design scale under
+              the sticky header. Scrolls away with the section; accent-inked
               when the domain is slipping. Identity, not information. */}
-          <div
-            className="hidden lg:block h-[56px] mb-3.5 overflow-hidden opacity-[0.55]"
-            style={{
-              WebkitMaskImage: 'linear-gradient(to right, black 45%, transparent 96%)',
-              maskImage: 'linear-gradient(to right, black 45%, transparent 96%)',
-            }}
-            aria-hidden
-          >
-            <DomainFrieze name={domain.name} svg={artSvg} tone={domain.urgency === 'over' ? 'accent' : 'ink'} />
+          <div className="hidden lg:block h-[96px] w-[230px] mb-3.5 overflow-hidden opacity-70" aria-hidden>
+            <DomainIllustration name={domain.name} svg={artSvg} tone={domain.urgency === 'over' ? 'accent' : 'ink'} />
           </div>
           {domain.projects.length > 0 && (
             <div
