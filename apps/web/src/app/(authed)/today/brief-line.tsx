@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import type { BriefLine } from '@/lib/api';
+import { Pill } from '@/components/Pill';
 
 // Editorial brief line — the heart of the Briefing.
 //
@@ -17,53 +18,48 @@ import type { BriefLine } from '@/lib/api';
 // SVG-free — three positioned divs, see CadenceBar below.
 
 export function BriefLineRow({ line }: { line: BriefLine }) {
-  const slipping = line.status === 'slip';
+  // Cadence slip → the two warm pill states. Stale (no activity at all) and
+  // far-past-cadence read as "over"; a fresh slip reads "due".
+  const over = line.status === 'stale' || line.ratio >= 1.5;
+  const pillState = over ? 'over' : 'due';
   return (
     <Link
       href={line.routeTo.href}
-      className="brief-clickable block py-4 border-b border-line"
+      className="brief-clickable block rounded border border-line bg-bg p-4 hover:border-line-strong transition-colors"
     >
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex items-start justify-between gap-6">
         <div className="flex-1 min-w-0">
-          <h3 className="font-serif text-[18px] font-medium text-ink tracking-[-0.2px] leading-tight">
-            {line.name}
-          </h3>
+          <div className="flex items-center gap-2.5 mb-1.5 flex-wrap">
+            <h3 className="font-serif text-[18px] font-medium text-ink tracking-[-0.2px] leading-tight">
+              {line.name}
+            </h3>
+            <Pill state={pillState}>{line.status === 'stale' ? 'Stale' : 'Slipping'}</Pill>
+          </div>
         </div>
-        <div className="text-right shrink-0 flex items-baseline gap-1.5">
-          <span
-            className={`font-serif text-[34px] leading-[0.9] tabular-nums tracking-[-1px] ${
-              slipping ? 'text-accent-slip' : 'text-ink'
-            }`}
+        <div className="text-right shrink-0">
+          <div
+            className={`font-serif text-[34px] leading-[0.9] tabular-nums tracking-[-1px] ${over ? 'text-accent' : 'text-ink'}`}
             style={{ fontWeight: 500 }}
           >
             {line.big}
-          </span>
+          </div>
+          <div className="mt-1.5 font-sans text-[11px] text-ink-3 max-w-[118px]">{line.unit}</div>
         </div>
-      </div>
-
-      <div className="flex justify-end -mt-0.5 mb-2">
-        <span className="font-sans text-[11px] text-ink-3">{line.unit}</span>
       </div>
 
       <CadenceBar ratio={line.ratio} />
 
-      <div className="mt-3 flex items-center gap-2 flex-wrap">
-        <span className="font-mono text-[9px] uppercase tracking-[0.06em] text-ink-3">
-          Next
-        </span>
-        <span className="font-sans text-[13px] text-ink-2 flex-1 min-w-0">
+      <div className="mt-3 flex items-baseline gap-2 flex-wrap">
+        <span className="font-sans text-[13.5px] font-medium text-accent flex-1 min-w-0">
           {line.next}
         </span>
-      </div>
-
-      <div className="mt-1 font-mono text-[10px] uppercase tracking-wider text-accent">
-        {line.routeTo.label}
+        <span className="font-mono text-[10px] uppercase tracking-[0.07em] text-ink-4 shrink-0">
+          {line.routeTo.label}
+        </span>
       </div>
 
       {line.last && (
-        <div className="mt-1 font-sans text-[11px] text-ink-3">
-          {line.last}
-        </div>
+        <div className="mt-2 font-mono text-[10.5px] text-ink-4">{line.last}</div>
       )}
     </Link>
   );

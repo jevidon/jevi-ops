@@ -1,390 +1,43 @@
-import Link from 'next/link';
-import { cookies } from 'next/headers';
-import { redirect } from 'next/navigation';
-import { ScreenHeader } from '@/components/ScreenHeader';
-import { contentApi, ApiError, type ContentItem, type ContentItemStatus } from '@/lib/api';
+import { contentApi, ApiError, type ContentItem } from '@/lib/api';
 import { getAppTimezone } from '@/lib/app-settings';
-import { PrefsPersist } from '@/components/PrefsPersist';
-import { youtubeThumbnailUrl } from '@/lib/youtube';
+import { todayIsoDate } from '@/lib/today';
+import { ContentView } from './content-view';
 
-// /content — list of content items (videos, articles, podcasts) with
-// status filter chips + sort. The pipeline status is the primary mental
-// model so we surface it prominently. Cookie-backed persistence via the
-// shared PrefsPersist component.
-//
-// Done items get their own section at the bottom — they don't intermix
-// with active work. The main section's status chip filters in-progress
-// items; the done section has its own domain filter so you can audit
-// "what's shipped on the main channel" without affecting the active
-// pipeline view.
+// /content — the content pipeline (v2 redesign). Thin server shell: fetch the
+// items (the API excludes archived by default, Addendum 09) + app-tz today, and
+// hand off to the client ContentView which owns the facet rail + stage grouping.
+// A ?status= deep link (e.g. the Work page's "Ideas" link) preselects that stage.
 
-type StatusFilter = Exclude<ContentItemStatus, 'done'> | 'all' | 'in_progress';
-type SortKey = 'updated' | 'status' | 'published';
-
-// "in_progress" is a convenience filter — everything not done or shipped.
-// Lets the user see "what am I actively working on" in one click. "Done"
-// is excluded from this list because done items always render in their
-// own section below, regardless of status filter.
-const STATUS_FILTERS: Array<{ value: StatusFilter; label: string }> = [
-  { value: 'all', label: 'All' },
-  { value: 'in_progress', label: 'In progress' },
-  { value: 'idea', label: 'Idea' },
-  { value: 'outline', label: 'Outline' },
-  { value: 'filming', label: 'Filming' },
-  { value: 'editing', label: 'Editing' },
-  { value: 'published', label: 'Published' },
-];
-
-// Status order for the "status" sort — matches the pipeline progression
-// so ordering by status visually walks the funnel.
-const STATUS_ORDER: Record<ContentItemStatus, number> = {
-  idea: 0,
-  outline: 1,
-  filming: 2,
-  editing: 3,
-  published: 4,
-  derivatives_pending: 5,
-  done: 6,
-};
-
-const SORT_OPTIONS: Array<{ value: SortKey; label: string }> = [
-  { value: 'updated', label: 'Recent' },
-  { value: 'status', label: 'Pipeline' },
-  { value: 'published', label: 'Published' },
-];
-
-const STATUS_LABELS: Record<ContentItemStatus, string> = {
-  idea: 'Idea',
-  outline: 'Outline',
-  filming: 'Filming',
-  editing: 'Editing',
-  published: 'Published',
-  derivatives_pending: 'Derivatives',
-  done: 'Done',
-};
+export const dynamic = 'force-dynamic';
 
 export default async function ContentPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; sort?: string; done_domain?: string }>;
+  searchParams: Promise<{ status?: string }>;
 }) {
-  const params = await searchParams;
+  const { status } = await searchParams;
   const tz = await getAppTimezone();
-
-  // Cookie restore — same pattern as /library/books.
-  if (params.status === undefined && params.sort === undefined && params.done_domain === undefined) {
-    const jar = await cookies();
-    const savedStatus = jar.get('content_status')?.value;
-    const savedSort = jar.get('content_sort')?.value;
-    const savedDoneDomain = jar.get('content_done_domain')?.value;
-    const validSavedStatus = savedStatus && STATUS_FILTERS.find((f) => f.value === savedStatus)
-      ? savedStatus
-      : undefined;
-    const validSavedSort = savedSort && SORT_OPTIONS.find((s) => s.value === savedSort)
-      ? savedSort
-      : undefined;
-    const qs = new URLSearchParams();
-    if (validSavedStatus && validSavedStatus !== 'all') qs.set('status', validSavedStatus);
-    if (validSavedSort && validSavedSort !== 'updated') qs.set('sort', validSavedSort);
-    if (savedDoneDomain) qs.set('done_domain', savedDoneDomain);
-    if (qs.toString()) redirect(`/content?${qs.toString()}`);
-  }
-
-  const status = (
-    params.status && STATUS_FILTERS.find((f) => f.value === params.status)
-      ? params.status
-      : 'all'
-  ) as StatusFilter;
-  const sort = (
-    params.sort && SORT_OPTIONS.find((s) => s.value === params.sort)
-      ? params.sort
-      : 'updated'
-  ) as SortKey;
-  const doneDomainFilter = params.done_domain?.trim() || null;
+  const today = todayIsoDate(tz);
 
   let items: ContentItem[] = [];
   let errorMessage: string | null = null;
   try {
-    // Fetch all items so we can do client-side filtering across the
-    // "in_progress" virtual filter. The API supports server-side status
-    // filtering too (for direct status=X URLs), but we lose the cheap
-    // "in_progress = !done && !derivatives_pending" trick if we use it.
-    items = (await contentApi.list()).items;
+    const res = await contentApi.list();
+    items = res.items;
   } catch (err) {
     errorMessage = err instanceof ApiError ? `API ${err.status}` : (err as Error).message;
   }
 
-  // Split into two streams. Done items always live in their own section
-  // regardless of the status filter; the main filter only applies to
-  // the in-progress stream above.
-  const activeItems = items.filter((i) => i.status !== 'done');
-  const doneItems = items.filter((i) => i.status === 'done');
-
-  let filteredActive = activeItems;
-  if (status === 'in_progress') {
-    filteredActive = activeItems.filter(
-      (i) => i.status !== 'published' && i.status !== 'derivatives_pending',
-    );
-  } else if (status !== 'all') {
-    filteredActive = activeItems.filter((i) => i.status === status);
-  }
-  filteredActive = [...filteredActive].sort((a, b) => sortContent(a, b, sort));
-
-  // Build the domain chip set from done items only — there's no point
-  // showing a domain that has no done content to filter.
-  type DomainChip = { id: string; name: string; count: number };
-  const doneDomainMap = new Map<string, DomainChip>();
-  for (const item of doneItems) {
-    if (!item.domain) continue;
-    const existing = doneDomainMap.get(item.domain.id);
-    if (existing) existing.count += 1;
-    else doneDomainMap.set(item.domain.id, { id: item.domain.id, name: item.domain.name, count: 1 });
-  }
-  const doneDomains = Array.from(doneDomainMap.values()).sort((a, b) => a.name.localeCompare(b.name));
-
-  let filteredDone = doneItems;
-  if (doneDomainFilter) {
-    filteredDone = doneItems.filter((i) => i.domain?.id === doneDomainFilter);
-  }
-  // Done section always sorts by release date, most recent first. Falls
-  // back to updated_at if no published_at — old imports might lack the
-  // canonical release date but we still want them ordered consistently.
-  filteredDone = [...filteredDone].sort(
-    (a, b) => (b.published_at ?? b.updated_at).localeCompare(a.published_at ?? a.updated_at),
-  );
-
-  const buildHref = (overrides: { status?: StatusFilter; sort?: SortKey; done_domain?: string | null }) => {
-    const qs = new URLSearchParams();
-    const s = overrides.status ?? status;
-    const so = overrides.sort ?? sort;
-    const dd = overrides.done_domain === undefined ? doneDomainFilter : overrides.done_domain;
-    if (s !== 'all') qs.set('status', s);
-    if (so !== 'updated') qs.set('sort', so);
-    if (dd) qs.set('done_domain', dd);
-    const str = qs.toString();
-    return str ? `/content?${str}` : '/content';
-  };
-
-  return (
-    <div>
-      <PrefsPersist cookiePrefix="content" paramNames={['status', 'sort', 'done_domain']} />
-      <ScreenHeader
-        eyebrow="Pipeline"
-        title="Content"
-        meta={`${filteredActive.length} active · ${filteredDone.length} done`}
-      />
-      <div className="hairline" />
-
-      <div className="px-5 lg:px-0 pt-3 flex flex-col gap-2">
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-          <span className="eyebrow">Status</span>
-          <div className="flex flex-wrap gap-1.5">
-            {STATUS_FILTERS.map((f) => (
-              <Link
-                key={f.value}
-                href={buildHref({ status: f.value })}
-                className={`px-2.5 py-1 border font-mono text-[10px] uppercase tracking-wider transition-colors ${
-                  status === f.value
-                    ? 'bg-ink text-bg border-ink'
-                    : 'border-line text-ink-2 hover:border-ink-2 hover:text-ink'
-                }`}
-              >
-                {f.label}
-              </Link>
-            ))}
-          </div>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-          <span className="eyebrow">Sort</span>
-          <div className="flex flex-wrap gap-1.5">
-            {SORT_OPTIONS.map((s) => (
-              <Link
-                key={s.value}
-                href={buildHref({ sort: s.value })}
-                className={`px-2.5 py-1 border font-mono text-[10px] uppercase tracking-wider transition-colors ${
-                  sort === s.value
-                    ? 'bg-ink text-bg border-ink'
-                    : 'border-line text-ink-2 hover:border-ink-2 hover:text-ink'
-                }`}
-              >
-                {s.label}
-              </Link>
-            ))}
-          </div>
-          <Link
-            href="/content/new"
-            className="ml-auto font-mono text-[11px] uppercase tracking-wider text-ink-3 hover:text-accent transition-colors"
-          >
-            + Add
-          </Link>
-        </div>
+  if (errorMessage) {
+    return (
+      <div className="px-5 lg:px-10 pt-8">
+        <h1 className="font-serif text-[40px] font-medium tracking-[-0.022em] text-ink">Content</h1>
+        <p className="mt-4 font-sans text-[13px] text-ink-3">Couldn&rsquo;t load content: {errorMessage}</p>
       </div>
-
-      {/* ─── Active items ─────────────────────────────────────────────── */}
-      {errorMessage ? (
-        <div className="px-5 lg:px-0 mt-6 font-sans text-[13px] text-ink-3">Error: {errorMessage}</div>
-      ) : filteredActive.length === 0 ? (
-        <div className="px-5 lg:px-0 mt-6 font-sans text-[13px] text-ink-3 italic">
-          {activeItems.length === 0
-            ? 'No active content items. Add your first video idea.'
-            : 'No content items match this filter.'}
-        </div>
-      ) : (
-        <ul className="px-5 lg:px-0 mt-4">
-          {filteredActive.map((item) => (
-            <ContentRow key={item.id} item={item} tz={tz} />
-          ))}
-        </ul>
-      )}
-
-      {/* ─── Done section ─────────────────────────────────────────────── */}
-      {doneItems.length > 0 && (
-        <div className="mt-12">
-          <div className="px-5 lg:px-0 flex flex-wrap items-baseline justify-between gap-3 pb-2 border-b border-line">
-            <div className="flex items-baseline gap-3">
-              <span className="eyebrow">Done</span>
-              <span className="font-mono text-[10px] uppercase tracking-wider text-ink-3">
-                {filteredDone.length} of {doneItems.length}
-              </span>
-            </div>
-          </div>
-
-          {/* Domain filter — only render if there's more than one domain
-              represented in done items. With a single domain (or none)
-              the chip would just be visual noise. */}
-          {doneDomains.length > 1 && (
-            <div className="px-5 lg:px-0 pt-3 flex flex-wrap items-center gap-x-3 gap-y-2">
-              <span className="eyebrow">Domain</span>
-              <div className="flex flex-wrap gap-1.5">
-                <Link
-                  href={buildHref({ done_domain: null })}
-                  className={`px-2.5 py-1 border font-mono text-[10px] uppercase tracking-wider transition-colors ${
-                    !doneDomainFilter
-                      ? 'bg-ink text-bg border-ink'
-                      : 'border-line text-ink-2 hover:border-ink-2 hover:text-ink'
-                  }`}
-                >
-                  All
-                </Link>
-                {doneDomains.map((d) => (
-                  <Link
-                    key={d.id}
-                    href={buildHref({ done_domain: d.id })}
-                    className={`px-2.5 py-1 border font-mono text-[10px] uppercase tracking-wider transition-colors ${
-                      doneDomainFilter === d.id
-                        ? 'bg-ink text-bg border-ink'
-                        : 'border-line text-ink-2 hover:border-ink-2 hover:text-ink'
-                    }`}
-                  >
-                    {d.name} <span className="text-ink-3 ml-1">{d.count}</span>
-                  </Link>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {filteredDone.length === 0 ? (
-            <div className="px-5 lg:px-0 mt-4 font-sans text-[13px] text-ink-3 italic">
-              No done items in this domain.
-            </div>
-          ) : (
-            <ul className="px-5 lg:px-0 mt-4">
-              {filteredDone.map((item) => (
-                <ContentRow key={item.id} item={item} tz={tz} dim />
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// Row renderer factored out so the active and done sections render
-// identically. `dim` lowers the opacity slightly so done rows read as
-// archive rather than competing with active work for attention.
-function ContentRow({ item, tz, dim = false }: { item: ContentItem; tz: string; dim?: boolean }) {
-  const thumb = item.video_url ? youtubeThumbnailUrl(item.video_url, 'mq') : null;
-  return (
-    <li className={`py-3 border-b border-line/40 ${dim ? 'opacity-70 hover:opacity-100 transition-opacity' : ''}`}>
-      <Link
-        href={`/content/${item.id}`}
-        className="flex gap-3 hover:opacity-80 transition-opacity"
-      >
-        {/* Thumbnail. 112px wide × 63px tall (16:9). Falls back to a
-            placeholder so non-YouTube / no-URL rows stay aligned. */}
-        <div className="w-28 aspect-video bg-surface border border-line shrink-0 overflow-hidden">
-          {thumb ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={thumb}
-              alt=""
-              className="w-full h-full object-cover"
-              loading="lazy"
-            />
-          ) : (
-            <div className="w-full h-full flex items-center justify-center font-mono text-[9px] uppercase tracking-wider text-ink-3">
-              {item.type.replace('_', ' ')}
-            </div>
-          )}
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-baseline justify-between gap-3">
-            <span className="font-mono text-[10px] uppercase tracking-wider text-ink-3">
-              {STATUS_LABELS[item.status]}
-              {item.domain?.name ? ` · ${item.domain.name}` : ''}
-            </span>
-            <span className="font-mono text-[10px] uppercase tracking-wider text-ink-3 shrink-0">
-              {formatDate(item.published_at || item.updated_at, tz)}
-            </span>
-          </div>
-          <div className="mt-1 font-serif text-[15px] text-ink leading-tight line-clamp-2">
-            {item.title}
-          </div>
-        </div>
-      </Link>
-    </li>
-  );
-}
-
-// For the "Recent" sort, use the most user-meaningful date: published_at
-// for items that have actually shipped, updated_at for everything in
-// flight. This matches mental model — a video published last year that
-// I just edited the description on should still appear in last year's
-// slot, not at the top of the timeline.
-function effectiveDate(c: ContentItem): string {
-  return c.published_at ?? c.updated_at;
-}
-
-function sortContent(a: ContentItem, b: ContentItem, key: SortKey): number {
-  switch (key) {
-    case 'updated':
-      return effectiveDate(b).localeCompare(effectiveDate(a));
-    case 'status': {
-      const ao = STATUS_ORDER[a.status] ?? 99;
-      const bo = STATUS_ORDER[b.status] ?? 99;
-      if (ao === bo) return effectiveDate(b).localeCompare(effectiveDate(a));
-      return ao - bo;
-    }
-    case 'published': {
-      const aa = a.published_at ?? '';
-      const bb = b.published_at ?? '';
-      if (!aa && !bb) return b.updated_at.localeCompare(a.updated_at);
-      if (!aa) return 1;
-      if (!bb) return -1;
-      return bb.localeCompare(aa);
-    }
-    default:
-      return 0;
+    );
   }
-}
 
-function formatDate(iso: string | null, tz: string): string {
-  if (!iso) return '';
-  return new Date(iso).toLocaleDateString('en-US', {
-    timeZone: tz,
-    month: 'short',
-    day: 'numeric',
-  });
+  // key on the deep-link status so a soft nav to /content?status=… (e.g. the
+  // in-page "Ideas" link) remounts and re-seeds the stage filter.
+  return <ContentView key={status ?? 'all'} items={items} today={today} tz={tz} initialStage={status} />;
 }

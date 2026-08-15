@@ -22,6 +22,7 @@ interface InitialValues {
   engagement_type: 'project' | 'retainer';
   kind: 'project' | 'area';
   quoted_hours: string;   // input value is always string
+  retainer_anchor_day: string; // day-of-month (1-31) the cycle resets
   start_date: string;
   target_date: string;
   color: string;
@@ -58,6 +59,9 @@ export function ProjectForm({
   // (target date, hours, engagement type — all project-only concepts).
   const [kind, setKind] = useState<'project' | 'area'>(initial.kind);
   const isArea = kind === 'area';
+  // Controlled so the retainer-only fields (cycle anchor, hours-cap label)
+  // appear immediately when the radio is switched — not only after a resave.
+  const [engagement, setEngagement] = useState<'project' | 'retainer'>(initial.engagement_type);
 
   return (
     <>
@@ -141,7 +145,8 @@ export function ProjectForm({
                   type="radio"
                   name="engagement_type"
                   value="project"
-                  defaultChecked={initial.engagement_type === 'project'}
+                  checked={engagement === 'project'}
+                  onChange={() => setEngagement('project')}
                   className="peer sr-only"
                 />
                 <div className="px-3 py-2 border border-line peer-checked:border-ink peer-checked:bg-surface-2/50 font-sans text-[13px] text-ink cursor-pointer transition-colors">
@@ -154,7 +159,8 @@ export function ProjectForm({
                   type="radio"
                   name="engagement_type"
                   value="retainer"
-                  defaultChecked={initial.engagement_type === 'retainer'}
+                  checked={engagement === 'retainer'}
+                  onChange={() => setEngagement('retainer')}
                   className="peer sr-only"
                 />
                 <div className="px-3 py-2 border border-line peer-checked:border-ink peer-checked:bg-surface-2/50 font-sans text-[13px] text-ink cursor-pointer transition-colors">
@@ -228,7 +234,7 @@ export function ProjectForm({
         {!isArea && (
           <Field
             label={
-              initial.engagement_type === 'retainer'
+              engagement === 'retainer'
                 ? 'Monthly hours cap (decimal OK)'
                 : 'Quoted hours (decimal OK)'
             }
@@ -239,7 +245,21 @@ export function ProjectForm({
               min="0"
               name="quoted_hours"
               defaultValue={initial.quoted_hours}
-              placeholder={initial.engagement_type === 'retainer' ? 'e.g. 20' : 'optional'}
+              placeholder={engagement === 'retainer' ? 'e.g. 20' : 'optional'}
+              className="w-full bg-transparent border border-line focus:border-ink-2 focus:outline-none p-2 font-sans text-[14px] text-ink"
+            />
+          </Field>
+        )}
+
+        {!isArea && engagement === 'retainer' && (
+          <Field label="Cycle anchor day (day-of-month the retainer resets, 1–31)">
+            <input
+              type="number"
+              min="1"
+              max="31"
+              name="retainer_anchor_day"
+              defaultValue={initial.retainer_anchor_day}
+              placeholder="e.g. 1 (billing day)"
               className="w-full bg-transparent border border-line focus:border-ink-2 focus:outline-none p-2 font-sans text-[14px] text-ink"
             />
           </Field>

@@ -23,22 +23,23 @@ export async function TaskItem({
   task,
   showStar = true,
   showProject = true,
-  parentCrumb = null,
 }: {
   task: Task;
   showStar?: boolean;
   showProject?: boolean;
-  // Parent task title for subtask rows surfaced outside their parent's
-  // context (Today rail, date views) — renders as a "↳ parent" crumb.
-  parentCrumb?: string | null;
 }) {
   const tz = await getAppTimezone();
   const today = todayIsoDate(tz);
   const isDone = task.status === 'done';
+  const isWaiting = task.status === 'waiting';
   const isTop3 = Boolean(task.top3_for_date);
   const dueLabel = task.due_date ? formatDueLabel(task.due_date, today) : null;
   const isOverdue = dueLabel?.kind === 'overdue';
   const isTodayDue = dueLabel?.kind === 'today';
+  // Waiting aging (Addendum 08): days since the block started. ≥7d is the
+  // point the Attention Engine flags it — mirror that threshold in the color.
+  const waitDays = isWaiting && task.waiting_since ? daysBetween(task.waiting_since, today) : null;
+  const waitStale = waitDays != null && waitDays >= 7;
   const project = showProject ? task.project : null;
   // Recurrence indicator. Only render the chip when the rule is a
   // pattern we know how to advance — surface bogus rules silently.
@@ -55,7 +56,11 @@ export async function TaskItem({
           type="submit"
           aria-label={isDone ? 'Mark task open' : 'Mark task done'}
           className={`flex h-5 w-5 items-center justify-center border transition-colors ${
-            isDone ? 'border-ink-2 bg-ink-2' : 'border-line hover:border-ink-2'
+            isDone
+              ? 'border-ink-2 bg-ink-2'
+              : isWaiting
+                ? `border-dashed ${waitStale ? 'border-accent' : 'border-ink-3'} hover:border-ink-2`
+                : 'border-line hover:border-ink-2'
           }`}
         >
           {isDone && (
@@ -77,16 +82,30 @@ export async function TaskItem({
         <Link
           href={`/tasks/${task.id}`}
           className={`block font-sans text-[14px] leading-snug hover:text-accent transition-colors ${
-            isDone ? 'text-ink-3 line-through decoration-ink-3/60' : 'text-ink'
+            isDone
+              ? 'text-ink-3 line-through decoration-ink-3/60'
+              : isWaiting
+                ? 'text-ink-2'
+                : 'text-ink'
           }`}
         >
           {task.title}
         </Link>
-        {(project || parentCrumb || (dueLabel && !isDone) || recurrence) && (
+        {(isWaiting || project || (dueLabel && !isDone && !isWaiting) || recurrence) && (
           <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5">
-            {parentCrumb && (
-              <span className="font-mono text-[10px] uppercase tracking-wider text-ink-3">
-                ↳ {parentCrumb}
+            {isWaiting && (
+              <span
+                className={`font-mono text-[10px] uppercase tracking-wider ${
+                  waitStale ? 'text-accent' : 'text-ink-3'
+                }`}
+                title={
+                  waitStale
+                    ? 'Blocked for a week or more — nudge whoever you are waiting on.'
+                    : 'Blocked on someone else.'
+                }
+              >
+                ⏸ Waiting{task.waiting_on ? ` on ${task.waiting_on}` : ''}
+                {waitDays != null ? ` · ${waitDays}d` : ''}
               </span>
             )}
             {project && (
@@ -104,7 +123,7 @@ export async function TaskItem({
                 {project.name}
               </Link>
             )}
-            {dueLabel && !isDone && (
+            {dueLabel && !isDone && !isWaiting && (
               <span
                 className={`font-mono text-[10px] uppercase tracking-wider ${
                   isOverdue ? 'text-accent' : isTodayDue ? 'text-ink-2' : 'text-ink-3'

@@ -8,39 +8,50 @@
 
 html,
 body {
+  /* Re-warmed to linen (Addendum 10 §4; the white v2 read too cold). Kept in
+     sync with the `bg`/`ink` Tailwind tokens and the viewport theme-color. */
   background: #f6f2ea;
-  color: #1a1612;
+  color: #12100e;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  /* Kill horizontal scroll on mobile: a stray wide child (negative-margin
+     rows, min-w flex items, long unbroken strings) must never let the page
+     slide sideways. `clip` — not `hidden` — because it doesn't create a scroll
+     container, so `position: sticky` section headers keep working. Any element
+     that genuinely needs to scroll sideways owns its own overflow-x-auto and is
+     unaffected. */
+  overflow-x: clip;
 }
 
 ::selection {
+  /* Accent unchanged (#B8442B = rgb 184,68,43). */
   background: rgba(184, 68, 43, 0.22);
 }
 
-/* Hairline rule used throughout — matches `Rule` in the mockup canvas. */
+/* Hairline rule used throughout — matches `Rule` in the mockup canvas.
+   Value tracks the `line` token (v2 ink base 18,16,14 @ .09). */
 .hairline {
   height: 1px;
   width: 100%;
-  background: rgba(26, 22, 18, 0.08);
+  background: rgba(18, 16, 14, 0.09);
 }
 
-/* Editorial eyebrow label. */
+/* Editorial eyebrow label. Colour = ink-3; tracking .1em per v2 type spec. */
 .eyebrow {
   font-family: 'Geist Mono', ui-monospace, monospace;
   font-size: 10px;
   font-weight: 600;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: #928a7e;
+  color: #8b847a;
 }
 
 /* Stronger hairline — section rules and dividers that need to read at
-   the same weight as adjacent text. */
+   the same weight as adjacent text. Tracks `line-strong` (@ .17). */
 .hairline-strong {
   height: 1px;
   width: 100%;
-  background: rgba(26, 22, 18, 0.16);
+  background: rgba(18, 16, 14, 0.17);
 }
 
 /* Editorial briefing-line wash. Applied to `.brief-clickable` so the row
@@ -53,10 +64,10 @@ body {
   transition: background 0.12s;
 }
 .brief-clickable:hover {
-  background: rgba(26, 22, 18, 0.035);
+  background: rgba(18, 16, 14, 0.035);
 }
 .brief-clickable:active {
-  background: rgba(26, 22, 18, 0.06);
+  background: rgba(18, 16, 14, 0.06);
 }
 
 /* Density toggle. `[data-density="compact"]` halves the vertical rhythm

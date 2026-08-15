@@ -4,9 +4,10 @@ import {
   authApi, googleApi, settingsApi, ApiError,
   type ApiTokenRow, type AppSettings, type GoogleStatus,
 } from '@/lib/api';
-import { getAppTimezone } from '@/lib/app-settings';
+import { getAppTimezone, getFeatureFlag } from '@/lib/app-settings';
 import { SettingsSection } from './settings-section';
 import { TimezoneForm } from './timezone-form';
+import { ModulesForm } from './modules-form';
 import { AiSettingsForm } from './ai-settings-form';
 import { ApiTokensPanel } from './api-tokens-panel';
 import { beginGoogleOAuthAction } from './actions';
@@ -21,8 +22,16 @@ export default async function SettingsPage({
 }) {
   const { google: googleParam, reason } = await searchParams;
   const tz = await getAppTimezone();
+  const healthEnabled = await getFeatureFlag('health_module_enabled');
+  const routinesEnabled = await getFeatureFlag('routines_module_enabled');
+  const ruleEnabled = await getFeatureFlag('rule_module_enabled');
 
-  let appSettings: AppSettings = { timezone: tz };
+  let appSettings: AppSettings = {
+    timezone: tz,
+    health_module_enabled: healthEnabled,
+    routines_module_enabled: routinesEnabled,
+    rule_module_enabled: ruleEnabled,
+  };
   try {
     appSettings = await settingsApi.getApp();
   } catch {
@@ -74,6 +83,14 @@ export default async function SettingsPage({
 
       <SettingsSection title="Timezone">
         <TimezoneForm current={tz} />
+      </SettingsSection>
+
+      <SettingsSection title="Modules">
+        <ModulesForm
+          healthEnabled={healthEnabled}
+          routinesEnabled={routinesEnabled}
+          ruleEnabled={ruleEnabled}
+        />
       </SettingsSection>
 
       <SettingsSection title="AI · language model, transcription, photos">

@@ -24,7 +24,7 @@ export function MilestonesSection({
     : `Milestones · ${progressPct}%`;
 
   return (
-    <section className="px-5 lg:px-0 pt-6">
+    <section className="mt-6 first:mt-0">
       <div className="eyebrow pb-2 border-b border-line mb-3">{label}</div>
 
       {milestones.length === 0 ? (

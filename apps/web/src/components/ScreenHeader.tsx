@@ -7,6 +7,8 @@ export function ScreenHeader({
   title,
   meta,
 }: {
+  // ReactNode, not string — fork pages (e.g. the maintenance subview's
+  // linked eyebrow) pass JSX here. Do not narrow back to string.
   eyebrow: React.ReactNode;
   title: React.ReactNode;
   meta?: string;

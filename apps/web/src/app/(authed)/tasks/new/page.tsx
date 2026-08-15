@@ -15,35 +15,21 @@ export default async function NewTaskPage({
 }) {
   const { project_id: preProject, domain_id: preDomain, content_item_id: preContent } = await searchParams;
 
-  let projects: {
-    id: string;
-    name: string;
-    domain_id: string | null;
-    milestones: { id: string; title: string; status: 'open' | 'done'; position: number }[];
-  }[] = [];
+  let projects: { id: string; name: string; domain_id: string | null }[] = [];
   let domains: { id: string; name: string; is_system?: boolean }[] = [];
   let contentItems: { id: string; title: string }[] = [];
 
-  const [projectsRes, domainsRes, contentRes] = await Promise.allSettled([
+  const [projectsRes, domainsRes, contentRes, milestonesRes] = await Promise.allSettled([
     projectsApi.list(),
     domainsApi.list(),
     contentApi.list(),
+    projectsApi.milestones.listAll(),
   ]);
 
   if (projectsRes.status === 'fulfilled') {
     projects = projectsRes.value.projects
       .filter((p) => p.status === 'active')
-      .map((p) => ({
-        id: p.id,
-        name: p.name,
-        domain_id: p.domain?.id ?? null,
-        milestones: (p.milestones ?? []).map((m) => ({
-          id: m.id,
-          title: m.title,
-          status: m.status,
-          position: m.position,
-        })),
-      }))
+      .map((p) => ({ id: p.id, name: p.name, domain_id: p.domain?.id ?? null }))
       .sort((a, b) => a.name.localeCompare(b.name));
   }
 
@@ -68,6 +54,14 @@ export default async function NewTaskPage({
       contentItems.unshift({ id: c.id, title: c.title });
     } catch (err) {
       if (!(err instanceof ApiError)) throw err;
+    }
+  }
+
+  // Milestones grouped by project — for the task form's milestone picker.
+  const projectMilestones: Record<string, { id: string; title: string }[]> = {};
+  if (milestonesRes.status === 'fulfilled') {
+    for (const m of milestonesRes.value.milestones) {
+      (projectMilestones[m.project_id] ??= []).push({ id: m.id, title: m.title });
     }
   }
 
@@ -111,6 +105,7 @@ export default async function NewTaskPage({
           domains={domains}
           projects={projects}
           contentItems={contentItems}
+          projectMilestones={projectMilestones}
         />
       </div>
     </div>

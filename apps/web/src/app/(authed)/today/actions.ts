@@ -41,6 +41,8 @@ export async function toggleTaskDoneAction(formData: FormData) {
     // Best-effort; UI will reload on next request and reflect reality.
   }
   revalidatePath('/today');
+  revalidatePath('/attention');
+  revalidatePath('/work');
 }
 
 export async function toggleTop3Action(formData: FormData) {

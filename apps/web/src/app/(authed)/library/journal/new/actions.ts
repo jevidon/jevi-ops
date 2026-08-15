@@ -34,7 +34,9 @@ export async function createJournalEntryAction(
       transcription_text: text,
       ...(entry_date ? { entry_date } : {}),
       attachments,
-      source: 'manual',
+      // journal_entries.source CHECK allows only handwritten_photo | voice |
+      // typed. A manually composed entry is 'typed'.
+      source: 'typed',
     });
     createdId = created.id;
   } catch (err) {

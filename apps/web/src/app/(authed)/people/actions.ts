@@ -10,14 +10,7 @@ const VALID_RELATIONSHIPS: readonly RelationshipType[] = [
   'client', 'family', 'church', 'friend', 'team', 'vendor', 'other',
 ];
 
-function readFields(formData: FormData): {
-  name: string;
-  relationship_type: RelationshipType | null;
-  email: string | null;
-  phone: string | null;
-  company: string | null;
-  notes: string | null;
-} {
+function readFields(formData: FormData): PersonCreate {
   const name = String(formData.get('name') ?? '').trim();
   const rawRelationship = String(formData.get('relationship_type') ?? '').trim();
   const relationship_type = (VALID_RELATIONSHIPS as readonly string[]).includes(rawRelationship)
@@ -25,9 +18,18 @@ function readFields(formData: FormData): {
     : null;
   const email = String(formData.get('email') ?? '').trim() || null;
   const phone = String(formData.get('phone') ?? '').trim() || null;
+  // Fork: company is a plain text field on the person, not a CRM FK.
+  // Birthdays/anniversaries live in person_facts, not person columns.
   const company = String(formData.get('company') ?? '').trim() || null;
   const notes = String(formData.get('notes') ?? '').trim() || null;
-  return { name, relationship_type, email, phone, company, notes };
+  return {
+    name,
+    relationship_type,
+    email,
+    phone,
+    company,
+    notes,
+  };
 }
 
 function shapeApiError(err: unknown): SaveResult {

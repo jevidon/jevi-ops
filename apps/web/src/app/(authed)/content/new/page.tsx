@@ -45,7 +45,13 @@ export default async function NewContentPage({
             outline_md: '',
             video_url: '',
             article_url: '',
+            canonical_url: '',
+            body_rich: '',
             published_at: '',
+            produced_on: '',
+            target_publish_date: '',
+            platforms: [],
+            meta: {},
           }}
         />
       </div>

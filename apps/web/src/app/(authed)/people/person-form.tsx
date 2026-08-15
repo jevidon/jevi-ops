@@ -30,7 +30,11 @@ export interface PersonFormInitial {
   notes: string;
 }
 
-export function PersonForm({ initial }: { initial: PersonFormInitial }) {
+export function PersonForm({
+  initial,
+}: {
+  initial: PersonFormInitial;
+}) {
   const isEdit = Boolean(initial.id);
   const [state, formAction, pending] = useActionState<SaveResult | null, FormData>(
     isEdit ? updatePersonAction : createPersonAction,
@@ -88,13 +92,15 @@ export function PersonForm({ initial }: { initial: PersonFormInitial }) {
           </Field>
         </div>
 
-        <Field label="Company / org">
+        <Field label="Company">
+          {/* Fork: freeform text on the person record — birthdays and
+              anniversaries live in person_facts on the detail page. */}
           <input
             type="text"
             name="company"
             defaultValue={initial.company}
-            autoComplete="organization"
-            className="w-full bg-transparent border-b border-line focus:border-accent focus:outline-none py-1.5 font-sans text-[14px] text-ink"
+            placeholder="e.g. Riverside Web Co."
+            className="w-full bg-transparent border-b border-line focus:border-accent focus:outline-none py-1.5 font-sans text-[14px] text-ink placeholder:text-ink-3/60"
           />
         </Field>
 

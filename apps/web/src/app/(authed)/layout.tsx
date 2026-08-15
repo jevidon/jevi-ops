@@ -1,5 +1,6 @@
 import { BottomTabBar } from '@/components/BottomTabBar';
-import { DesktopRail } from '@/components/DesktopRail';
+import { IconRail } from '@/components/IconRail';
+import { Topbar } from '@/components/Topbar';
 import { MicFAB } from '@/components/MicFAB';
 import { TextCaptureFAB } from '@/components/TextCaptureFAB';
 import { NotificationBell } from '@/components/NotificationBell';
@@ -7,8 +8,8 @@ import { SearchHotkey } from '@/components/SearchHotkey';
 import { TextCapturePalette } from '@/components/TextCapturePalette';
 import { TimezoneProvider } from '@/components/TimezoneProvider';
 import { requireUser } from '@/lib/auth';
-import { notificationsApi, ApiError } from '@/lib/api';
-import { getAppTimezone } from '@/lib/app-settings';
+import { notificationsApi, attentionApi, ApiError } from '@/lib/api';
+import { getAppTimezone, getFeatureFlag } from '@/lib/app-settings';
 
 // Every page inside the (authed) group requires a signed-in user — checked
 // in middleware AND here as defense-in-depth.
@@ -27,9 +28,14 @@ export default async function AuthedLayout({ children }: { children: React.React
   // Fetch unread notification count so the rail badge stays in sync across
   // navigation. Best-effort — a failure here just hides the badge.
   let unreadNotifications = 0;
+  let attentionActive = 0;
   try {
-    const res = await notificationsApi.count();
-    unreadNotifications = res.unread;
+    const [notif, attention] = await Promise.allSettled([
+      notificationsApi.count(),
+      attentionApi.count(),
+    ]);
+    if (notif.status === 'fulfilled') unreadNotifications = notif.value.unread;
+    if (attention.status === 'fulfilled') attentionActive = attention.value.active;
   } catch (err) {
     if (!(err instanceof ApiError)) {
       // swallow; the layout shouldn't block on observability
@@ -40,17 +46,30 @@ export default async function AuthedLayout({ children }: { children: React.React
   // client-side context so date/time-aware UI (DateInput, the routine
   // strip, etc.) doesn't need to hardcode 'America/Denver'.
   const timezone = await getAppTimezone();
+  const healthEnabled = await getFeatureFlag('health_module_enabled');
+  const routinesEnabled = await getFeatureFlag('routines_module_enabled');
 
   return (
     <TimezoneProvider timezone={timezone}>
       <div className="flex-1 flex">
-        <DesktopRail email={user.email ?? undefined} unreadNotifications={unreadNotifications} />
+        <IconRail
+          email={user.email ?? undefined}
+          unreadNotifications={unreadNotifications}
+          attentionActive={attentionActive}
+          healthEnabled={healthEnabled}
+          routinesEnabled={routinesEnabled}
+        />
 
         <div className="flex-1 flex flex-col min-w-0">
-          {/* Inner wrapper: clamp width on mobile so the layout matches what
-              we had before; on desktop, cap the reading measure at 750px
-              (846 = 750 + 2×48px rail padding) — the earlier 1280px let
-              body text and forms stretch past comfortable line lengths.
+          {/* v2 topbar (desktop only) — breadcrumb + search + Capture. */}
+          <Topbar />
+
+          {/* Inner wrapper: FLUID up to the desktop gate — no mobile max-width
+              cap, so a wider-than-typical viewport (e.g. a foldable's cover
+              screen) fills edge to edge instead of centering with side gutters.
+              Each page owns its own horizontal padding (px-5 below lg), so
+              dropping the cap doesn't push content to the bezel. On desktop the
+              1120px cap + mx-auto centers within the rail-less space.
 
               Bottom padding adapts: a base value clears the tab bar in
               regular Safari (where env(safe-area-inset-bottom) is 0), and
@@ -58,7 +77,7 @@ export default async function AuthedLayout({ children }: { children: React.React
               content stays above the home indicator without any over-
               padding in browser mode. */}
           <main
-            className="flex-1 lg:pb-12 mx-auto w-full max-w-[480px] lg:max-w-[846px] lg:px-12"
+            className="flex-1 lg:pb-12 mx-auto w-full lg:max-w-[1120px] lg:px-10"
             style={{ paddingBottom: 'calc(5rem + env(safe-area-inset-bottom))' }}
           >
             {children}
@@ -66,7 +85,13 @@ export default async function AuthedLayout({ children }: { children: React.React
           <MicFAB />
           <TextCaptureFAB />
           <NotificationBell unread={unreadNotifications} />
-          <BottomTabBar />
+          <BottomTabBar
+            email={user.email ?? undefined}
+            unreadNotifications={unreadNotifications}
+            attentionActive={attentionActive}
+            healthEnabled={healthEnabled}
+            routinesEnabled={routinesEnabled}
+          />
           <SearchHotkey />
           <TextCapturePalette />
         </div>

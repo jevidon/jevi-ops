@@ -1,7 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { domainsApi, tasksApi, ApiError } from '@/lib/api';
+import { domainsApi, ApiError } from '@/lib/api';
 import {
   CADENCE_RULE_TYPES,
   PRIMARY_CADENCE_RULES,
@@ -9,42 +9,6 @@ import {
 } from './cadence-rules';
 
 export type SaveResult = { ok: true } | { ok: false; error: string };
-
-// ─── Quick-add task ──────────────────────────────────────────────────────
-//
-// Title-only capture straight into this domain (a direct task — no
-// project), mirroring /today's quick add but routed here instead of
-// Inbox. Everything else (due date, priority, project) is the full
-// editor's job: /tasks/new?domain_id=… pre-selects this domain.
-
-export async function quickAddTaskAction(
-  _prev: SaveResult | null,
-  formData: FormData,
-): Promise<SaveResult> {
-  const id = String(formData.get('id') ?? '');
-  if (!id) return { ok: false, error: 'Missing id.' };
-  const title = String(formData.get('title') ?? '').trim();
-  if (!title) return { ok: false, error: 'Title is required.' };
-
-  try {
-    await tasksApi.create({
-      title,
-      domain_id: id,
-      priority: 4,
-      source: 'manual',
-    });
-  } catch (err) {
-    if (err instanceof ApiError) return { ok: false, error: `API ${err.status}` };
-    return { ok: false, error: (err as Error).message };
-  }
-
-  revalidatePath(`/domains/${id}`);
-  // The board's per-domain task counts and /today's open-task rollup
-  // both read from tasks — keep them honest.
-  revalidatePath('/domains');
-  revalidatePath('/today');
-  return { ok: true };
-}
 
 export async function updateDomainAction(
   _prev: SaveResult | null,
@@ -62,6 +26,11 @@ export async function updateDomainAction(
   const description = (String(formData.get('description') ?? '').trim()) || null;
   const fruit_definition = (String(formData.get('fruit_definition') ?? '').trim()) || null;
   const active = formData.get('active') === 'on';
+  const stale_enabled = formData.get('stale_enabled') === 'on';
+  // Attention staleness threshold — clamp to a sane positive int; blank/invalid
+  // falls back to the rule's default (null → 21).
+  const staleDaysRaw = parseInt(String(formData.get('stale_days') ?? ''), 10);
+  const stale_days = Number.isFinite(staleDaysRaw) && staleDaysRaw > 0 ? staleDaysRaw : null;
 
   try {
     await domainsApi.update(id, {
@@ -69,6 +38,8 @@ export async function updateDomainAction(
       description,
       fruit_definition,
       active,
+      stale_enabled,
+      stale_days,
     });
   } catch (err) {
     if (err instanceof ApiError) return { ok: false, error: `API ${err.status}` };
@@ -160,75 +131,6 @@ export async function setCadenceRuleAction(
 // users whose work lives off-dashboard (Substack essays, social video,
 // etc.) can still keep a real cadence without logging every external
 // post as a content_items row.
-
-// ─── Illustration candidate workflow ─────────────────────────────────────
-//
-// Drawing a candidate never overwrites the saved art. The API owns the
-// whole pipeline (LLM compose → sanitize → persist to the draft slot);
-// these actions just trigger draft / keep / discard and revalidate.
-// Draft only refreshes the detail page; commit and discard also refresh
-// the board (commit changes what the grid shows, and both settle the
-// pending-candidate state).
-
-export type IllustrationActionResult =
-  | { ok: true; source?: 'llm' | 'procedural' }
-  | { ok: false; error: string };
-
-function illustrationError(err: unknown): IllustrationActionResult {
-  if (err instanceof ApiError) {
-    const body = err.body as { error?: string } | null;
-    if (body?.error === 'no_draft') return { ok: false, error: 'No candidate to keep — draw one first.' };
-    return { ok: false, error: body?.error ?? `API ${err.status}` };
-  }
-  return { ok: false, error: (err as Error).message };
-}
-
-export async function draftIllustrationAction(
-  _prev: IllustrationActionResult | null,
-  formData: FormData,
-): Promise<IllustrationActionResult> {
-  const id = String(formData.get('id') ?? '');
-  if (!id) return { ok: false, error: 'Missing id.' };
-  try {
-    const domain = await domainsApi.draftIllustration(id);
-    revalidatePath(`/domains/${id}`);
-    return { ok: true, source: domain.illustration_draft?.source };
-  } catch (err) {
-    return illustrationError(err);
-  }
-}
-
-export async function commitIllustrationAction(
-  _prev: IllustrationActionResult | null,
-  formData: FormData,
-): Promise<IllustrationActionResult> {
-  const id = String(formData.get('id') ?? '');
-  if (!id) return { ok: false, error: 'Missing id.' };
-  try {
-    await domainsApi.commitIllustration(id);
-    revalidatePath(`/domains/${id}`);
-    revalidatePath('/domains');
-    return { ok: true };
-  } catch (err) {
-    return illustrationError(err);
-  }
-}
-
-export async function discardIllustrationAction(
-  _prev: IllustrationActionResult | null,
-  formData: FormData,
-): Promise<IllustrationActionResult> {
-  const id = String(formData.get('id') ?? '');
-  if (!id) return { ok: false, error: 'Missing id.' };
-  try {
-    await domainsApi.discardIllustrationDraft(id);
-    revalidatePath(`/domains/${id}`);
-    revalidatePath('/domains');
-    return { ok: true };
-  } catch (err) {
-    return illustrationError(err);
-  }
-}
 
 export type MarkShippedResult = { ok: true; at: string } | { ok: false; error: string };
 

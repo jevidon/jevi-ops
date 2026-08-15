@@ -49,6 +49,7 @@ export default async function NewProjectPage({
             engagement_type: 'project',
             kind: initialKind,
             quoted_hours: '',
+            retainer_anchor_day: '',
             start_date: '',
             target_date: '',
             color: '',
