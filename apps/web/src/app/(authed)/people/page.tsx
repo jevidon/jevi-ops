@@ -1,18 +1,13 @@
 import { peopleApi, ApiError, type Person } from '@/lib/api';
-import { getAppTimezone } from '@/lib/app-settings';
-import { todayIsoDate } from '@/lib/today';
 import { PeopleView } from './people-view';
 
-// /people — relationships CRM (v2 redesign). Thin server shell: fetch the
-// people (with synthesised last-contact) + app-tz today, hand off to the client
-// PeopleView which owns the facet rail + card grid.
+// /people — relationships (v2 redesign). Thin server shell: fetch the people
+// (with interaction/fact counts), hand off to the client PeopleView which
+// owns the facet rail + card grid.
 
 export const dynamic = 'force-dynamic';
 
 export default async function PeoplePage() {
-  const tz = await getAppTimezone();
-  const today = todayIsoDate(tz);
-
   let people: Person[] = [];
   let errorMessage: string | null = null;
   try {
@@ -31,5 +26,5 @@ export default async function PeoplePage() {
     );
   }
 
-  return <PeopleView people={people} today={today} tz={tz} />;
+  return <PeopleView people={people} />;
 }

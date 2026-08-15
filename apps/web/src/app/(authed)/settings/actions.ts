@@ -90,6 +90,68 @@ export async function updateTimezoneAction(formData: FormData): Promise<SyncResu
   return { ok: true, message: `Timezone set to ${tz}.` };
 }
 
+// Toggle the Health module (Addendum 05). Default off; enabling reveals the
+// /health tabs in the nav. Data is retained either way.
+export async function toggleHealthModuleAction(formData: FormData): Promise<SyncResult> {
+  const enabled = formData.get('enabled') === 'true';
+  try {
+    await settingsApi.updateApp({ health_module_enabled: enabled });
+  } catch (err) {
+    if (err instanceof ApiError) {
+      const body = err.body as { error?: string } | null;
+      return { ok: false, message: body?.error ?? `HTTP ${err.status}` };
+    }
+    return { ok: false, message: (err as Error).message };
+  }
+  revalidatePath('/', 'layout');
+  return {
+    ok: true,
+    message: enabled ? 'Health module enabled.' : 'Health module hidden.',
+  };
+}
+
+// Toggle the Routines module (Addendum 06). Default on; turning it off hides
+// Routines from the nav + Today, 404s its routes, and quiets its cron pings +
+// chat tool. Data is retained. Layout revalidation refreshes the rail.
+export async function toggleRoutinesModuleAction(formData: FormData): Promise<SyncResult> {
+  const enabled = formData.get('enabled') === 'true';
+  try {
+    await settingsApi.updateApp({ routines_module_enabled: enabled });
+  } catch (err) {
+    if (err instanceof ApiError) {
+      const body = err.body as { error?: string } | null;
+      return { ok: false, message: body?.error ?? `HTTP ${err.status}` };
+    }
+    return { ok: false, message: (err as Error).message };
+  }
+  revalidatePath('/', 'layout');
+  return {
+    ok: true,
+    message: enabled ? 'Routines module enabled.' : 'Routines module hidden.',
+  };
+}
+
+// Toggle the Daily Rule module flag. In this fork the Rule surfaces
+// (/shutdown, /recap, /hedge) were never ported, so the flag is inert
+// beyond hiding/showing nothing — kept for schema parity with upstream.
+export async function toggleRuleModuleAction(formData: FormData): Promise<SyncResult> {
+  const enabled = formData.get('enabled') === 'true';
+  try {
+    await settingsApi.updateApp({ rule_module_enabled: enabled });
+  } catch (err) {
+    if (err instanceof ApiError) {
+      const body = err.body as { error?: string } | null;
+      return { ok: false, message: body?.error ?? `HTTP ${err.status}` };
+    }
+    return { ok: false, message: (err as Error).message };
+  }
+  revalidatePath('/', 'layout');
+  return {
+    ok: true,
+    message: enabled ? 'Daily Rule module restored.' : 'Daily Rule module retired.',
+  };
+}
+
 export async function disconnectGoogleAction(): Promise<SyncResult> {
   try {
     await googleApi.disconnect();

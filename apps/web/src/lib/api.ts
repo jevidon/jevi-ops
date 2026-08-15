@@ -55,13 +55,15 @@ export const api = {
     call<T>(path, { method: 'POST', body: body ? JSON.stringify(body) : undefined, auth: opts?.auth }),
   patch: <T>(path: string, body?: unknown) =>
     call<T>(path, { method: 'PATCH', body: body ? JSON.stringify(body) : undefined }),
+  put: <T>(path: string, body?: unknown) =>
+    call<T>(path, { method: 'PUT', body: body ? JSON.stringify(body) : undefined }),
   delete: <T = void>(path: string) => call<T>(path, { method: 'DELETE' }),
 };
 
 export { ApiError };
 
 // Typed helpers — one per known route. Add as new routes ship.
-import type { Task, Project, Domain, RecurrencePattern } from '@jevi-ops/shared';
+import type { Task, Project, Domain, RecurrencePattern } from '@jerad-ops/shared';
 
 // Project list/detail include relations the bare Project type doesn't.
 export interface Milestone {
@@ -107,7 +109,9 @@ export interface ProjectChecklistItem {
 }
 
 export interface ProjectDetail {
-  project: Project & { domain?: { id: string; name: string } | null };
+  project: Project & {
+    domain?: { id: string; name: string } | null;
+  };
   milestones: Milestone[];
   tasks: Task[];
   activity: ActivityLogEntry[];
@@ -147,6 +151,39 @@ export const tasksApi = {
   remove: (id: string) => api.delete(`/api/tasks/${id}`),
 };
 
+// The Daily Rule module (shutdown/hedges/recap/keystones) is not in this
+// fork — rule_module_enabled defaults false and the surfaces were never
+// ported. Only Tomorrow's Focus survives from that addendum series.
+
+// The Work page's computed map (Addendum 08).
+import type { WorkPayload } from '@jerad-ops/shared';
+export type { WorkPayload, WorkDomain, WorkProjectCard, WorkContentRow, WorkDirect, WorkRollup } from '@jerad-ops/shared';
+
+export const workApi = {
+  get: () => api.get<WorkPayload>('/api/work'),
+};
+
+// ─── Tomorrow's Focus (Addendum 09) ──────────────────────────────────────
+import type { ResolvedFocus, FocusTargetType } from '@jerad-ops/shared';
+export type { ResolvedFocus, FocusTargetType } from '@jerad-ops/shared';
+
+export const focusApi = {
+  // date omitted → today (app tz), server-side.
+  get: (date?: string) =>
+    api.get<{ focus: ResolvedFocus | null }>(
+      `/api/focus${date ? `?date=${encodeURIComponent(date)}` : ''}`,
+    ),
+  // date omitted → tomorrow (app tz), server-side.
+  set: (body: {
+    date?: string;
+    target_type: FocusTargetType;
+    target_id: string;
+    note?: string | null;
+  }) => api.put<{ focus: ResolvedFocus }>('/api/focus', body),
+  clear: (date?: string) =>
+    api.delete(`/api/focus${date ? `?date=${encodeURIComponent(date)}` : ''}`),
+};
+
 export type EngagementType = 'project' | 'retainer';
 export type ProjectKind = 'project' | 'area';
 
@@ -155,6 +192,7 @@ export interface ProjectCreate {
   description?: string | null;
   domain_id?: string | null;
   type?: 'client' | 'internal' | 'content' | null;
+  // Fork: client is a person (people.id), not a CRM company.
   client_id?: string | null;
   quoted_hours?: number | null;
   start_date?: string | null;
@@ -162,6 +200,7 @@ export interface ProjectCreate {
   color?: string | null;
   engagement_type?: EngagementType;
   kind?: ProjectKind;
+  retainer_anchor_day?: number | null;
 }
 
 export interface ProjectUpdate extends Partial<ProjectCreate> {
@@ -175,6 +214,11 @@ export const projectsApi = {
   update: (id: string, body: ProjectUpdate) => api.patch<Project>(`/api/projects/${id}`, body),
   remove: (id: string) => api.delete(`/api/projects/${id}`),
   milestones: {
+    // Flat list across all projects — for the task form's milestone picker.
+    listAll: () =>
+      api.get<{ milestones: Array<{ id: string; project_id: string; title: string; status: 'open' | 'done'; weight: number; position: number }> }>(
+        '/api/milestones',
+      ),
     create: (projectId: string, body: { title: string; weight?: number; position?: number }) =>
       api.post<Milestone>(`/api/projects/${projectId}/milestones`, body),
     update: (
@@ -235,6 +279,11 @@ export interface DomainUpdate {
   // "Mark shipped" timestamp — manually stamped via the domain detail
   // page button. The cadence helper reads MAX(this, content_items.publish).
   last_shipped_at?: string | null;
+  // Attention domain_stale config (Addendum 06).
+  stale_enabled?: boolean;
+  stale_days?: number | null;
+  // Work-page shelf (migration 0038).
+  parked?: boolean;
 }
 
 export const contentApi = {
@@ -472,7 +521,7 @@ export interface Quote {
   added_via: string;
   resurface_weight?: number;
   created_at: string;
-  book?: { id: string; title: string; author: string | null } | null;
+  book?: { id: string; title: string; author: string | null; cover_image_url?: string | null } | null;
   annotation_count?: number;
 }
 
@@ -498,6 +547,18 @@ export interface JournalEntry {
   created_at: string;
 }
 
+// Slim prev/next-day neighbour for the journal reader's paging (Addendum 10 §10).
+export interface JournalNeighbor {
+  id: string;
+  entry_date: string;
+  transcription_text: string | null;
+}
+export interface JournalEntryDetail {
+  entry: JournalEntry;
+  prev: JournalNeighbor | null;
+  next: JournalNeighbor | null;
+}
+
 export type FeedItemKind = 'note' | 'quote' | 'annotation' | 'journal';
 export interface FeedItem {
   kind: FeedItemKind;
@@ -511,7 +572,10 @@ export type ContentItemStatus =
   | 'published' | 'derivatives_pending' | 'done';
 
 export type ContentItemType =
-  | 'video' | 'article' | 'short_clip' | 'podcast_episode' | 'newsletter';
+  | 'video' | 'article' | 'short_clip' | 'podcast_episode' | 'newsletter' | 'course';
+
+export type ContentPlatform =
+  | 'yt_shorts' | 'ig_reels' | 'fb_reels' | 'tiktok' | 'threads' | 'x';
 
 export interface ContentItem {
   id: string;
@@ -525,6 +589,18 @@ export interface ContentItem {
   published_at: string | null;
   parent_id: string | null;
   derivative_type: string | null;
+  // Content Manager v2 (Addendum 07).
+  meta: Record<string, unknown>;
+  produced_on: string | null;
+  target_publish_date: string | null;
+  canonical_url: string | null;
+  platforms: ContentPlatform[] | null;
+  body_rich: string | null;
+  // Work Page (Addendum 08): holder + idea lifecycle.
+  holder: 'me' | 'editor';
+  holder_since: string | null;
+  archived_at: string | null;
+  idea_reviewed_at: string | null;
   created_at: string;
   updated_at: string;
   domain?: { id: string; name: string } | null;
@@ -591,12 +667,13 @@ export const libraryApi = {
     }>(`/api/library/resurfacing${q ? `?${q}` : ''}`);
   },
   notes: {
-    list: (opts?: { source_type?: string; needs_review?: boolean; tag?: string; resurface?: 'boosted' | 'excluded' }) => {
+    list: (opts?: { source_type?: string; needs_review?: boolean; tag?: string; resurface?: 'boosted' | 'excluded'; limit?: number }) => {
       const qs = new URLSearchParams();
       if (opts?.source_type) qs.set('source_type', opts.source_type);
       if (opts?.needs_review) qs.set('needs_review', 'true');
       if (opts?.tag) qs.set('tag', opts.tag);
       if (opts?.resurface) qs.set('resurface', opts.resurface);
+      if (opts?.limit) qs.set('limit', String(opts.limit));
       const q = qs.toString();
       return api.get<{ notes: Note[] }>(`/api/notes${q ? `?${q}` : ''}`);
     },
@@ -614,10 +691,11 @@ export const libraryApi = {
     remove: (id: string) => api.delete(`/api/notes/${id}`),
   },
   quotes: {
-    list: (opts?: { tag?: string; resurface?: 'boosted' | 'excluded' }) => {
+    list: (opts?: { tag?: string; resurface?: 'boosted' | 'excluded'; limit?: number }) => {
       const qs = new URLSearchParams();
       if (opts?.tag) qs.set('tag', opts.tag);
       if (opts?.resurface) qs.set('resurface', opts.resurface);
+      if (opts?.limit) qs.set('limit', String(opts.limit));
       const q = qs.toString();
       return api.get<{ quotes: Quote[] }>(`/api/quotes${q ? `?${q}` : ''}`);
     },
@@ -647,13 +725,14 @@ export const libraryApi = {
     remove: (id: string) => api.delete(`/api/quote-annotations/${id}`),
   },
   journal: {
-    list: (opts?: { resurface?: 'boosted' | 'excluded' }) => {
+    list: (opts?: { resurface?: 'boosted' | 'excluded'; limit?: number }) => {
       const qs = new URLSearchParams();
       if (opts?.resurface) qs.set('resurface', opts.resurface);
+      if (opts?.limit) qs.set('limit', String(opts.limit));
       const q = qs.toString();
       return api.get<{ entries: JournalEntry[] }>(`/api/journal-entries${q ? `?${q}` : ''}`);
     },
-    get: (id: string) => api.get<JournalEntry>(`/api/journal-entries/${id}`),
+    get: (id: string) => api.get<JournalEntryDetail>(`/api/journal-entries/${id}`),
     create: (body: {
       transcription_text?: string | null;
       entry_date?: string;
@@ -669,7 +748,12 @@ export const libraryApi = {
     remove: (id: string) => api.delete(`/api/journal-entries/${id}`),
   },
   books: {
-    list: () => api.get<{ books: Book[] }>('/api/books'),
+    list: (opts?: { limit?: number }) => {
+      const qs = new URLSearchParams();
+      if (opts?.limit) qs.set('limit', String(opts.limit));
+      const q = qs.toString();
+      return api.get<{ books: Book[] }>(`/api/books${q ? `?${q}` : ''}`);
+    },
     get: (id: string) => api.get<{ book: Book; quotes: Quote[] }>(`/api/books/${id}`),
     create: (body: Partial<Book> & { title: string }) =>
       api.post<Book>('/api/books', body),
@@ -763,7 +847,7 @@ export const routinesApi = {
     api.post<unknown>(`/api/routines/${id}/completions`, body),
 };
 
-// ─── People CRM ──────────────────────────────────────────────────────────
+// ─── People (contacts + facts + interaction log — this fork's model) ──────
 
 export type RelationshipType =
   | 'client' | 'family' | 'church' | 'friend' | 'team' | 'vendor' | 'other';
@@ -807,6 +891,55 @@ export interface PersonInteraction {
   notes: string | null;
   occurred_at: string;
 }
+
+// ─── Attention Engine (Addendum 05) ──────────────────────────────────────
+
+export type AttentionSourceType =
+  | 'person' | 'company' | 'domain' | 'project' | 'conversation' | 'task' | 'content';
+export type AttentionUrgency = 'low' | 'normal' | 'high';
+export type AttentionStatus = 'active' | 'dismissed' | 'snoozed' | 'acted_on' | 'expired';
+
+export interface AttentionItem {
+  id: string;
+  rule_type: string;
+  source_type: AttentionSourceType;
+  source_id: string;
+  title: string;
+  detail: string | null;
+  suggested_action: string | null;
+  score: number;
+  urgency: AttentionUrgency;
+  first_surfaced_at: string;
+  last_surfaced_at: string;
+  surface_count: number;
+  status: AttentionStatus;
+  snoozed_until: string | null;
+  dismissed_at: string | null;
+  acted_on_at: string | null;
+  acted_on_action: string | null;
+  dedup_key: string;
+  created_at: string;
+}
+
+export type AttentionActionBody =
+  | { action: 'snooze'; until?: string }
+  | { action: 'dismiss' }
+  | { action: 'acted_on'; acted_on_action?: string }
+  | { action: 'reactivate' };
+
+export const attentionApi = {
+  list: (opts?: { status?: AttentionStatus; urgency?: AttentionUrgency; limit?: number; all?: boolean }) => {
+    const qs = new URLSearchParams();
+    if (opts?.status) qs.set('status', opts.status);
+    if (opts?.urgency) qs.set('urgency', opts.urgency);
+    if (opts?.limit) qs.set('limit', String(opts.limit));
+    if (opts?.all) qs.set('all', 'true');
+    const q = qs.toString();
+    return api.get<{ items: AttentionItem[] }>(`/api/attention${q ? `?${q}` : ''}`);
+  },
+  count: () => api.get<{ active: number }>('/api/attention/count'),
+  act: (id: string, body: AttentionActionBody) => api.patch<AttentionItem>(`/api/attention/${id}`, body),
+};
 
 export interface PersonDetail {
   person: Person;
@@ -1035,34 +1168,11 @@ export interface CadenceRow {
   unit: string;
   next: string;
   routeTo: { href: string; label: string };
-  // Stored engraved spot art (migration 0032); null = render the
-  // name-seeded procedural fallback. Matches DomainIllustrationSchema
-  // in @jevi-ops/shared.
-  illustration: {
-    svg: string;
-    style: 'engraved';
-    source: 'llm' | 'procedural';
-    generated_at: string;
-  } | null;
-}
-
-// Workload rollup attached to each Domains-pulse row. `next_due` is the
-// earliest dated open task in the domain, overdue included.
-export interface DomainStats {
-  projects: number;
-  open_tasks: number;
-  overdue: number;
-  due_soon: number;
-  next_due: { date: string; title: string } | null;
-}
-
-export interface DomainPulseRow extends CadenceRow {
-  stats: DomainStats;
 }
 
 export const briefingApi = {
   today: () => api.get<BriefingPayload>('/api/briefing/today'),
-  domains: () => api.get<{ domains: DomainPulseRow[] }>('/api/briefing/domains'),
+  domains: () => api.get<{ domains: CadenceRow[] }>('/api/briefing/domains'),
 };
 
 // ─── Notifications ───────────────────────────────────────────────────────
@@ -1110,6 +1220,12 @@ export interface IntegrationItem {
 
 export interface AppSettings {
   timezone: string;
+  // Module flags (v2, migration 0036).
+  health_module_enabled: boolean;
+  routines_module_enabled: boolean;
+  // Daily Rule (Addendum 06), retired by Addendum 09 — defaults false.
+  rule_module_enabled: boolean;
+  // Fork: self-hosted AI + Immich configuration.
   llm_provider?: 'openai_compatible' | 'anthropic' | null;
   llm_base_url?: string | null;
   llm_model?: string | null;
