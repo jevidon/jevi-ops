@@ -77,7 +77,7 @@ export default async function NotificationsPage({
 
       {errorMessage ? (
         <div className="px-5 lg:px-0 mt-6 font-sans text-[13px] text-ink-3">
-          Couldn't load: {errorMessage}
+          Couldn&rsquo;t load: {errorMessage}
         </div>
       ) : notifications.length === 0 ? (
         <div className="px-5 lg:px-0 mt-8 font-sans text-[13px] text-ink-3 italic">
