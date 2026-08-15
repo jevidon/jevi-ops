@@ -26,14 +26,20 @@ export interface PersonFormInitial {
   relationship_type: RelationshipType | '';
   email: string;
   phone: string;
-  company: string;
+  company_id: string;
+  role_at_company: string;
+  is_primary_contact: boolean;
+  birthday: string;
+  anniversary: string;
   notes: string;
 }
 
 export function PersonForm({
   initial,
+  companies,
 }: {
   initial: PersonFormInitial;
+  companies: Array<{ id: string; name: string }>;
 }) {
   const isEdit = Boolean(initial.id);
   const [state, formAction, pending] = useActionState<SaveResult | null, FormData>(
@@ -92,17 +98,70 @@ export function PersonForm({
           </Field>
         </div>
 
-        <Field label="Company">
-          {/* Fork: freeform text on the person record — birthdays and
-              anniversaries live in person_facts on the detail page. */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <Field label="Company">
+            <select
+              name="company_id"
+              defaultValue={initial.company_id}
+              className="w-full bg-transparent border-b border-line focus:border-accent focus:outline-none py-1.5 font-sans text-[14px] text-ink"
+            >
+              <option value="">— none —</option>
+              {companies.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Role at company">
+            <input
+              type="text"
+              name="role_at_company"
+              defaultValue={initial.role_at_company}
+              placeholder="e.g. Marketing Director"
+              className="w-full bg-transparent border-b border-line focus:border-accent focus:outline-none py-1.5 font-sans text-[14px] text-ink placeholder:text-ink-3/60"
+            />
+          </Field>
+        </div>
+
+        {companies.length === 0 && (
+          <p className="font-sans text-[12px] text-ink-3 -mt-2">
+            No companies yet.{' '}
+            <Link href="/companies/new" className="text-accent hover:underline">Create one</Link>{' '}
+            to link this person to an org.
+          </p>
+        )}
+
+        <label className="flex items-center gap-2">
+          {/* Hidden 'false' companion — an unchecked checkbox is omitted from
+              FormData, so without this, unchecking can't be distinguished from
+              "field absent." readFields reads getAll('is_primary_contact'). */}
+          <input type="hidden" name="is_primary_contact" value="false" />
           <input
-            type="text"
-            name="company"
-            defaultValue={initial.company}
-            placeholder="e.g. Riverside Web Co."
-            className="w-full bg-transparent border-b border-line focus:border-accent focus:outline-none py-1.5 font-sans text-[14px] text-ink placeholder:text-ink-3/60"
+            type="checkbox"
+            name="is_primary_contact"
+            defaultChecked={initial.is_primary_contact}
+            className="accent-ink"
           />
-        </Field>
+          <span className="font-sans text-[13px] text-ink-2">Primary contact for this company</span>
+        </label>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <Field label="Birthday">
+            <input
+              type="date"
+              name="birthday"
+              defaultValue={initial.birthday}
+              className="w-full bg-transparent border-b border-line focus:border-accent focus:outline-none py-1.5 font-sans text-[14px] text-ink"
+            />
+          </Field>
+          <Field label="Anniversary">
+            <input
+              type="date"
+              name="anniversary"
+              defaultValue={initial.anniversary}
+              className="w-full bg-transparent border-b border-line focus:border-accent focus:outline-none py-1.5 font-sans text-[14px] text-ink"
+            />
+          </Field>
+        </div>
 
         <Field label="Notes">
           <textarea

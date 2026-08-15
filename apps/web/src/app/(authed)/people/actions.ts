@@ -18,16 +18,28 @@ function readFields(formData: FormData): PersonCreate {
     : null;
   const email = String(formData.get('email') ?? '').trim() || null;
   const phone = String(formData.get('phone') ?? '').trim() || null;
-  // Fork: company is a plain text field on the person, not a CRM FK.
-  // Birthdays/anniversaries live in person_facts, not person columns.
-  const company = String(formData.get('company') ?? '').trim() || null;
+  const company_id = String(formData.get('company_id') ?? '').trim() || null;
+  const role_at_company = String(formData.get('role_at_company') ?? '').trim() || null;
+  const birthday = String(formData.get('birthday') ?? '').trim() || null;
+  const anniversary = String(formData.get('anniversary') ?? '').trim() || null;
+  // Checkbox with a hidden 'false' companion — getAll returns ['false'] when
+  // unchecked, ['false','on'] when checked (never absent since the form
+  // always renders it), so presence of 'on' means true.
+  const is_primary_contact = formData.getAll('is_primary_contact').map(String).includes('on');
   const notes = String(formData.get('notes') ?? '').trim() || null;
+  // If no company is selected, a primary-contact flag is meaningless — force
+  // it false so we never trip the one-primary-per-company partial index with
+  // a null company_id edge case.
   return {
     name,
     relationship_type,
     email,
     phone,
-    company,
+    company_id,
+    role_at_company,
+    is_primary_contact: company_id ? is_primary_contact : false,
+    birthday,
+    anniversary,
     notes,
   };
 }

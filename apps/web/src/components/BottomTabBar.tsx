@@ -71,6 +71,7 @@ export function BottomTabBar({
 
   const moreItems: MoreItem[] = ([
     { href: '/tasks', label: 'Tasks', icon: 'tasks' },
+    { href: '/companies', label: 'Companies', icon: 'companies' },
     { href: '/routines', label: 'Routines', icon: 'routines', flag: 'routines' },
     { href: '/health', label: 'Health', icon: 'health', flag: 'health' },
     { href: '/search', label: 'Search', icon: 'search' },
