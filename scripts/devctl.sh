@@ -37,12 +37,31 @@ url_for() {
   esac
 }
 
+port_for() {
+  case "$1" in
+    api) echo "$API_PORT" ;;
+    web) echo "$WEB_PORT" ;;
+  esac
+}
+
 start_one() {
   local name="$1" dir="$2"; shift 2
   local url; url="$(url_for "$name")"
   if is_running "$name"; then
     echo "$name: already running (pid $(pid_of "$name"))"
     return 0
+  fi
+  # A foreign listener on our port would make the health poll pass while
+  # our own process dies (or serves nothing) — the classic stale-server
+  # trap. Refuse loudly instead of reporting a false "up".
+  local port occupant
+  port="$(port_for "$name")"
+  occupant="$(lsof -ti "tcp:${port}" -sTCP:LISTEN 2>/dev/null | head -1 || true)"
+  if [ -n "$occupant" ]; then
+    echo "$name: port $port is already in use by a process devctl didn't start:" >&2
+    ps -o pid=,command= -p "$occupant" >&2 || true
+    echo "$name: kill it first (kill $occupant), then re-run start." >&2
+    return 1
   fi
   rm -f "$RUN/$name.pid"
   # nohup + background happens *inside* this script — the caller never
@@ -114,7 +133,14 @@ status_one() {
       echo "$name: running (pid $(pid_of "$name")) but $url NOT answering"
     fi
   else
-    echo "$name: stopped"
+    local port occupant
+    port="$(port_for "$name")"
+    occupant="$(lsof -ti "tcp:${port}" -sTCP:LISTEN 2>/dev/null | head -1 || true)"
+    if [ -n "$occupant" ]; then
+      echo "$name: stopped, but port $port is held by a foreign process (pid $occupant) — start will refuse until it's killed"
+    else
+      echo "$name: stopped"
+    fi
   fi
 }
 

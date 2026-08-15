@@ -22,7 +22,18 @@ API: `http://127.0.0.1:3001` (health: `/healthz`). Web: `http://127.0.0.1:3000`
 (hot-reloads on its own). Logs and PID files live in `.dev-run/` (gitignored).
 The API reads `.env` at the repo root on boot.
 
+If `start` refuses because the port is held by a process devctl didn't start
+(a stale server from a pre-devctl session), kill the PID it prints and re-run.
+`status` flags the same condition.
+
 ## Database & migrations
+
+`scripts/db-migrate.sh` targets, in order: `--url`, `$DATABASE_URL`,
+`DATABASE_URL` from the repo-root `.env` (i.e. whatever the API itself uses),
+then the docker dev default. It prints the target before acting — read that
+line. It finds psql on PATH, in common install spots (Homebrew libpq,
+Postgres.app), via `$PSQL_BIN`, or falls back to docker-exec inside the dev
+container.
 
 Dev DB (Docker, port 54329 to dodge system Postgres):
 
