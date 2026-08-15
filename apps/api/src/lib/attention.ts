@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNotNull, lt, lte, max } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNotNull, isNull, lt, lte, max } from 'drizzle-orm';
 import type { Db } from './db.js';
 import {
   activity_log,
@@ -270,29 +270,112 @@ async function ruleProjectStalled(db: Db, ctx: Ctx): Promise<CandidateItem[]> {
 }
 
 async function ruleContentStuck(db: Db, ctx: Ctx): Promise<CandidateItem[]> {
-  // Fork adaptation: upstream anchors on holder/holder_since (Content Manager
-  // v2, not ported). Our clock is updated_at — any touch to the row resets
-  // it, which under-fires rather than over-fires. Revisit if CM v2 lands.
+  // Sharpened per upstream Addendum 08 §9 (migration 0038): fire only when
+  // the EDITOR has held it ≥10 days, anchored on holder_since — a true
+  // clock — instead of raw editing-status age. Self-edited items
+  // (holder='me') are my-move work, surfaced elsewhere, not "stuck".
   const cutoff = daysAgoIso(10);
   const stuck = await db.query.content_items.findMany({
-    columns: { id: true, title: true, updated_at: true },
-    where: and(eq(content_items.status, 'editing'), lt(content_items.updated_at, cutoff)),
+    columns: { id: true, title: true, holder_since: true },
+    where: and(
+      eq(content_items.status, 'editing'),
+      eq(content_items.holder, 'editor'),
+      isNotNull(content_items.holder_since),
+      lt(content_items.holder_since, cutoff),
+    ),
   });
   const out: CandidateItem[] = [];
   for (const c of stuck) {
-    const days = Math.abs(daysBetween(ymdInTz(c.updated_at, ctx.tz), ctx.todayYmd));
+    // holder_since is TIMESTAMPTZ — convert to the app-tz date before
+    // diffing (a UTC slice reads a day early for evening hand-offs).
+    const days = c.holder_since
+      ? Math.abs(daysBetween(ymdInTz(c.holder_since, ctx.tz), ctx.todayYmd))
+      : 10;
     out.push({
       rule_type: 'content_stuck_in_editing',
       source_type: 'content',
       source_id: c.id,
-      title: `Stuck in editing: ${c.title}`,
-      detail: `In editing, untouched ${days}d`,
-      suggested_action: 'Open content',
+      title: `With editor: ${c.title}`,
+      detail: `In the editor's hands ${days}d`,
+      suggested_action: 'Nudge editor',
       score: 45 + Math.min(35, Math.floor((days - 10) / 7) * 15),
       dedup_key: `content_stuck_in_editing:${c.id}:${isoWeekBucket(ctx.todayYmd)}`,
     });
   }
   return out;
+}
+
+// Waiting ≥7 days (Addendum 08 §9): a task blocked on someone else long
+// enough to warrant a nudge-or-move-on. waiting_since is the anchor.
+// Waiting tasks are excluded from task_due_soon (that rule filters
+// status='open'), so there's no double surface. Score ramps weekly past
+// the 7-day mark.
+async function ruleTaskWaitingAging(db: Db, ctx: Ctx): Promise<CandidateItem[]> {
+  const rows = await db.query.tasks.findMany({
+    columns: { id: true, title: true, waiting_on: true, waiting_since: true },
+    where: and(eq(tasks.status, 'waiting'), isNotNull(tasks.waiting_since)),
+  });
+  const out: CandidateItem[] = [];
+  for (const t of rows) {
+    const days = t.waiting_since ? Math.abs(daysBetween(t.waiting_since, ctx.todayYmd)) : 0;
+    if (days < 7) continue;
+    const who = t.waiting_on?.trim() || 'someone';
+    out.push({
+      rule_type: 'task_waiting_aging',
+      source_type: 'task',
+      source_id: t.id,
+      title: `Waiting ${days}d: ${t.title}`,
+      detail: `Waiting on ${who} · ${days}d — nudge or move on?`,
+      suggested_action: 'Nudge or move on',
+      score: 30 + Math.min(40, Math.floor((days - 7) / 7) * 20),
+      dedup_key: `task_waiting_aging:${t.id}:${isoWeekBucket(ctx.todayYmd)}`,
+    });
+  }
+  return out;
+}
+
+// Idea resurfacing (Addendum 09 §5). Fires only when the backlog is
+// genuinely stale: ≥3 ideas with no review in 30+ days. Emits exactly ONE
+// item a week — the count is the signal, so N items would be noise —
+// anchored on the OLDEST un-reviewed idea, because attention_items.source_id
+// must be a real uuid (there is no roll-up source). Keep/Archive is what
+// clears them; idea_reviewed_at is the "reviewed" stamp, falling back to
+// created_at for never-reviewed ideas.
+const IDEAS_AGING_MIN_COUNT = 3;
+const IDEAS_AGING_MIN_DAYS = 30;
+
+async function ruleIdeasAging(db: Db, ctx: Ctx): Promise<CandidateItem[]> {
+  const rows = await db.query.content_items.findMany({
+    columns: { id: true, title: true, created_at: true, idea_reviewed_at: true },
+    where: and(eq(content_items.status, 'idea'), isNull(content_items.archived_at)),
+  });
+
+  // "Last looked at" = the review stamp, else when it was captured. Both are
+  // TIMESTAMPTZ, so convert to the app-tz calendar date before diffing.
+  const stale = rows
+    .map((c) => ({ ...c, lastSeen: ymdInTz(c.idea_reviewed_at ?? c.created_at, ctx.tz) }))
+    .filter((c) => Math.abs(daysBetween(c.lastSeen, ctx.todayYmd)) >= IDEAS_AGING_MIN_DAYS)
+    .sort((a, b) => a.lastSeen.localeCompare(b.lastSeen));
+
+  if (stale.length < IDEAS_AGING_MIN_COUNT) return [];
+
+  const oldest = stale[0]!;
+  const days = Math.abs(daysBetween(oldest.lastSeen, ctx.todayYmd));
+  return [{
+    rule_type: 'ideas_aging',
+    source_type: 'content',
+    source_id: oldest.id,
+    title: `${stale.length} ideas aging — review`,
+    detail: `Oldest untouched ${days}d: "${oldest.title}". Keep the ones worth keeping, archive the rest.`,
+    suggested_action: 'Review ideas',
+    score: 25,
+    // Occurrence identity is the WEEK, not the anchor idea. Keying on
+    // oldest.id would change the dedup identity the moment you Keep or
+    // Archive anything — inserting a SECOND item in the same week and
+    // resurrecting one you just dismissed. source_id still carries the real
+    // idea uuid so the row deep-links and satisfies the not-null column.
+    dedup_key: `ideas_aging:all:${isoWeekBucket(ctx.todayYmd)}`,
+  }];
 }
 
 // Observations cadence rules — a domain with any of these is already tracked
@@ -305,19 +388,23 @@ const OBSERVATION_CADENCE_RULES = new Set([
 ]);
 
 async function ruleDomainStale(db: Db, ctx: Ctx): Promise<CandidateItem[]> {
-  // Fork note: upstream adds per-domain stale_enabled/stale_days (Addendum
-  // 06); this fork uses the flat 21-day default until that config lands.
-  const THRESHOLD_DAYS = 21;
   const domains = await db.query.stewardship_domains.findMany({
-    columns: { id: true, name: true, last_shipped_at: true, failure_patterns: true },
+    columns: {
+      id: true, name: true, last_shipped_at: true, failure_patterns: true,
+      stale_enabled: true, stale_days: true,
+    },
     where: and(eq(stewardship_domains.active, true), eq(stewardship_domains.is_system, false)),
   });
-  const cutoff = daysAgoIso(THRESHOLD_DAYS);
   const out: CandidateItem[] = [];
   for (const d of domains) {
+    // Per-domain off switch (migration 0040).
+    if (d.stale_enabled === false) continue;
     // Skip domains the Observations engine already tracks for staleness.
     const patterns = Array.isArray(d.failure_patterns) ? d.failure_patterns : [];
     if (patterns.some((p) => OBSERVATION_CADENCE_RULES.has((p as { rule?: string })?.rule ?? ''))) continue;
+    // Per-domain threshold; null/invalid → the default 21.
+    const thresholdDays = typeof d.stale_days === 'number' && d.stale_days > 0 ? d.stale_days : 21;
+    const cutoff = daysAgoIso(thresholdDays);
     if (d.last_shipped_at && d.last_shipped_at > cutoff) continue;
     out.push({
       rule_type: 'domain_stale',
@@ -325,7 +412,7 @@ async function ruleDomainStale(db: Db, ctx: Ctx): Promise<CandidateItem[]> {
       source_id: d.id,
       title: `${d.name}: nothing shipped recently`,
       detail: d.last_shipped_at
-        ? `Last shipped ${ymdInTz(d.last_shipped_at, ctx.tz)} · ${THRESHOLD_DAYS}d threshold`
+        ? `Last shipped ${ymdInTz(d.last_shipped_at, ctx.tz)} · ${thresholdDays}d threshold`
         : 'No ship logged yet',
       suggested_action: 'Open domain',
       score: 30,
@@ -343,8 +430,10 @@ const RULES: { ruleType: string; fn: RuleFn }[] = [
   // protects every one of its item families from auto-resolve.
   { ruleType: 'birthday_upcoming', fn: rulePersonFact },
   { ruleType: 'task_due_soon', fn: ruleTaskDueSoon },
+  { ruleType: 'task_waiting_aging', fn: ruleTaskWaitingAging },
   { ruleType: 'project_stalled', fn: ruleProjectStalled },
   { ruleType: 'content_stuck_in_editing', fn: ruleContentStuck },
+  { ruleType: 'ideas_aging', fn: ruleIdeasAging },
   { ruleType: 'domain_stale', fn: ruleDomainStale },
 ];
 // rule_types that share rulePersonFact's fate (see registry note above).

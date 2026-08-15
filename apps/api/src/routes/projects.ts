@@ -163,6 +163,17 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
   // to "end of list" when omitted; status flips stamp/clear completed_at
   // so the UI doesn't have to manage that field separately.
 
+  // Flat list of every milestone across projects — the v2 task form/detail
+  // fetch this once (projectsApi.milestones.listAll) instead of an N+1 per
+  // project. Ordered so a client can group by project_id then board order.
+  app.get('/api/milestones', async () => {
+    const rows = await getDb().query.milestones.findMany({
+      columns: { id: true, project_id: true, title: true, status: true, weight: true, position: true },
+      orderBy: [asc(milestones.project_id), asc(milestones.position)],
+    });
+    return { milestones: rows };
+  });
+
   app.post<{ Params: { id: string } }>(
     '/api/projects/:id/milestones',
     async (req, reply) => {

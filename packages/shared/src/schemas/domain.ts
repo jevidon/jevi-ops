@@ -32,6 +32,13 @@ export const DomainSchema = z.object({
   // cadence helper's days_since_publish rule reads MAX of this and the
   // latest content_items.published_at.
   last_shipped_at: z.string().datetime({ offset: true }).nullable().optional(),
+  // Added by migration 0040. Per-domain Attention domain_stale config: on/off
+  // + threshold (null → default 21). Also auto-skipped when a cadence rule
+  // tracks the domain (Observations owns those).
+  stale_enabled: z.boolean().default(true),
+  stale_days: z.number().int().positive().nullable().optional(),
+  // Added by migration 0038. Parked channel — muted/collapsed on Work.
+  parked: z.boolean().default(false),
   // Added by migration 0032. Server-generated engraved spot art for the
   // Domains board; see DomainIllustrationSchema above.
   illustration: DomainIllustrationSchema.nullable().optional(),
@@ -57,4 +64,7 @@ export const UpdateDomainSchema = z.object({
   // Stamped via the "Mark shipped" button on the domain detail page.
   // Accept ISO datetime or null (to clear).
   last_shipped_at: z.string().datetime({ offset: true }).nullable().optional(),
+  stale_enabled: z.boolean().optional(),
+  stale_days: z.number().int().positive().nullable().optional(),
+  parked: z.boolean().optional(),
 });

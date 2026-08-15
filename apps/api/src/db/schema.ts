@@ -65,6 +65,8 @@ export const projects = pgTable("projects", {
 	completed_at: timestamp({ withTimezone: true, mode: 'string' }),
 	color: text(),
 	engagement_type: text().default('project').notNull(),
+	// Retainer cycle anchor day-of-month (migration 0038); null until set.
+	retainer_anchor_day: integer(),
 	kind: text().default('project').notNull(),
 	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	updated_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
@@ -86,6 +88,7 @@ export const projects = pgTable("projects", {
 	check("projects_type_check", sql`type = ANY (ARRAY['client'::text, 'internal'::text, 'content'::text])`),
 	check("projects_engagement_type_check", sql`engagement_type = ANY (ARRAY['project'::text, 'retainer'::text])`),
 	check("projects_kind_check", sql`kind = ANY (ARRAY['project'::text, 'area'::text])`),
+	check("projects_retainer_anchor_day_check", sql`(retainer_anchor_day >= 1) AND (retainer_anchor_day <= 31)`),
 ]);
 
 export const stewardship_domains = pgTable("stewardship_domains", {
@@ -97,6 +100,11 @@ export const stewardship_domains = pgTable("stewardship_domains", {
 	expected_cadence: text(),
 	active: boolean().default(true).notNull(),
 	is_system: boolean().default(false).notNull(),
+	// Work page (0038): deliberately-paused channel, muted at the bottom.
+	parked: boolean().default(false).notNull(),
+	// Attention domain_stale config (0040): on/off + threshold (null → 21).
+	stale_enabled: boolean().default(true).notNull(),
+	stale_days: integer(),
 	last_shipped_at: timestamp({ withTimezone: true, mode: 'string' }),
 	illustration: jsonb().$type<DomainIllustration>(),
 	// Candidate awaiting Keep/Discard on the settings page (migration 0033).
@@ -230,6 +238,18 @@ export const content_items = pgTable("content_items", {
 	published_at: timestamp({ withTimezone: true, mode: 'string' }),
 	parent_id: uuid(),
 	derivative_type: text(),
+	// Work page (0038): who the ball is with + idea lifecycle stamps.
+	holder: text().default('me').notNull(),
+	holder_since: timestamp({ withTimezone: true, mode: 'string' }),
+	archived_at: timestamp({ withTimezone: true, mode: 'string' }),
+	idea_reviewed_at: timestamp({ withTimezone: true, mode: 'string' }),
+	// Content Manager v2 (0039): production fields.
+	meta: jsonb().$type<Record<string, unknown>>().default({}).notNull(),
+	produced_on: date(),
+	target_publish_date: date(),
+	canonical_url: text(),
+	platforms: text().array(),
+	body_rich: text(),
 	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	updated_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [
@@ -245,8 +265,9 @@ export const content_items = pgTable("content_items", {
 			foreignColumns: [table.id],
 			name: "content_items_parent_id_fkey"
 		}).onDelete("set null"),
-	check("content_items_type_check", sql`type = ANY (ARRAY['video'::text, 'article'::text, 'short_clip'::text, 'podcast_episode'::text, 'newsletter'::text])`),
+	check("content_items_type_check", sql`type = ANY (ARRAY['video'::text, 'article'::text, 'short_clip'::text, 'podcast_episode'::text, 'newsletter'::text, 'course'::text])`),
 	check("content_items_status_check", sql`status = ANY (ARRAY['idea'::text, 'outline'::text, 'filming'::text, 'editing'::text, 'published'::text, 'derivatives_pending'::text, 'done'::text])`),
+	check("content_items_holder_check", sql`holder = ANY (ARRAY['me'::text, 'editor'::text])`),
 ]);
 
 export const content_checklist_items = pgTable("content_checklist_items", {
@@ -296,6 +317,9 @@ export const tasks = pgTable("tasks", {
 	reminders_sent: jsonb().$type<Record<string, string>>().default({}).notNull(),
 	source: text().default('manual').notNull(),
 	top3_for_date: date(),
+	// Waiting state (migration 0038): who it's blocked on + the aging anchor.
+	waiting_on: text(),
+	waiting_since: date(),
 	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	completed_at: timestamp({ withTimezone: true, mode: 'string' }),
 	updated_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
@@ -332,7 +356,7 @@ export const tasks = pgTable("tasks", {
 			foreignColumns: [stewardship_domains.id],
 			name: "tasks_domain_id_fkey"
 		}),
-	check("tasks_status_check", sql`status = ANY (ARRAY['open'::text, 'done'::text])`),
+	check("tasks_status_check", sql`status = ANY (ARRAY['open'::text, 'waiting'::text, 'done'::text])`),
 	check("tasks_priority_check", sql`(priority >= 1) AND (priority <= 4)`),
 	check("tasks_source_check", sql`source = ANY (ARRAY['manual'::text, 'voice'::text, 'email'::text, 'observation'::text, 'import'::text])`),
 ]);

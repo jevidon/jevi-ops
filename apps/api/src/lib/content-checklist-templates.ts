@@ -47,6 +47,13 @@ export const CONTENT_CHECKLIST_TEMPLATES: Record<ContentItemType, readonly strin
     'Header image',
     'Send',
   ],
+  course: [
+    'Outline',
+    'Film',
+    'Edit',
+    'Companion post',
+    'Publish',
+  ],
 };
 
 export function defaultChecklistItemsFor(type: ContentItemType): string[] {
