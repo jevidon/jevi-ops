@@ -3,6 +3,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { env } from '../lib/env.js';
 import { getDb, isDatabaseConfigured } from '../lib/db.js';
 import { runObservations } from '../lib/observations.js';
+import { runAttention } from '../lib/attention.js';
 import { runReminders } from '../lib/reminders.js';
 import { runRoutineReminders, runRoutineMissed } from '../lib/routine-reminders.js';
 import { runOverdue } from '../lib/overdue.js';
@@ -256,4 +257,33 @@ export const cronRoutes: FastifyPluginAsync = async (app) => {
   };
   app.get('/api/cron/calendar-sync', calendarSyncHandler);
   app.post('/api/cron/calendar-sync', calendarSyncHandler);
+
+  // /api/cron/attention — daily at 5am app-tz via the in-process scheduler.
+  // Runs the Attention Engine rules and reconciles attention_items
+  // (birthdays, due tasks, stalled projects, stuck content, stale domains).
+  // Idempotent — safe to run more often.
+  const attentionHandler = async (req: FastifyRequest, reply: import('fastify').FastifyReply) => {
+    if (!env.CRON_SECRET) {
+      return reply.code(503).send({ error: 'cron_disabled', reason: 'CRON_SECRET not set' });
+    }
+    if (!checkSecret(readSecret(req))) {
+      return reply.code(401).send({ error: 'unauthorized' });
+    }
+    if (!isDatabaseConfigured()) {
+      return reply.code(503).send({ error: 'database_not_configured' });
+    }
+    try {
+      const result = await runAttention(getDb());
+      req.log.info({ event: 'attention_run', ...result }, 'attention cron complete');
+      return reply.code(200).send(result);
+    } catch (err) {
+      req.log.error({ err }, 'attention cron failed');
+      return reply.code(500).send({
+        error: 'attention_failed',
+        message: err instanceof Error ? err.message : 'unknown',
+      });
+    }
+  };
+  app.get('/api/cron/attention', attentionHandler);
+  app.post('/api/cron/attention', attentionHandler);
 };

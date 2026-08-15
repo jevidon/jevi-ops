@@ -1,0 +1,519 @@
+import { and, desc, eq, inArray, isNotNull, lt, lte, max } from 'drizzle-orm';
+import type { Db } from './db.js';
+import {
+  activity_log,
+  attention_items,
+  content_items,
+  people,
+  person_facts,
+  projects,
+  stewardship_domains,
+  tasks,
+} from '../db/schema.js';
+import { getAppTz } from './app-settings.js';
+
+// The Attention Engine — ported from upstream jerad-ops v2.0.0 (Addendum 05
+// §10), re-expressed against Drizzle. Modeled on observations.ts: rule
+// handlers each return CandidateItem[]; runAttention reconciles them against
+// stored items and manages the snooze/dismiss/acted lifecycle.
+//
+// Fork scope: upstream ships 13 rules; we port the 5 whose entities exist in
+// this fork (person facts, due tasks, stalled projects, stuck content, stale
+// domains). The conversation/company rules (follow-ups, silent clients,
+// reviews), waiting-task aging, and ideas aging depend on the CRM/Content-
+// Manager/Daily-Rule subsystems that haven't been ported — add them alongside
+// those ports, not before.
+//
+// Correctness model (upstream learned this the hard way in review):
+//   * Liveness + auto-resolve key on the OCCURRENCE identity (rule_type +
+//     entity id), NOT the bucketed dedup_key — so a snoozed item that
+//     reactivates under a new time bucket isn't mistaken for a resolved one
+//     and expired.
+//   * dedup_key (with its time bucket) is used only to scope a DISMISS to one
+//     occurrence, so dismissing this year's birthday still resurfaces next year.
+//   * Every rule THROWS on a query error (Drizzle's default), so a transient
+//     DB failure is caught as a rule error and that rule's items are left
+//     untouched — never mass-expired by an accidental empty result.
+
+export interface CandidateItem {
+  rule_type: string;
+  source_type: 'person' | 'company' | 'domain' | 'project' | 'conversation' | 'task' | 'content';
+  source_id: string;
+  title: string;
+  detail: string | null;
+  suggested_action: string | null;
+  score: number;
+  dedup_key: string;
+}
+
+interface Ctx {
+  todayYmd: string; // YYYY-MM-DD in app tz
+  nowIso: string;
+  // App timezone. Needed by any rule aging a TIMESTAMPTZ column: slicing the
+  // UTC date off such a value and diffing it against todayYmd is off by one
+  // for anything stamped after ~17:00 local in a behind-UTC zone.
+  tz: string;
+}
+
+// Live-clear the attention items a mutation just resolved — so acting on the
+// underlying thing (logging activity, shipping a domain, completing a task)
+// removes its attention item immediately instead of waiting for the daily
+// cron. NEW items still only arrive via the cron. Deletes the live (active/
+// snoozed) items for a source + rule set; dismissed/acted/expired history is
+// left alone. Best-effort at the call sites.
+export async function clearAttentionForSource(
+  db: Db,
+  sourceType: string,
+  sourceId: string,
+  ruleTypes: string[],
+): Promise<void> {
+  await db
+    .delete(attention_items)
+    .where(
+      and(
+        eq(attention_items.source_type, sourceType),
+        eq(attention_items.source_id, sourceId),
+        inArray(attention_items.rule_type, ruleTypes),
+        inArray(attention_items.status, ['active', 'snoozed']),
+      ),
+    );
+}
+
+// ─── Date helpers (string-based, tz-safe via UTC anchoring) ───────────────
+
+function ymdParts(s: string): [number, number, number] {
+  const parts = s.slice(0, 10).split('-');
+  return [Number(parts[0]), Number(parts[1]), Number(parts[2])];
+}
+function daysBetween(fromYmd: string, toYmd: string): number {
+  const [fy, fm, fd] = ymdParts(fromYmd);
+  const [ty, tm, td] = ymdParts(toYmd);
+  return Math.round((Date.UTC(ty, tm - 1, td) - Date.UTC(fy, fm - 1, fd)) / 86_400_000);
+}
+function daysUntil(dateYmd: string, todayYmd: string): number {
+  return daysBetween(todayYmd, dateYmd);
+}
+// Next occurrence of a month/day, this year or next — for recurring facts
+// (birthdays, anniversaries) where the stored year is the original event.
+function daysUntilRecurring(dateYmd: string, todayYmd: string): number {
+  const [, m, d] = ymdParts(dateYmd);
+  const [ty] = ymdParts(todayYmd);
+  let diff = daysBetween(todayYmd, `${ty}-${pad(m)}-${pad(d)}`);
+  if (diff < 0) diff = daysBetween(todayYmd, `${ty + 1}-${pad(m)}-${pad(d)}`);
+  return diff;
+}
+const pad = (n: number) => String(n).padStart(2, '0');
+function daysAgoIso(days: number): string {
+  return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+}
+// A TIMESTAMPTZ ISO string → the calendar date it fell on in tz.
+function ymdInTz(iso: string, tz: string): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date(iso));
+}
+function isoWeekBucket(todayYmd: string): string {
+  const [y, m, d] = ymdParts(todayYmd);
+  const date = new Date(Date.UTC(y, m - 1, d));
+  const day = date.getUTCDay() || 7;
+  date.setUTCDate(date.getUTCDate() + 4 - day);
+  const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
+  const week = Math.ceil(((date.getTime() - yearStart.getTime()) / 86_400_000 + 1) / 7);
+  return `${date.getUTCFullYear()}-W${pad(week)}`;
+}
+const monthBucket = (ymd: string) => ymd.slice(0, 7);
+const yearBucket = (ymd: string) => ymd.slice(0, 4);
+const dayBucket = (ymd: string) => ymd.slice(0, 10);
+
+function urgencyFor(score: number): 'low' | 'normal' | 'high' {
+  if (score >= 80) return 'high';
+  if (score >= 30) return 'normal';
+  return 'low';
+}
+function inDays(days: number): string {
+  if (days <= 0) return 'today';
+  if (days === 1) return 'tomorrow';
+  return `in ${days} days`;
+}
+
+// The occurrence identity of a dedup_key: `rule_type:entity_id`, dropping any
+// trailing `:time_bucket`. rule_type has no colons, entity_id is a UUID (no
+// colons), buckets use hyphens — so the first two colon-segments are the base.
+// Used for liveness + auto-resolve so a snoozed item that reactivates under a
+// new bucket still matches its regenerated candidate.
+function baseKey(dedupKey: string): string {
+  const parts = dedupKey.split(':');
+  return parts.length >= 2 ? `${parts[0]}:${parts[1]}` : dedupKey;
+}
+
+// ─── Time-triggered rules ─────────────────────────────────────────────────
+
+// Person facts with a relevant date — birthdays, anniversaries, follow-ups.
+// This fork keeps birthdays/anniversaries as person_facts rows (fact_type +
+// date_relevant + recurring), not as people columns like upstream — so one
+// rule covers what upstream splits into three, with per-fact-type scoring.
+async function rulePersonFact(db: Db, ctx: Ctx): Promise<CandidateItem[]> {
+  const facts = await db
+    .select({
+      id: person_facts.id,
+      person_id: person_facts.person_id,
+      fact_type: person_facts.fact_type,
+      fact_value: person_facts.fact_value,
+      date_relevant: person_facts.date_relevant,
+      recurring: person_facts.recurring,
+      name: people.name,
+    })
+    .from(person_facts)
+    .innerJoin(people, eq(person_facts.person_id, people.id))
+    .where(isNotNull(person_facts.date_relevant));
+
+  const out: CandidateItem[] = [];
+  for (const f of facts) {
+    if (!f.date_relevant) continue;
+    const days = f.recurring
+      ? daysUntilRecurring(f.date_relevant, ctx.todayYmd)
+      : daysUntil(f.date_relevant, ctx.todayYmd);
+    if (days < 0 || days > 14) continue;
+
+    let rule_type = 'person_fact_upcoming';
+    let title: string;
+    let detail: string | null = null;
+    let score: number;
+    if (f.fact_type === 'birthday') {
+      rule_type = 'birthday_upcoming';
+      title = days === 0 ? `${f.name}'s birthday is today` : `${f.name}'s birthday ${inDays(days)}`;
+      detail = 'Consider a call or a note.';
+      score = 50 + (days <= 1 ? 50 : 0);
+    } else if (f.fact_type === 'anniversary') {
+      rule_type = 'anniversary_upcoming';
+      title = days === 0 ? `${f.name}'s anniversary is today` : `${f.name}'s anniversary ${inDays(days)}`;
+      score = 40 + (days <= 3 ? 40 : 0);
+    } else {
+      title = `${f.name}: ${f.fact_value} ${inDays(days)}`;
+      score = 45 + (days <= 3 ? 40 : 0);
+    }
+    out.push({
+      rule_type,
+      source_type: 'person',
+      source_id: f.person_id,
+      title,
+      detail,
+      suggested_action: f.fact_type === 'birthday' || f.fact_type === 'anniversary' ? 'Create task' : 'Open person',
+      score,
+      // Recurring facts recur yearly → year bucket (dismiss covers this
+      // year's occurrence). One-shot facts → month bucket like upstream.
+      dedup_key: `${rule_type}:${f.id}:${f.recurring ? yearBucket(ctx.todayYmd) : monthBucket(ctx.todayYmd)}`,
+    });
+  }
+  return out;
+}
+
+async function ruleTaskDueSoon(db: Db, ctx: Ctx): Promise<CandidateItem[]> {
+  const open = await db.query.tasks.findMany({
+    columns: { id: true, title: true, due_date: true },
+    where: and(eq(tasks.status, 'open'), isNotNull(tasks.due_date)),
+  });
+  const out: CandidateItem[] = [];
+  for (const t of open) {
+    if (!t.due_date) continue;
+    const days = daysUntil(t.due_date, ctx.todayYmd);
+    if (days > 3) continue;
+    out.push({
+      rule_type: 'task_due_soon',
+      source_type: 'task',
+      source_id: t.id,
+      title: `${days < 0 ? 'Overdue' : 'Due'}: ${t.title}`,
+      detail: days < 0 ? `Due ${t.due_date}` : inDays(days),
+      suggested_action: 'Complete task',
+      score: 55 + (days === 0 ? 50 : 0) + (days < 0 ? 100 : 0),
+      dedup_key: `task_due_soon:${t.id}:${dayBucket(ctx.todayYmd)}`,
+    });
+  }
+  return out;
+}
+
+// ─── Inactivity-triggered rules ───────────────────────────────────────────
+
+async function ruleProjectStalled(db: Db, ctx: Ctx): Promise<CandidateItem[]> {
+  const cutoff = daysAgoIso(14);
+  // One grouped query (project + its latest activity) instead of upstream's
+  // per-project N+1 — same semantics: no activity_log row in 14 days.
+  const rows = await db
+    .select({
+      id: projects.id,
+      name: projects.name,
+      lastActivity: max(activity_log.logged_at),
+    })
+    .from(projects)
+    .leftJoin(activity_log, eq(activity_log.project_id, projects.id))
+    .where(and(eq(projects.status, 'active'), eq(projects.kind, 'project')))
+    .groupBy(projects.id, projects.name);
+
+  const out: CandidateItem[] = [];
+  for (const p of rows) {
+    if (p.lastActivity && p.lastActivity >= cutoff) continue;
+    out.push({
+      rule_type: 'project_stalled',
+      source_type: 'project',
+      source_id: p.id,
+      title: `Stalled: ${p.name}`,
+      detail: 'No activity logged in 14+ days',
+      suggested_action: 'Open project',
+      score: 40,
+      dedup_key: `project_stalled:${p.id}:${isoWeekBucket(ctx.todayYmd)}`,
+    });
+  }
+  return out;
+}
+
+async function ruleContentStuck(db: Db, ctx: Ctx): Promise<CandidateItem[]> {
+  // Fork adaptation: upstream anchors on holder/holder_since (Content Manager
+  // v2, not ported). Our clock is updated_at — any touch to the row resets
+  // it, which under-fires rather than over-fires. Revisit if CM v2 lands.
+  const cutoff = daysAgoIso(10);
+  const stuck = await db.query.content_items.findMany({
+    columns: { id: true, title: true, updated_at: true },
+    where: and(eq(content_items.status, 'editing'), lt(content_items.updated_at, cutoff)),
+  });
+  const out: CandidateItem[] = [];
+  for (const c of stuck) {
+    const days = Math.abs(daysBetween(ymdInTz(c.updated_at, ctx.tz), ctx.todayYmd));
+    out.push({
+      rule_type: 'content_stuck_in_editing',
+      source_type: 'content',
+      source_id: c.id,
+      title: `Stuck in editing: ${c.title}`,
+      detail: `In editing, untouched ${days}d`,
+      suggested_action: 'Open content',
+      score: 45 + Math.min(35, Math.floor((days - 10) / 7) * 15),
+      dedup_key: `content_stuck_in_editing:${c.id}:${isoWeekBucket(ctx.todayYmd)}`,
+    });
+  }
+  return out;
+}
+
+// Observations cadence rules — a domain with any of these is already tracked
+// for staleness on the "Slipping" panel, so Attention skips it (no double
+// surface). See lib/observations.ts.
+const OBSERVATION_CADENCE_RULES = new Set([
+  'days_since_journal',
+  'days_since_publish',
+  'no_activity_days',
+]);
+
+async function ruleDomainStale(db: Db, ctx: Ctx): Promise<CandidateItem[]> {
+  // Fork note: upstream adds per-domain stale_enabled/stale_days (Addendum
+  // 06); this fork uses the flat 21-day default until that config lands.
+  const THRESHOLD_DAYS = 21;
+  const domains = await db.query.stewardship_domains.findMany({
+    columns: { id: true, name: true, last_shipped_at: true, failure_patterns: true },
+    where: and(eq(stewardship_domains.active, true), eq(stewardship_domains.is_system, false)),
+  });
+  const cutoff = daysAgoIso(THRESHOLD_DAYS);
+  const out: CandidateItem[] = [];
+  for (const d of domains) {
+    // Skip domains the Observations engine already tracks for staleness.
+    const patterns = Array.isArray(d.failure_patterns) ? d.failure_patterns : [];
+    if (patterns.some((p) => OBSERVATION_CADENCE_RULES.has((p as { rule?: string })?.rule ?? ''))) continue;
+    if (d.last_shipped_at && d.last_shipped_at > cutoff) continue;
+    out.push({
+      rule_type: 'domain_stale',
+      source_type: 'domain',
+      source_id: d.id,
+      title: `${d.name}: nothing shipped recently`,
+      detail: d.last_shipped_at
+        ? `Last shipped ${ymdInTz(d.last_shipped_at, ctx.tz)} · ${THRESHOLD_DAYS}d threshold`
+        : 'No ship logged yet',
+      suggested_action: 'Open domain',
+      score: 30,
+      dedup_key: `domain_stale:${d.id}:${isoWeekBucket(ctx.todayYmd)}`,
+    });
+  }
+  return out;
+}
+
+// ─── Rule registry ────────────────────────────────────────────────────────
+
+type RuleFn = (db: Db, ctx: Ctx) => Promise<CandidateItem[]>;
+const RULES: { ruleType: string; fn: RuleFn }[] = [
+  // rulePersonFact emits three rule_types; list them all so an errored run
+  // protects every one of its item families from auto-resolve.
+  { ruleType: 'birthday_upcoming', fn: rulePersonFact },
+  { ruleType: 'task_due_soon', fn: ruleTaskDueSoon },
+  { ruleType: 'project_stalled', fn: ruleProjectStalled },
+  { ruleType: 'content_stuck_in_editing', fn: ruleContentStuck },
+  { ruleType: 'domain_stale', fn: ruleDomainStale },
+];
+// rule_types that share rulePersonFact's fate (see registry note above).
+const RULE_ALIASES: Record<string, string[]> = {
+  birthday_upcoming: ['birthday_upcoming', 'anniversary_upcoming', 'person_fact_upcoming'],
+};
+
+export interface AttentionRunResult {
+  candidates: number;
+  inserted: number;
+  refreshed: number;
+  reactivated: number;
+  auto_resolved: number;
+  expired: number;
+  rule_errors: string[];
+}
+
+const EXPIRE_DAYS = 60;
+
+export async function runAttention(db: Db): Promise<AttentionRunResult> {
+  const result: AttentionRunResult = {
+    candidates: 0,
+    inserted: 0,
+    refreshed: 0,
+    reactivated: 0,
+    auto_resolved: 0,
+    expired: 0,
+    rule_errors: [],
+  };
+
+  const tz = await getAppTz();
+  const todayYmd = new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
+  const nowIso = new Date().toISOString();
+  const ctx: Ctx = { todayYmd, nowIso, tz };
+
+  // 1. Reactivate snoozes whose date has arrived — they rejoin the active
+  //    surface and are then reconciled by source below (so a still-valid one
+  //    refreshes, a resolved one gets auto-resolved).
+  {
+    const reactivated = await db
+      .update(attention_items)
+      .set({ status: 'active', last_surfaced_at: nowIso })
+      .where(and(eq(attention_items.status, 'snoozed'), lte(attention_items.snoozed_until, todayYmd)))
+      .returning({ id: attention_items.id });
+    result.reactivated = reactivated.length;
+  }
+
+  // 2. Run rules (isolated — a rule that throws is recorded and its items are
+  //    left untouched by auto-resolve below).
+  const candidates: CandidateItem[] = [];
+  const ranOk = new Set<string>();
+  for (const { ruleType, fn } of RULES) {
+    try {
+      candidates.push(...(await fn(db, ctx)));
+      for (const rt of RULE_ALIASES[ruleType] ?? [ruleType]) ranOk.add(rt);
+    } catch (err) {
+      result.rule_errors.push(`${ruleType}: ${err instanceof Error ? err.message : 'error'}`);
+    }
+  }
+  result.candidates = candidates.length;
+
+  // 3. Load all stored items. Liveness + auto-resolve key on the OCCURRENCE
+  //    identity — the dedup_key minus its trailing time bucket (`rule_type:
+  //    entity_id`). This is NOT source_id: for person_fact the identity is the
+  //    fact, but source_id is the person, so two upcoming facts for one person
+  //    must stay distinct. Dismissed occurrences key on the full dedup_key so
+  //    a dismiss scopes to one bucket (e.g. this year's birthday).
+  const existing = await db.query.attention_items.findMany({
+    columns: { id: true, dedup_key: true, rule_type: true, source_id: true, status: true },
+  });
+  const liveByBase = new Map<string, { id: string; status: string }>();
+  const dismissedKeys = new Set<string>();
+  for (const r of existing) {
+    if (r.status === 'active' || r.status === 'snoozed') {
+      liveByBase.set(baseKey(r.dedup_key), { id: r.id, status: r.status });
+    }
+    if (r.status === 'dismissed' || r.status === 'acted_on') dismissedKeys.add(r.dedup_key);
+  }
+
+  // 4. Reconcile candidates. One live item per occurrence: refresh it if
+  //    active, respect it if snoozed. Otherwise honor a same-occurrence
+  //    dismiss, else insert a fresh item.
+  const toInsert: CandidateItem[] = [];
+  const refreshIds: string[] = [];
+  const candidateBases = new Set<string>();
+  const insertingBases = new Set<string>();
+  for (const c of candidates) {
+    const bk = baseKey(c.dedup_key);
+    candidateBases.add(bk);
+    const live = liveByBase.get(bk);
+    if (live) {
+      if (live.status === 'active') refreshIds.push(live.id);
+      continue; // snoozed → leave it snoozed
+    }
+    if (dismissedKeys.has(c.dedup_key)) continue; // dismissed for this occurrence
+    if (insertingBases.has(bk)) continue; // already inserting one for this occurrence
+    toInsert.push(c);
+    insertingBases.add(bk);
+  }
+
+  if (toInsert.length) {
+    await db
+      .insert(attention_items)
+      .values(
+        toInsert.map((c) => ({
+          rule_type: c.rule_type,
+          source_type: c.source_type,
+          source_id: c.source_id,
+          title: c.title,
+          detail: c.detail,
+          suggested_action: c.suggested_action,
+          score: c.score,
+          urgency: urgencyFor(c.score),
+          dedup_key: c.dedup_key,
+        })),
+      )
+      .onConflictDoNothing({ target: attention_items.dedup_key });
+    result.inserted = toInsert.length;
+  }
+  if (refreshIds.length) {
+    await db
+      .update(attention_items)
+      .set({ last_surfaced_at: nowIso })
+      .where(inArray(attention_items.id, refreshIds));
+    result.refreshed = refreshIds.length;
+  }
+
+  // 5. Auto-resolve: an active item whose rule ran OK this pass but whose
+  //    SOURCE produced no candidate → the situation resolved. Keyed on the
+  //    occurrence (not the bucketed dedup_key) so a reactivated item under a
+  //    new bucket isn't wrongly expired.
+  const autoResolveIds: string[] = [];
+  for (const r of existing) {
+    if (r.status !== 'active') continue;
+    if (!ranOk.has(r.rule_type)) continue; // rule errored → leave alone
+    if (candidateBases.has(baseKey(r.dedup_key))) continue;
+    autoResolveIds.push(r.id);
+  }
+  if (autoResolveIds.length) {
+    await db
+      .update(attention_items)
+      .set({ status: 'expired' })
+      .where(inArray(attention_items.id, autoResolveIds));
+    result.auto_resolved = autoResolveIds.length;
+  }
+
+  // 6. Hard expiry: active items older than 60 days with no action.
+  {
+    const old = await db
+      .update(attention_items)
+      .set({ status: 'expired' })
+      .where(
+        and(
+          eq(attention_items.status, 'active'),
+          lt(attention_items.first_surfaced_at, daysAgoIso(EXPIRE_DAYS)),
+        ),
+      )
+      .returning({ id: attention_items.id });
+    result.expired = old.length;
+  }
+
+  return result;
+}
+
+// Ordering helper for the list route — highest score first, then most
+// recently surfaced. Exported so the route and any future consumers agree.
+export const ATTENTION_LIST_ORDER = [desc(attention_items.score), desc(attention_items.last_surfaced_at)];

@@ -8,6 +8,7 @@ import { runRoutineReminders, runRoutineMissed } from './routine-reminders.js';
 import { runOverdue } from './overdue.js';
 import { runDailySummary } from './daily-summary.js';
 import { runObservations } from './observations.js';
+import { runAttention } from './attention.js';
 import { runCalendarSync } from './calendar-sync.js';
 
 // In-process scheduler — replaces the external HTTP cron pingers (XCloud).
@@ -92,6 +93,15 @@ export async function startScheduler(log: FastifyBaseLogger): Promise<() => void
       handler: async () => {
         const result = await runDailySummary(getDb());
         log.info({ event: 'daily_summary', ...result }, 'daily summary run');
+      },
+    },
+    {
+      // Before the 7am daily summary so the day starts with fresh items.
+      name: 'attention',
+      pattern: '0 5 * * *',
+      handler: async () => {
+        const result = await runAttention(getDb());
+        log.info({ event: 'attention_run', ...result }, 'attention run complete');
       },
     },
   ];

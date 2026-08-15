@@ -19,6 +19,9 @@ const TaskFormSchema = z.object({
   due_time: z.string(),
   priority: z.coerce.number().int().min(1).max(4),
   selection: z.string(),
+  // Optional — the form only renders the picker when the selected project
+  // has milestones, so the field may be absent entirely.
+  milestone_id: z.string(),
   content_item_id: z.string(),
   // Single-offset reminder picker on the form. Multi-offset reminders
   // are still supported via the voice parser (which can produce multiple
@@ -36,6 +39,7 @@ function readFormFields(formData: FormData) {
     due_time: formData.get('due_time') ?? '',
     priority: formData.get('priority') ?? '4',
     selection: formData.get('selection') ?? '',
+    milestone_id: formData.get('milestone_id') ?? '',
     content_item_id: formData.get('content_item_id') ?? '',
     remind_minutes: formData.get('remind_minutes') ?? '',
     recurrence_rule: formData.get('recurrence_rule') ?? '',
@@ -79,6 +83,9 @@ function toApiPayload(parsed: z.infer<typeof TaskFormSchema>) {
     priority: parsed.priority,
     domain_id,
     project_id,
+    // Server-validated: a milestone that doesn't belong to the task's
+    // project is parked back to null ("General") by the API.
+    milestone_id: parsed.milestone_id || null,
     content_item_id: parsed.content_item_id || null,
     reminder_offsets,
     recurrence_rule,

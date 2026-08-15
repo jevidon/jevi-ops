@@ -25,6 +25,7 @@ import {
 } from './match.js';
 import { insertEvent as insertGoogleEvent, loadTokens as loadGoogleTokens } from './google.js';
 import { getAppTz } from './app-settings.js';
+import { clearAttentionForSource } from './attention.js';
 
 // Action executor — dispatch each parsed action to the right table.
 // Returns a per-action result so the client can confirm what happened.
@@ -189,6 +190,13 @@ async function logActivity(
 
   const [row] = await db.insert(activity_log).values(insert).returning({ id: activity_log.id });
   if (!row) return { action: a.action, status: 'failed', message: 'insert_returned_no_row' };
+
+  // Voice-logged activity also clears the project's stalled attention item.
+  if (project_id) {
+    try {
+      await clearAttentionForSource(db, 'project', project_id, ['project_stalled']);
+    } catch { /* best-effort */ }
+  }
 
   // Bump projects.hours_logged so the list view and project detail header
   // reflect the new total. Read-then-update — single writer, so the race is

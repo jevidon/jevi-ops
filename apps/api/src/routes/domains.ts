@@ -2,6 +2,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import { asc, eq } from 'drizzle-orm';
 import { UpdateDomainSchema } from '@jevi-ops/shared/schemas';
 import { getDb } from '../lib/db.js';
+import { clearAttentionForSource } from '../lib/attention.js';
 import { composeDomainIllustration } from '../lib/illustration.js';
 import { stewardship_domains, type DomainIllustration } from '../db/schema.js';
 
@@ -68,6 +69,14 @@ export const domainRoutes: FastifyPluginAsync = async (app) => {
       .where(eq(stewardship_domains.id, req.params.id))
       .returning();
     if (!row) return reply.code(404).send({ error: 'not_found' });
+
+    // Marking a domain shipped (setting last_shipped_at) clears its
+    // "nothing shipped recently" attention item live. Best-effort.
+    if ('last_shipped_at' in parsed.data && parsed.data.last_shipped_at) {
+      try {
+        await clearAttentionForSource(db, 'domain', req.params.id, ['domain_stale']);
+      } catch { /* best-effort */ }
+    }
     return row;
   });
 

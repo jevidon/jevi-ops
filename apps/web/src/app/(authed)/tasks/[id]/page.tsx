@@ -27,7 +27,12 @@ export default async function TaskDetailPage({
 
   let task: Task | null = null;
   let errorMessage: string | null = null;
-  let projects: { id: string; name: string; domain_id: string | null }[] = [];
+  let projects: {
+    id: string;
+    name: string;
+    domain_id: string | null;
+    milestones: { id: string; title: string; status: 'open' | 'done'; position: number }[];
+  }[] = [];
   let domains: { id: string; name: string; is_system?: boolean }[] = [];
   let contentItems: { id: string; title: string }[] = [];
   let subtasks: Task[] = [];
@@ -52,7 +57,17 @@ export default async function TaskDetailPage({
   if (projectsRes.status === 'fulfilled') {
     projects = projectsRes.value.projects
       .filter((p) => p.status === 'active')
-      .map((p) => ({ id: p.id, name: p.name, domain_id: p.domain?.id ?? null }))
+      .map((p) => ({
+        id: p.id,
+        name: p.name,
+        domain_id: p.domain?.id ?? null,
+        milestones: (p.milestones ?? []).map((m) => ({
+          id: m.id,
+          title: m.title,
+          status: m.status,
+          position: m.position,
+        })),
+      }))
       .sort((a, b) => a.name.localeCompare(b.name));
   }
 
@@ -131,6 +146,7 @@ export default async function TaskDetailPage({
           : task.domain_id
             ? `domain:${task.domain_id}`
             : `domain:${INBOX_DOMAIN_ID}`,
+        milestone_id: task.milestone_id ?? '',
         content_item_id: task.content_item_id ?? '',
         // Surface the first reminder offset in the single-select UI.
         // Multi-offset reminders (set via voice) keep all offsets but
