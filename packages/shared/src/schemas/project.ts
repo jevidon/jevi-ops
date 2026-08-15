@@ -34,7 +34,9 @@ export const ProjectSchema = z.object({
   domain_id: z.string().uuid().nullable().optional(),
   status: ProjectStatusSchema,
   type: ProjectTypeSchema.nullable().optional(),
-  client_id: z.string().uuid().nullable().optional(),
+  // Renamed from client_id (0041): the primary contact person.
+  primary_contact_id: z.string().uuid().nullable().optional(),
+  company_id: z.string().uuid().nullable().optional(),
   quoted_hours: z.number().nullable().optional(),
   hours_logged: z.number(),
   start_date: z.string().date().nullable().optional(),
@@ -58,7 +60,9 @@ export const CreateProjectSchema = z.object({
   description: z.string().nullable().optional(),
   domain_id: z.string().uuid().nullable().optional(),
   type: ProjectTypeSchema.nullable().optional(),
-  client_id: z.string().uuid().nullable().optional(),
+  // Renamed from client_id (0041): the primary contact person.
+  primary_contact_id: z.string().uuid().nullable().optional(),
+  company_id: z.string().uuid().nullable().optional(),
   quoted_hours: z.number().nullable().optional(),
   start_date: z.string().date().nullable().optional(),
   target_date: z.string().date().nullable().optional(),

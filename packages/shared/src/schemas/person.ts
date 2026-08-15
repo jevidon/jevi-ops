@@ -20,7 +20,14 @@ export const PersonSchema = z.object({
   relationship_type: RelationshipTypeSchema.nullable().optional(),
   email: z.string().nullable().optional(),
   phone: z.string().nullable().optional(),
+  // Legacy freeform company text (superseded by company_id, migration 0041).
   company: z.string().nullable().optional(),
+  // Company hierarchy (CRM port, 0041).
+  company_id: z.string().uuid().nullable().optional(),
+  role_at_company: z.string().nullable().optional(),
+  is_primary_contact: z.boolean().optional(),
+  birthday: z.string().date().nullable().optional(),
+  anniversary: z.string().date().nullable().optional(),
   notes: z.string().nullable().optional(),
   created_at: z.string().datetime({ offset: true }),
   updated_at: z.string().datetime({ offset: true }),
@@ -34,6 +41,11 @@ export const CreatePersonSchema = z.object({
   email: z.string().nullable().optional(),
   phone: z.string().nullable().optional(),
   company: z.string().nullable().optional(),
+  company_id: z.string().uuid().nullable().optional(),
+  role_at_company: z.string().nullable().optional(),
+  is_primary_contact: z.boolean().optional(),
+  birthday: z.string().date().nullable().optional(),
+  anniversary: z.string().date().nullable().optional(),
   notes: z.string().nullable().optional(),
 });
 

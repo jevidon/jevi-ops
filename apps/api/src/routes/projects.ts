@@ -13,8 +13,11 @@ import { getDb } from '../lib/db.js';
 import { clearAttentionForSource } from '../lib/attention.js';
 import {
   activity_log,
+  conversations,
   milestones,
+  people,
   project_checklist_items,
+  project_contacts,
   projects,
   tasks,
 } from '../db/schema.js';
@@ -40,9 +43,13 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
     const id = req.params.id;
     const db = getDb();
 
-    const [project, projectMilestones, projectTasks, activity, checklist] = await Promise.all([
+    const [project, projectMilestones, projectTasks, activity, checklist, contacts, projectConversations] = await Promise.all([
       db.query.projects.findFirst({
-        with: { domain: { columns: { id: true, name: true } } },
+        with: {
+          domain: { columns: { id: true, name: true } },
+          company: { columns: { id: true, name: true } },
+          primary_contact: { columns: { id: true, name: true, email: true, role_at_company: true } },
+        },
         where: eq(projects.id, id),
       }),
       db.query.milestones.findMany({
@@ -62,6 +69,21 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
       db.query.project_checklist_items.findMany({
         where: eq(project_checklist_items.project_id, id),
         orderBy: asc(project_checklist_items.position),
+      }),
+      // CRM port (0041/0042): additional contacts + project conversations.
+      db.query.project_contacts.findMany({
+        where: eq(project_contacts.project_id, id),
+        with: { person: { columns: { id: true, name: true, email: true, role_at_company: true } } },
+        orderBy: asc(project_contacts.created_at),
+      }),
+      db.query.conversations.findMany({
+        where: eq(conversations.project_id, id),
+        with: {
+          company: { columns: { id: true, name: true } },
+          person: { columns: { id: true, name: true } },
+        },
+        orderBy: desc(conversations.occurred_at),
+        limit: 100,
       }),
     ]);
 
@@ -103,10 +125,45 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
       tasks: projectTasks,
       activity,
       checklist,
+      contacts,
+      conversations: projectConversations,
       hours_this_month: Number(hoursThisMonth.toFixed(2)),
       hours_last_month: Number(hoursLastMonth.toFixed(2)),
     };
   });
+
+  // ─── Additional contacts (CRM port) ─────────────────────────────────
+
+  app.post<{ Params: { id: string } }>('/api/projects/:id/contacts', async (req, reply) => {
+    const body = req.body as { person_id?: string; role?: string | null } | null;
+    if (!body?.person_id) {
+      return reply.code(400).send({ error: 'invalid_payload', details: { person_id: ['required'] } });
+    }
+    const [row] = await getDb()
+      .insert(project_contacts)
+      .values({ project_id: req.params.id, person_id: body.person_id, role: body.role ?? null })
+      .onConflictDoNothing()
+      .returning();
+    if (!row) return reply.code(409).send({ error: 'already_linked' });
+    const person = await getDb().query.people.findFirst({
+      columns: { id: true, name: true, email: true, role_at_company: true },
+      where: eq(people.id, row.person_id),
+    });
+    return reply.code(201).send({ ...row, person: person ?? null });
+  });
+
+  app.delete<{ Params: { id: string; contactId: string } }>(
+    '/api/projects/:id/contacts/:contactId',
+    async (req, reply) => {
+      await getDb()
+        .delete(project_contacts)
+        .where(and(
+          eq(project_contacts.id, req.params.contactId),
+          eq(project_contacts.project_id, req.params.id),
+        ));
+      return reply.code(204).send();
+    },
+  );
 
   app.post('/api/projects', async (req, reply) => {
     const parsed = CreateProjectSchema.safeParse(req.body);
