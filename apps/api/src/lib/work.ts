@@ -5,8 +5,8 @@ import type {
 import { urgencyFromCounts, parentUrgency, contentUrgency, moveVerb, type Urgency } from '@jevi-ops/shared';
 import type { Db } from './db.js';
 import {
-  activity_log, attention_items, content_items, people, projects as projectsTable,
-  stewardship_domains, tasks as tasksTable,
+  activity_log, attention_items, companies as companiesTable, content_items,
+  people, projects as projectsTable, stewardship_domains, tasks as tasksTable,
 } from '../db/schema.js';
 import { getAppTz } from './app-settings.js';
 import { todayInTz, formatInTz } from './tz.js';
@@ -16,10 +16,9 @@ import { todayInTz, formatInTz } from './tz.js';
 // projects + domains + in-flight content + attention flags, per domain, with
 // the ordering that is part of the contract. Nothing here is curated.
 //
-// Fork decision (CRM not ported): upstream reads the project card's `client`
-// from the companies table. This fork derives it from projects.client_id →
-// people.name, else null — the card's null path renders no client line. When
-// a CRM port lands, swap this lookup back to companies.
+// Client resolution (CRM port, 0041): the project card's `client` reads the
+// linked company's name first, falling back to the primary contact person's
+// name for projects that never got a company link. Null renders no line.
 
 const IN_FLIGHT_CONTENT = ['outline', 'filming', 'editing', 'derivatives_pending'];
 const SHIPPED_CONTENT = ['published', 'done'];
@@ -41,7 +40,8 @@ export async function buildWork(db: Db): Promise<WorkPayload> {
     db.query.projects.findMany({
       columns: {
         id: true, name: true, domain_id: true, engagement_type: true,
-        target_date: true, retainer_anchor_day: true, status: true, client_id: true,
+        target_date: true, retainer_anchor_day: true, status: true,
+        primary_contact_id: true, company_id: true,
       },
       with: { milestones: { columns: { weight: true, status: true } } },
       where: inArray(projectsTable.status, ['active', 'paused']),
@@ -82,14 +82,22 @@ export async function buildWork(db: Db): Promise<WorkPayload> {
       .then((rows) => rows[0]),
   ]);
 
-  // Client names (fork: person, not company — see header). One lookup for
-  // every referenced client_id.
-  const clientIds = [...new Set(projects.map((p) => p.client_id).filter((v): v is string => v != null))];
+  // Client names: companies first, contact people as fallback (see header).
+  const companyIds = [...new Set(projects.map((p) => p.company_id).filter((v): v is string => v != null))];
+  const companyNames = new Map<string, string>();
+  if (companyIds.length > 0) {
+    const rows = await db.query.companies.findMany({
+      columns: { id: true, name: true },
+      where: inArray(companiesTable.id, companyIds),
+    });
+    for (const c of rows) companyNames.set(c.id, c.name);
+  }
+  const contactIds = [...new Set(projects.map((p) => p.primary_contact_id).filter((v): v is string => v != null))];
   const clientNames = new Map<string, string>();
-  if (clientIds.length > 0) {
+  if (contactIds.length > 0) {
     const clients = await db.query.people.findMany({
       columns: { id: true, name: true },
-      where: inArray(people.id, clientIds),
+      where: inArray(people.id, contactIds),
     });
     for (const c of clients) clientNames.set(c.id, c.name);
   }
@@ -154,7 +162,10 @@ export async function buildWork(db: Db): Promise<WorkPayload> {
         id: p.id,
         kind: isRetainer ? 'retainer' : 'target',
         name: p.name,
-        client: p.client_id ? (clientNames.get(p.client_id) ?? null) : null,
+        client:
+          (p.company_id ? companyNames.get(p.company_id) : undefined)
+          ?? (p.primary_contact_id ? clientNames.get(p.primary_contact_id) : undefined)
+          ?? null,
         target: isRetainer ? null : p.target_date,
         cycle: isRetainer && p.retainer_anchor_day ? computeCycle(p.retainer_anchor_day, today) : null,
         pct: isRetainer ? null : progressPct(p.milestones ?? []),

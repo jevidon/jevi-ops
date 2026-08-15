@@ -15,3 +15,5 @@ export * from './health.js';
 export * from './attention.js';
 export * from './focus.js';
 export * from './work.js';
+export * from './company.js';
+export * from './conversation.js';

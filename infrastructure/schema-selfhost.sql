@@ -127,7 +127,8 @@ create table if not exists projects (
   status text not null default 'active' check (status in
     ('active','paused','done','archived')),
   type text check (type in ('client','internal','content')),
-  client_id uuid references people(id) on delete set null,
+  -- The primary contact person (named client_id pre-0041 on migrated DBs).
+  primary_contact_id uuid references people(id) on delete set null,
   quoted_hours numeric(8,2),
   hours_logged numeric(8,2) not null default 0,
   start_date date,
@@ -1047,6 +1048,138 @@ create table if not exists daily_focus (
   note text,
   created_at timestamptz not null default now()
 );
+
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- CRM module (migrations 0041-0043): companies, conversations, contacts
+-- ─────────────────────────────────────────────────────────────────────────
+
+create table if not exists companies (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  domain_id uuid references stewardship_domains(id) on delete set null,
+  relationship_type text check (relationship_type in (
+    'active_client', 'past_client', 'prospect',
+    'vendor', 'partner', 'brand_deal', 'other'
+  )),
+  website text,
+  primary_email text,
+  primary_phone text,
+  notes text,
+  first_engagement_at date,
+  -- Stamped from conversations.occurred_at by trigger. Powers company_silent.
+  last_interaction_at timestamptz,
+  next_review_at date,
+  -- Silent-client cadence override; null → rule default 30 days.
+  checkin_interval_days integer
+    check (checkin_interval_days is null or checkin_interval_days > 0),
+  active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_companies_domain on companies(domain_id);
+create index if not exists idx_companies_active on companies(active) where active = true;
+create index if not exists idx_companies_last_interaction
+  on companies(last_interaction_at desc nulls last);
+create unique index if not exists idx_companies_name_lower on companies(lower(name));
+
+drop trigger if exists trg_companies_updated_at on companies;
+create trigger trg_companies_updated_at
+  before update on companies
+  for each row execute function set_updated_at();
+
+-- People: company link + promoted date fields.
+alter table people
+  add column if not exists company_id uuid references companies(id) on delete set null,
+  add column if not exists role_at_company text,
+  add column if not exists is_primary_contact boolean not null default false,
+  add column if not exists birthday date,
+  add column if not exists anniversary date;
+
+create index if not exists idx_people_company on people(company_id);
+create unique index if not exists idx_people_one_primary_per_company
+  on people(company_id) where is_primary_contact = true and company_id is not null;
+
+-- Projects: company link (primary_contact_id is inline above).
+alter table projects
+  add column if not exists company_id uuid references companies(id) on delete set null;
+
+create index if not exists idx_projects_company on projects(company_id);
+
+create table if not exists project_contacts (
+  id uuid primary key default gen_random_uuid(),
+  project_id uuid not null references projects(id) on delete cascade,
+  person_id uuid not null references people(id) on delete cascade,
+  role text,
+  created_at timestamptz not null default now(),
+  unique (project_id, person_id)
+);
+
+create index if not exists idx_project_contacts_project on project_contacts(project_id);
+create index if not exists idx_project_contacts_person on project_contacts(person_id);
+
+create table if not exists conversations (
+  id uuid primary key default gen_random_uuid(),
+  company_id uuid references companies(id) on delete set null,
+  person_id uuid references people(id) on delete set null,
+  project_id uuid references projects(id) on delete set null,
+  task_id uuid references tasks(id) on delete set null,
+  interaction_type text not null check (interaction_type in (
+    'email', 'call', 'text_message', 'social_dm',
+    'in_person', 'meeting', 'video_call', 'other'
+  )),
+  direction text not null check (direction in ('inbound', 'outbound', 'internal')),
+  subject text,
+  summary text not null,
+  body_excerpt text,
+  email_message_id text,
+  email_thread_id text,
+  email_deep_link text,
+  from_address text,
+  to_addresses text[] not null default '{}',
+  cc_addresses text[] not null default '{}',
+  captured_via text not null default 'manual' check (captured_via in (
+    'email_forward', 'manual', 'voice', 'import'
+  )),
+  requires_followup boolean not null default false,
+  followup_by date,
+  occurred_at timestamptz not null default now(),
+  created_at timestamptz not null default now(),
+  constraint conversations_has_association check (
+    company_id is not null or person_id is not null
+    or project_id is not null or task_id is not null
+  )
+);
+
+create index if not exists idx_conversations_company on conversations(company_id);
+create index if not exists idx_conversations_person on conversations(person_id);
+create index if not exists idx_conversations_project on conversations(project_id);
+create index if not exists idx_conversations_task on conversations(task_id);
+create index if not exists idx_conversations_occurred_at on conversations(occurred_at desc);
+create index if not exists idx_conversations_followup
+  on conversations(requires_followup, followup_by) where requires_followup = true;
+create unique index if not exists idx_conversations_email_message_id
+  on conversations(email_message_id) where email_message_id is not null;
+
+create or replace function conversations_touch_associations() returns trigger as $$
+begin
+  if new.company_id is not null then
+    update companies
+       set last_interaction_at = greatest(coalesce(last_interaction_at, new.occurred_at), new.occurred_at)
+     where id = new.company_id;
+  end if;
+  if new.person_id is not null then
+    update people set updated_at = now() where id = new.person_id;
+  end if;
+  return new;
+end;
+$$ language plpgsql;
+
+drop trigger if exists trg_conversations_touch on conversations;
+create trigger trg_conversations_touch
+  after insert on conversations
+  for each row execute function conversations_touch_associations();
 
 
 -- ─────────────────────────────────────────────────────────────────────────

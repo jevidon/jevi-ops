@@ -108,14 +108,25 @@ export interface ProjectChecklistItem {
   updated_at: string;
 }
 
+export interface ProjectContactRef {
+  id: string;
+  role: string | null;
+  created_at: string;
+  person: { id: string; name: string; email: string | null; role_at_company: string | null } | null;
+}
+
 export interface ProjectDetail {
   project: Project & {
     domain?: { id: string; name: string } | null;
+    company?: { id: string; name: string } | null;
+    primary_contact?: { id: string; name: string; email: string | null; role_at_company: string | null } | null;
   };
   milestones: Milestone[];
   tasks: Task[];
   activity: ActivityLogEntry[];
   checklist: ProjectChecklistItem[];
+  contacts: ProjectContactRef[];
+  conversations: Conversation[];
   hours_this_month: number;
   hours_last_month: number;
 }
@@ -192,8 +203,8 @@ export interface ProjectCreate {
   description?: string | null;
   domain_id?: string | null;
   type?: 'client' | 'internal' | 'content' | null;
-  // Fork: client is a person (people.id), not a CRM company.
-  client_id?: string | null;
+  primary_contact_id?: string | null;
+  company_id?: string | null;
   quoted_hours?: number | null;
   start_date?: string | null;
   target_date?: string | null;
@@ -250,6 +261,12 @@ export const projectsApi = {
     ) => api.patch<ProjectChecklistItem>(`/api/projects/${projectId}/checklist/${itemId}`, body),
     remove: (projectId: string, itemId: string) =>
       api.delete(`/api/projects/${projectId}/checklist/${itemId}`),
+  },
+  contacts: {
+    add: (projectId: string, body: { person_id: string; role?: string | null }) =>
+      api.post<ProjectContactRef>(`/api/projects/${projectId}/contacts`, body),
+    remove: (projectId: string, contactId: string) =>
+      api.delete(`/api/projects/${projectId}/contacts/${contactId}`),
   },
   activity: {
     add: (
@@ -847,10 +864,16 @@ export const routinesApi = {
     api.post<unknown>(`/api/routines/${id}/completions`, body),
 };
 
-// ─── People (contacts + facts + interaction log — this fork's model) ──────
+// ─── People CRM ──────────────────────────────────────────────────────────
 
 export type RelationshipType =
   | 'client' | 'family' | 'church' | 'friend' | 'team' | 'vendor' | 'other';
+
+export interface CompanyRef {
+  id: string;
+  name: string;
+  relationship_type?: CompanyRelationshipType | null;
+}
 
 export interface Person {
   id: string;
@@ -858,13 +881,25 @@ export interface Person {
   relationship_type: RelationshipType | null;
   email: string | null;
   phone: string | null;
+  // Legacy freeform company text (superseded by company_id, Addendum 05).
   company: string | null;
+  company_id: string | null;
+  role_at_company: string | null;
+  is_primary_contact: boolean;
+  birthday: string | null;
+  anniversary: string | null;
   notes: string | null;
   created_at: string;
   updated_at: string;
+  // Joined company record (aliased company_ref to avoid clobbering the
+  // legacy `company` text column). Present on list + detail endpoints.
+  company_ref?: CompanyRef | null;
   // Synthesized on list endpoint:
   interaction_count?: number;
   fact_count?: number;
+  // Max conversation occurred_at — people has no last_interaction_at column,
+  // so the list endpoint synthesises it for the v2 silence pill.
+  last_interaction_at?: string | null;
 }
 
 export type PersonFactType =
@@ -881,17 +916,58 @@ export interface PersonFact {
   created_at: string;
 }
 
-export type PersonInteractionType =
-  | 'email' | 'call' | 'in_person' | 'text' | 'meeting' | 'other';
+// ─── Conversations (Addendum 05 — supersedes person interactions) ─────────
 
-export interface PersonInteraction {
+export type ConversationInteractionType =
+  | 'email' | 'call' | 'text_message' | 'social_dm'
+  | 'in_person' | 'meeting' | 'video_call' | 'other';
+export type ConversationDirection = 'inbound' | 'outbound' | 'internal';
+export type ConversationCapturedVia = 'email_forward' | 'manual' | 'voice' | 'import';
+
+export interface Conversation {
   id: string;
-  person_id: string;
-  interaction_type: PersonInteractionType;
-  notes: string | null;
+  company_id: string | null;
+  person_id: string | null;
+  project_id: string | null;
+  task_id: string | null;
+  interaction_type: ConversationInteractionType;
+  direction: ConversationDirection;
+  subject: string | null;
+  summary: string;
+  body_excerpt: string | null;
+  email_message_id: string | null;
+  email_thread_id: string | null;
+  email_deep_link: string | null;
+  from_address: string | null;
+  to_addresses: string[];
+  cc_addresses: string[];
+  captured_via: ConversationCapturedVia;
+  requires_followup: boolean;
+  followup_by: string | null;
   occurred_at: string;
+  created_at: string;
+  // Joined refs (present depending on the endpoint's select):
+  company?: { id: string; name: string } | null;
+  person?: { id: string; name: string } | null;
+  project?: { id: string; name: string; color: string | null } | null;
 }
 
+export interface ConversationCreate {
+  company_id?: string | null;
+  person_id?: string | null;
+  project_id?: string | null;
+  task_id?: string | null;
+  interaction_type: ConversationInteractionType;
+  direction: ConversationDirection;
+  subject?: string | null;
+  summary: string;
+  body_excerpt?: string | null;
+  requires_followup?: boolean;
+  followup_by?: string | null;
+  occurred_at?: string | null;
+}
+
+// ─── Attention Engine (Addendum 05) ──────────────────────────────────────
 // ─── Attention Engine (Addendum 05) ──────────────────────────────────────
 
 export type AttentionSourceType =
@@ -941,10 +1017,32 @@ export const attentionApi = {
   act: (id: string, body: AttentionActionBody) => api.patch<AttentionItem>(`/api/attention/${id}`, body),
 };
 
+export const conversationsApi = {
+  list: (opts?: {
+    company_id?: string; person_id?: string; project_id?: string;
+    task_id?: string; requires_followup?: boolean; limit?: number;
+  }) => {
+    const qs = new URLSearchParams();
+    if (opts?.company_id) qs.set('company_id', opts.company_id);
+    if (opts?.person_id) qs.set('person_id', opts.person_id);
+    if (opts?.project_id) qs.set('project_id', opts.project_id);
+    if (opts?.task_id) qs.set('task_id', opts.task_id);
+    if (opts?.requires_followup) qs.set('requires_followup', 'true');
+    if (opts?.limit) qs.set('limit', String(opts.limit));
+    const q = qs.toString();
+    return api.get<{ conversations: Conversation[] }>(`/api/conversations${q ? `?${q}` : ''}`);
+  },
+  create: (body: ConversationCreate) => api.post<Conversation>('/api/conversations', body),
+  update: (id: string, body: Partial<ConversationCreate>) =>
+    api.patch<Conversation>(`/api/conversations/${id}`, body),
+  remove: (id: string) => api.delete(`/api/conversations/${id}`),
+};
+
+
 export interface PersonDetail {
   person: Person;
   facts: PersonFact[];
-  interactions: PersonInteraction[];
+  conversations: Conversation[];
   notes: { id: string; title: string | null; body: string; source_type: string; created_at: string }[];
   projects: { id: string; name: string; status: string; color: string | null }[];
 }
@@ -955,6 +1053,11 @@ export interface PersonCreate {
   email?: string | null;
   phone?: string | null;
   company?: string | null;
+  company_id?: string | null;
+  role_at_company?: string | null;
+  is_primary_contact?: boolean;
+  birthday?: string | null;
+  anniversary?: string | null;
   notes?: string | null;
 }
 
@@ -985,20 +1088,92 @@ export const peopleApi = {
     remove: (personId: string, factId: string) =>
       api.delete(`/api/people/${personId}/facts/${factId}`),
   },
-  interactions: {
-    add: (personId: string, body: {
-      interaction_type: PersonInteractionType;
-      notes?: string | null;
-      occurred_at?: string | null;
-    }) => api.post<PersonInteraction>(`/api/people/${personId}/interactions`, body),
-    update: (personId: string, interactionId: string, body: Partial<{
-      interaction_type: PersonInteractionType;
-      notes: string | null;
-      occurred_at: string | null;
-    }>) => api.patch<PersonInteraction>(`/api/people/${personId}/interactions/${interactionId}`, body),
-    remove: (personId: string, interactionId: string) =>
-      api.delete(`/api/people/${personId}/interactions/${interactionId}`),
+};
+
+// ─── Companies (Addendum 05) ───────────────────────────────────────────────
+
+export type CompanyRelationshipType =
+  | 'active_client' | 'past_client' | 'prospect'
+  | 'vendor' | 'partner' | 'brand_deal' | 'other';
+
+export interface Company {
+  id: string;
+  name: string;
+  domain_id: string | null;
+  relationship_type: CompanyRelationshipType | null;
+  website: string | null;
+  primary_email: string | null;
+  primary_phone: string | null;
+  notes: string | null;
+  first_engagement_at: string | null;
+  last_interaction_at: string | null;
+  next_review_at: string | null;
+  // Silent-client check-in cadence in days (null → rule default 30).
+  checkin_interval_days: number | null;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+  domain?: { id: string; name: string } | null;
+  // Synthesized on the list endpoint:
+  contact_count?: number;
+  active_project_count?: number;
+}
+
+export interface CompanyContact {
+  id: string;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  role_at_company: string | null;
+  is_primary_contact: boolean;
+}
+
+// A not-done task surfaced in the company rollup — reached through its project
+// (tasks carry no company_id). `project` is the embedded parent (Addendum 10 §8).
+export interface CompanyOpenTask {
+  id: string;
+  title: string;
+  due_date: string | null;
+  status: string;
+  project: { id: string; name: string; color: string | null };
+}
+
+export interface CompanyDetail {
+  company: Company;
+  contacts: CompanyContact[];
+  projects: { id: string; name: string; status: string; color: string | null }[];
+  conversations: Conversation[];
+  // Open tasks across the company's projects (capped list + exact total).
+  open_tasks: CompanyOpenTask[];
+  open_tasks_count: number;
+}
+
+export interface CompanyCreate {
+  name: string;
+  domain_id?: string | null;
+  relationship_type?: CompanyRelationshipType | null;
+  website?: string | null;
+  primary_email?: string | null;
+  primary_phone?: string | null;
+  notes?: string | null;
+  first_engagement_at?: string | null;
+  next_review_at?: string | null;
+  checkin_interval_days?: number | null;
+  active?: boolean;
+}
+
+export const companiesApi = {
+  list: (opts?: { relationship_type?: CompanyRelationshipType; active?: boolean }) => {
+    const qs = new URLSearchParams();
+    if (opts?.relationship_type) qs.set('relationship_type', opts.relationship_type);
+    if (opts?.active) qs.set('active', 'true');
+    const q = qs.toString();
+    return api.get<{ companies: Company[] }>(`/api/companies${q ? `?${q}` : ''}`);
   },
+  get: (id: string) => api.get<CompanyDetail>(`/api/companies/${id}`),
+  create: (body: CompanyCreate) => api.post<Company>('/api/companies', body),
+  update: (id: string, body: Partial<CompanyCreate>) => api.patch<Company>(`/api/companies/${id}`, body),
+  remove: (id: string) => api.delete(`/api/companies/${id}`),
 };
 
 // ─── Search ──────────────────────────────────────────────────────────────

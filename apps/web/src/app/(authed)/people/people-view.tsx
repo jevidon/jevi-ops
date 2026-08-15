@@ -3,13 +3,14 @@
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import type { Person, RelationshipType } from '@/lib/api';
+import { Pill } from '@/components/Pill';
 import { Icon } from '@/components/Icon';
 import { FacetRail, FacetGroup, FacetRow, FacetSep } from '@/components/FacetRail';
+import { todayIsoDate } from '@/lib/today';
+import { silenceUrgency, silenceLabel } from '@/lib/silence';
 
-// People — relationships (v2 redesign, Jul 2026). Card grid, facet rail
-// (Relationship + Company). This fork's list payload carries interaction/fact
-// counts, not a last-interaction date, so cards show history depth instead
-// of upstream's contact-silence pill.
+// People — the relationships CRM (v2 redesign, Jul 2026). Card grid, facet rail
+// (Relationship + Company), contact silence carried by the four urgency pills.
 
 const PERSON_REL: { value: RelationshipType; label: string; color: string }[] = [
   { value: 'client', label: 'Client', color: '#2F5D8A' },
@@ -23,13 +24,18 @@ const PERSON_REL: { value: RelationshipType; label: string; color: string }[] = 
 const REL_COLOR: Record<string, string> = Object.fromEntries(PERSON_REL.map((r) => [r.value, r.color]));
 const REL_LABEL: Record<string, string> = Object.fromEntries(PERSON_REL.map((r) => [r.value, r.label]));
 
+function daysBetween(fromIso: string, toIso: string): number {
+  return Math.round((Date.parse(toIso) - Date.parse(fromIso)) / 86_400_000);
+}
+
 function initials(name: string): string {
   return name.split(' ').filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
 }
 
-export function PeopleView({ people }: { people: Person[] }) {
+export function PeopleView({ people, today, tz }: { people: Person[]; today: string; tz: string }) {
   const [rels, setRels] = useState<Set<string>>(new Set());
   const [cos, setCos] = useState<Set<string>>(new Set());
+  const [silent, setSilent] = useState(false);
 
   const toggle = (set: React.Dispatch<React.SetStateAction<Set<string>>>, v: string) =>
     set((s) => {
@@ -38,24 +44,33 @@ export function PeopleView({ people }: { people: Person[] }) {
       return n;
     });
 
-  const withCompany = useMemo(
-    () => people.map((p) => ({ p, company: p.company ?? null })),
-    [people],
+  const withDays = useMemo(
+    () =>
+      people.map((p) => ({
+        p,
+        days: p.last_interaction_at
+          ? Math.max(0, daysBetween(todayIsoDate(tz, new Date(p.last_interaction_at)), today))
+          : null,
+        company: p.company_ref?.name ?? p.company ?? null,
+      })),
+    [people, today, tz],
   );
 
   const companies = useMemo(
-    () => [...new Set(withCompany.map((x) => x.company).filter((c): c is string => !!c))].sort(),
-    [withCompany],
+    () => [...new Set(withDays.map((x) => x.company).filter((c): c is string => !!c))].sort(),
+    [withDays],
   );
 
-  const visible = withCompany.filter(({ p, company }) => {
+  const visible = withDays.filter(({ p, days, company }) => {
     if (rels.size && (!p.relationship_type || !rels.has(p.relationship_type))) return false;
     if (cos.size && (!company || !cos.has(company))) return false;
+    if (silent && (days == null || days < 30)) return false;
     return true;
   });
 
-  const activeFilters = rels.size + cos.size;
-  const reset = () => { setRels(new Set()); setCos(new Set()); };
+  const activeFilters = rels.size + cos.size + (silent ? 1 : 0);
+  const reset = () => { setRels(new Set()); setCos(new Set()); setSilent(false); };
+  const silentCount = withDays.filter((x) => x.days != null && x.days >= 30).length;
 
   return (
     <div className="lg:flex">
@@ -67,12 +82,13 @@ export function PeopleView({ people }: { people: Person[] }) {
               <FacetRow key={r.value} on={rels.has(r.value)} onClick={() => toggle(setRels, r.value)} color={r.color} name={r.label} count={n} />
             ) : null;
           })}
+          <FacetRow on={silent} onClick={() => setSilent((v) => !v)} name="Silent 30d+" count={silentCount} />
         </FacetGroup>
         <FacetSep />
         {companies.length > 0 && (
           <FacetGroup label="Company" action={cos.size ? <ClearBtn onClick={() => setCos(new Set())} /> : undefined}>
             {companies.map((c) => (
-              <FacetRow key={c} on={cos.has(c)} onClick={() => toggle(setCos, c)} name={c} count={withCompany.filter((x) => x.company === c).length} />
+              <FacetRow key={c} on={cos.has(c)} onClick={() => toggle(setCos, c)} name={c} count={withDays.filter((x) => x.company === c).length} />
             ))}
           </FacetGroup>
         )}
@@ -100,7 +116,7 @@ export function PeopleView({ people }: { people: Person[] }) {
           </div>
         ) : (
           <div className="grid gap-3.5" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(258px, 1fr))' }}>
-            {visible.map(({ p, company }) => (
+            {visible.map(({ p, days, company }) => (
               <Link key={p.id} href={`/people/${p.id}`} className="block rounded border border-line bg-bg px-4 pt-[15px] pb-[13px] hover:border-line-strong transition-colors">
                 <div className="flex items-start gap-3 mb-3">
                   <span className="grid place-items-center w-[34px] h-[34px] shrink-0 rounded-full font-serif font-medium text-[13px] text-white" style={{ background: p.relationship_type ? REL_COLOR[p.relationship_type] : '#8B847A' }}>
@@ -115,6 +131,7 @@ export function PeopleView({ people }: { people: Person[] }) {
                 </div>
                 {p.email && <div className="mb-[11px] font-mono text-[11px] text-ink-3 truncate">{p.email}</div>}
                 <div className="flex items-center justify-between gap-2.5 pt-[11px] border-t border-line">
+                  <Pill state={silenceUrgency(days)}>{silenceLabel(days)}</Pill>
                   <span className="font-mono text-[10.5px] text-ink-4 whitespace-nowrap">
                     {historyLabel(p)}
                   </span>

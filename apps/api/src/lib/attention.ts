@@ -3,6 +3,7 @@ import type { Db } from './db.js';
 import {
   activity_log,
   attention_items,
+  companies,
   content_items,
   people,
   person_facts,
@@ -422,6 +423,48 @@ async function ruleDomainStale(db: Db, ctx: Ctx): Promise<CandidateItem[]> {
   return out;
 }
 
+// Silent clients (CRM port, 0041/0043). Active client companies whose
+// last_interaction_at is older than their per-company cadence (null →
+// 30 days). Never-contacted clients are the MOST urgent, not exempt.
+// Dedup is stable per company (no time bucket): the item persists until
+// a conversation is logged — the conversations route live-reconciles it
+// to acted_on, and the DB trigger advances last_interaction_at so the
+// next sweep doesn't re-raise until the cadence lapses again.
+async function ruleCompanySilent(db: Db, _ctx: Ctx): Promise<CandidateItem[]> {
+  const rows = await db.query.companies.findMany({
+    columns: {
+      id: true, name: true, last_interaction_at: true, checkin_interval_days: true,
+    },
+    where: and(eq(companies.active, true), eq(companies.relationship_type, 'active_client')),
+  });
+  const out: CandidateItem[] = [];
+  for (const c of rows) {
+    const interval = typeof c.checkin_interval_days === 'number' && c.checkin_interval_days > 0
+      ? c.checkin_interval_days
+      : 30;
+    const cutoff = daysAgoIso(interval);
+    if (c.last_interaction_at && c.last_interaction_at > cutoff) continue;
+    const daysSilent = c.last_interaction_at
+      ? Math.floor((Date.now() - Date.parse(c.last_interaction_at)) / 86_400_000)
+      : null;
+    out.push({
+      rule_type: 'company_silent',
+      source_type: 'company',
+      source_id: c.id,
+      title: `Silent client: ${c.name}`,
+      detail: daysSilent != null ? `No conversation in ${daysSilent} days` : 'No conversation logged yet',
+      suggested_action: 'Log a check-in',
+      // Score scales with lapse: base 40 + 10/interval overdue, cap 80.
+      // Never-contacted reads as maximally silent.
+      score: daysSilent == null
+        ? 80
+        : Math.min(80, 40 + Math.floor(Math.max(0, daysSilent - interval) / interval) * 10),
+      dedup_key: `company_silent:${c.id}`,
+    });
+  }
+  return out;
+}
+
 // ─── Rule registry ────────────────────────────────────────────────────────
 
 type RuleFn = (db: Db, ctx: Ctx) => Promise<CandidateItem[]>;
@@ -435,6 +478,7 @@ const RULES: { ruleType: string; fn: RuleFn }[] = [
   { ruleType: 'content_stuck_in_editing', fn: ruleContentStuck },
   { ruleType: 'ideas_aging', fn: ruleIdeasAging },
   { ruleType: 'domain_stale', fn: ruleDomainStale },
+  { ruleType: 'company_silent', fn: ruleCompanySilent },
 ];
 // rule_types that share rulePersonFact's fate (see registry note above).
 const RULE_ALIASES: Record<string, string[]> = {

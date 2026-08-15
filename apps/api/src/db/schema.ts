@@ -57,7 +57,9 @@ export const projects = pgTable("projects", {
 	domain_id: uuid(),
 	status: text().default('active').notNull(),
 	type: text(),
-	client_id: uuid(),
+	// Renamed from client_id in 0041 — the primary contact person.
+	primary_contact_id: uuid(),
+	company_id: uuid(),
 	quoted_hours: numeric({ mode: 'number', precision: 8, scale:  2 }),
 	hours_logged: numeric({ mode: 'number', precision: 8, scale:  2 }).default(0).notNull(),
 	start_date: date(),
@@ -80,9 +82,15 @@ export const projects = pgTable("projects", {
 			name: "projects_domain_id_fkey"
 		}).onDelete("set null"),
 	foreignKey({
-			columns: [table.client_id],
+			columns: [table.primary_contact_id],
 			foreignColumns: [people.id],
 			name: "projects_client_id_fkey"
+		}).onDelete("set null"),
+	index("idx_projects_company").using("btree", table.company_id.asc().nullsLast().op("uuid_ops")),
+	foreignKey({
+			columns: [table.company_id],
+			foreignColumns: [companies.id],
+			name: "projects_company_id_fkey"
 		}).onDelete("set null"),
 	check("projects_status_check", sql`status = ANY (ARRAY['active'::text, 'paused'::text, 'done'::text, 'archived'::text])`),
 	check("projects_type_check", sql`type = ANY (ARRAY['client'::text, 'internal'::text, 'content'::text])`),
@@ -121,12 +129,25 @@ export const people = pgTable("people", {
 	relationship_type: text(),
 	email: text(),
 	phone: text(),
+	// Legacy freeform company text — superseded by company_id (0041), kept
+	// as a fallback for names that didn't map cleanly.
 	company: text(),
+	company_id: uuid(),
+	role_at_company: text(),
+	is_primary_contact: boolean().default(false).notNull(),
+	birthday: date(),
+	anniversary: date(),
 	notes: text(),
 	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	updated_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [
 	index("idx_people_name_lower").using("btree", sql`lower(name)`),
+	index("idx_people_company").using("btree", table.company_id.asc().nullsLast().op("uuid_ops")),
+	foreignKey({
+			columns: [table.company_id],
+			foreignColumns: [companies.id],
+			name: "people_company_id_fkey"
+		}).onDelete("set null"),
 	check("people_relationship_type_check", sql`relationship_type = ANY (ARRAY['client'::text, 'family'::text, 'church'::text, 'friend'::text, 'team'::text, 'vendor'::text, 'other'::text])`),
 ]);
 
@@ -165,6 +186,113 @@ export const person_interactions = pgTable("person_interactions", {
 			name: "person_interactions_person_id_fkey"
 		}).onDelete("cascade"),
 	check("person_interactions_interaction_type_check", sql`interaction_type = ANY (ARRAY['email'::text, 'call'::text, 'in_person'::text, 'text'::text, 'meeting'::text, 'other'::text])`),
+]);
+
+// ─── CRM module (migrations 0041-0043, ported from upstream v2.0.0) ──────
+
+export const companies = pgTable("companies", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	name: text().notNull(),
+	domain_id: uuid(),
+	relationship_type: text(),
+	website: text(),
+	primary_email: text(),
+	primary_phone: text(),
+	notes: text(),
+	first_engagement_at: date(),
+	// Stamped forward by the conversations insert trigger (0042).
+	last_interaction_at: timestamp({ withTimezone: true, mode: 'string' }),
+	next_review_at: date(),
+	// Silent-client cadence override; null → rule default 30d (0043).
+	checkin_interval_days: integer(),
+	active: boolean().default(true).notNull(),
+	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	updated_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	index("idx_companies_domain").using("btree", table.domain_id.asc().nullsLast().op("uuid_ops")),
+	foreignKey({
+			columns: [table.domain_id],
+			foreignColumns: [stewardship_domains.id],
+			name: "companies_domain_id_fkey"
+		}).onDelete("set null"),
+	check("companies_relationship_type_check", sql`relationship_type = ANY (ARRAY['active_client'::text, 'past_client'::text, 'prospect'::text, 'vendor'::text, 'partner'::text, 'brand_deal'::text, 'other'::text])`),
+	check("companies_checkin_interval_days_check", sql`(checkin_interval_days IS NULL) OR (checkin_interval_days > 0)`),
+]);
+
+export const conversations = pgTable("conversations", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	company_id: uuid(),
+	person_id: uuid(),
+	project_id: uuid(),
+	task_id: uuid(),
+	interaction_type: text().notNull(),
+	direction: text().notNull(),
+	subject: text(),
+	summary: text().notNull(),
+	body_excerpt: text(),
+	email_message_id: text(),
+	email_thread_id: text(),
+	email_deep_link: text(),
+	from_address: text(),
+	to_addresses: text().array().default([]).notNull(),
+	cc_addresses: text().array().default([]).notNull(),
+	captured_via: text().default('manual').notNull(),
+	requires_followup: boolean().default(false).notNull(),
+	followup_by: date(),
+	occurred_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	index("idx_conversations_company").using("btree", table.company_id.asc().nullsLast().op("uuid_ops")),
+	index("idx_conversations_person").using("btree", table.person_id.asc().nullsLast().op("uuid_ops")),
+	index("idx_conversations_project").using("btree", table.project_id.asc().nullsLast().op("uuid_ops")),
+	index("idx_conversations_task").using("btree", table.task_id.asc().nullsLast().op("uuid_ops")),
+	index("idx_conversations_occurred_at").using("btree", table.occurred_at.desc().nullsFirst().op("timestamptz_ops")),
+	foreignKey({
+			columns: [table.company_id],
+			foreignColumns: [companies.id],
+			name: "conversations_company_id_fkey"
+		}).onDelete("set null"),
+	foreignKey({
+			columns: [table.person_id],
+			foreignColumns: [people.id],
+			name: "conversations_person_id_fkey"
+		}).onDelete("set null"),
+	foreignKey({
+			columns: [table.project_id],
+			foreignColumns: [projects.id],
+			name: "conversations_project_id_fkey"
+		}).onDelete("set null"),
+	foreignKey({
+			columns: [table.task_id],
+			foreignColumns: [tasks.id],
+			name: "conversations_task_id_fkey"
+		}).onDelete("set null"),
+	check("conversations_interaction_type_check", sql`interaction_type = ANY (ARRAY['email'::text, 'call'::text, 'text_message'::text, 'social_dm'::text, 'in_person'::text, 'meeting'::text, 'video_call'::text, 'other'::text])`),
+	check("conversations_direction_check", sql`direction = ANY (ARRAY['inbound'::text, 'outbound'::text, 'internal'::text])`),
+	check("conversations_captured_via_check", sql`captured_via = ANY (ARRAY['email_forward'::text, 'manual'::text, 'voice'::text, 'import'::text])`),
+	check("conversations_has_association", sql`(company_id IS NOT NULL) OR (person_id IS NOT NULL) OR (project_id IS NOT NULL) OR (task_id IS NOT NULL)`),
+]);
+
+export const project_contacts = pgTable("project_contacts", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	project_id: uuid().notNull(),
+	person_id: uuid().notNull(),
+	role: text(),
+	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	index("idx_project_contacts_project").using("btree", table.project_id.asc().nullsLast().op("uuid_ops")),
+	index("idx_project_contacts_person").using("btree", table.person_id.asc().nullsLast().op("uuid_ops")),
+	foreignKey({
+			columns: [table.project_id],
+			foreignColumns: [projects.id],
+			name: "project_contacts_project_id_fkey"
+		}).onDelete("cascade"),
+	foreignKey({
+			columns: [table.person_id],
+			foreignColumns: [people.id],
+			name: "project_contacts_person_id_fkey"
+		}).onDelete("cascade"),
+	unique("project_contacts_project_id_person_id_key").on(table.project_id, table.person_id),
 ]);
 
 export const milestones = pgTable("milestones", {

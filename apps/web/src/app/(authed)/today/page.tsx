@@ -18,6 +18,7 @@ import type { Task } from '@jevi-ops/shared';
 import { getAppTimezone, getFeatureFlag } from '@/lib/app-settings';
 import { todayIsoDate } from '@/lib/today';
 import { Pill } from '@/components/Pill';
+import { silenceUrgency, silenceLabel } from '@/lib/silence';
 import { BriefLineRow } from './brief-line';
 import { RoutinesTodayList } from '@/app/(authed)/routines/routines-today-list';
 import { TaskItem } from '@/components/TaskItem';
@@ -25,16 +26,20 @@ import {
   getResurfacingSeen,
   skipResurfacingAction,
   resetResurfacingAction,
+  logCheckInAction,
 } from './actions';
 
 // The Briefing — editorial home screen (v2 redesign, Jul 2026).
 //
 // Lead with state, not a checklist. Masthead carries a derived summary pillrow
 // (overdue · open · waiting · routines). Two columns: a ledger left (Needs a
-// move slip cards → Attention → Reflection → Latest quote) and an ambient,
-// sticky rail right (events · Doing · Routines). Everything the Addendum-09
-// route surfaced survives — Focus line, Inbox triage, Reflection, Latest
-// quote. (Upstream's Silent-clients section is CRM scope — not in this fork.)
+// move slip cards → Silent clients → Attention → Reflection → Latest quote) and
+// an ambient, sticky rail right (events · Doing · Routines). Everything the
+// Addendum-09 route surfaced survives — Focus line, Inbox triage, Reflection,
+// Latest quote. "Silent clients" is the company_silent attention rule pulled
+// into its own section (so it isn't shown twice), with an inline Log check-in.
+
+const SILENT_CAP = 6;
 
 function mastheadDate(tz: string): string {
   const d = new Date();
@@ -55,6 +60,14 @@ function computeIsoWeek(now: Date, tz: string): number {
   return Math.ceil(((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
 }
 
+// Days-silent parsed out of the company_silent detail ("No conversation in N
+// days" | "No conversation logged yet") — feeds the shared silence pill.
+function silentDays(detail: string | null): number | null {
+  if (!detail) return null;
+  const m = detail.match(/(\d+)\s*day/);
+  return m ? Number(m[1]) : null;
+}
+
 export default async function TodayPage() {
   const tz = await getAppTimezone();
   const today = todayIsoDate(tz);
@@ -70,6 +83,7 @@ export default async function TodayPage() {
   let allTasks: Task[] = [];
   let resurfaceExhausted = false;
   let attentionItems: AttentionItem[] = [];
+  let silentClients: AttentionItem[] = [];
   let attentionActiveCount = 0;
   let focus: { href: string; title: string; note: string | null } | null = null;
 
@@ -95,7 +109,11 @@ export default async function TodayPage() {
   if (attentionCountRes.status === 'fulfilled') attentionActiveCount = attentionCountRes.value.active;
   if (attentionRes.status === 'fulfilled') {
     const active = attentionRes.value.items;
+    // Silent clients (company_silent) get their own section below — pull them
+    // out of the general Attention list so they're never shown twice.
+    silentClients = active.filter((i) => i.rule_type === 'company_silent').slice(0, SILENT_CAP);
     attentionItems = active
+      .filter((i) => i.rule_type !== 'company_silent')
       .filter((i) => i.urgency === 'high' || i.urgency === 'normal')
       .slice(0, 5);
   }
@@ -237,7 +255,24 @@ export default async function TodayPage() {
             )}
           </section>
 
-          {/* Attention — active rules (waiting / content / ideas …) */}
+          {/* Silent clients — company_silent, pulled out of Attention */}
+          {silentClients.length > 0 && (
+            <section className="mt-9 px-5 lg:px-0">
+              <div className="flex items-baseline justify-between mb-2">
+                <div className="eyebrow">Silent clients · {silentClients.length}</div>
+                <Link href="/companies" className="font-mono text-[10px] uppercase tracking-wider text-ink-3 hover:text-accent transition-colors">
+                  Companies →
+                </Link>
+              </div>
+              <ul>
+                {silentClients.map((c) => (
+                  <SilentClientRow key={c.id} item={c} />
+                ))}
+              </ul>
+            </section>
+          )}
+
+          {/* Attention — remaining rules (waiting / content / ideas …) */}
           {attentionItems.length > 0 && (
             <section className="mt-9 px-5 lg:px-0">
               <div className="flex items-baseline justify-between mb-2">
@@ -426,6 +461,31 @@ export default async function TodayPage() {
 
       <CaptureChips />
     </div>
+  );
+}
+
+function SilentClientRow({ item }: { item: AttentionItem }) {
+  const name = item.title.replace(/^Silent client:\s*/i, '');
+  const days = silentDays(item.detail);
+  return (
+    <li className="flex items-center gap-3.5 py-3 border-b border-line">
+      <Link href={`/companies/${item.source_id}`} className="flex-1 min-w-0 group">
+        <div className="font-serif text-[15px] font-medium text-ink group-hover:text-accent transition-colors truncate">{name}</div>
+        {item.detail && <div className="mt-0.5 font-mono text-[11px] text-ink-3">{item.detail}</div>}
+      </Link>
+      {/* Every silent client is already past the rule's cadence; a never-
+          contacted one (days null) is the most urgent, not calm. */}
+      <Pill state={days == null ? 'over' : silenceUrgency(days)}>{silenceLabel(days)}</Pill>
+      <form action={logCheckInAction} className="shrink-0">
+        <input type="hidden" name="company_id" value={item.source_id} />
+        <button
+          type="submit"
+          className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-2 border border-line-strong rounded px-2.5 py-1.5 hover:border-ink-3 hover:text-ink transition-colors whitespace-nowrap"
+        >
+          Log check-in
+        </button>
+      </form>
+    </li>
   );
 }
 

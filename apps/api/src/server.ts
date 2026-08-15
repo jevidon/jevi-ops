@@ -30,6 +30,8 @@ import { libraryRoutes } from './routes/library.js';
 import { contentRoutes } from './routes/content.js';
 import { searchRoutes } from './routes/search.js';
 import { peopleRoutes } from './routes/people.js';
+import { companyRoutes } from './routes/companies.js';
+import { conversationRoutes } from './routes/conversations.js';
 import { routineRoutes } from './routes/routines.js';
 import { uploadRoutes } from './routes/uploads.js';
 import { briefingRoutes } from './routes/briefing.js';
@@ -109,6 +111,8 @@ export async function buildServer() {
   await app.register(contentRoutes);
   await app.register(searchRoutes);
   await app.register(peopleRoutes);
+  await app.register(companyRoutes);
+  await app.register(conversationRoutes);
   await app.register(routineRoutes);
   await app.register(uploadRoutes);
   await app.register(settingsRoutes);
