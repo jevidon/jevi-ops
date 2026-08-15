@@ -328,10 +328,10 @@ function DomainSection({
           {domain.name}
         </Link>
         <span
-          className="hidden lg:block h-[52px] w-[125px] shrink-0 overflow-hidden opacity-80"
+          className="hidden lg:block h-[48px] w-[160px] shrink-0 overflow-hidden opacity-80"
           aria-hidden
         >
-          <DomainIllustration name={domain.name} svg={artSvg} tone={domain.urgency === 'over' ? 'accent' : 'ink'} />
+          <DomainIllustration name={domain.name} svg={artSvg} crop tone={domain.urgency === 'over' ? 'accent' : 'ink'} />
         </span>
         <div className="flex items-baseline gap-3 ml-auto mb-[2px] min-w-0 overflow-hidden font-mono text-[11px] font-medium text-ink-3">
           <span className="whitespace-nowrap">{r.open} open</span>

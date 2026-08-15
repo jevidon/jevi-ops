@@ -20,15 +20,23 @@ export function DomainIllustration({
   name,
   svg,
   tone = 'ink',
+  crop = false,
 }: {
   name: string;
   svg?: string | null;
   tone?: 'ink' | 'accent';
+  // The illustration contract keeps strokes inside y 20–80 of the 240×100
+  // canvas (safe-crop padding for `slice`). crop trims to that drawn band
+  // (with a whisker of margin) so tight placements — the Work section
+  // headers — can bottom-align the ground line instead of the empty
+  // canvas edge. Applies to committed art too: the composer prompt is
+  // tuned against the same band.
+  crop?: boolean;
 }) {
   const inner = svg && svg.trim() ? svg : proceduralIllustration(name);
   return (
     <svg
-      viewBox="0 0 240 100"
+      viewBox={crop ? '0 14 240 72' : '0 0 240 100'}
       preserveAspectRatio="xMidYMid slice"
       aria-hidden="true"
       className={`domain-ill h-full w-full ${
