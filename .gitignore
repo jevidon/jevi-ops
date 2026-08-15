@@ -15,6 +15,9 @@ out/
 .env.local
 !.env.example
 
+# dev-server controller state (scripts/devctl.sh)
+.dev-run/
+
 # logs
 *.log
 npm-debug.log*
