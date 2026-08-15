@@ -307,9 +307,17 @@ function DomainSection({
 
   return (
     <section className="mb-8">
-      {/* Sticky header — colour chip · name · urgency pill · counts · toggle,
-          with a 2px ink rule under it. Sticks below the 60px topbar. */}
-      <div className="sticky top-0 lg:top-[60px] z-20 flex items-center gap-3 py-3 bg-bg border-b-2 border-ink">
+      {/* Sticky header — engraving · colour chip · name · urgency pill ·
+          counts · toggle, with a 2px ink rule under it. Sticks below the
+          60px topbar. The fork's engraving (committed art or the name-seeded
+          procedural motif) leads the row; accent-inked when slipping. */}
+      <div className="sticky top-0 lg:top-[60px] z-20 flex items-center gap-3 py-2 bg-bg border-b-2 border-ink">
+        <span
+          className="hidden lg:block h-[56px] w-[134px] shrink-0 overflow-hidden opacity-80"
+          aria-hidden
+        >
+          <DomainIllustration name={domain.name} svg={artSvg} tone={domain.urgency === 'over' ? 'accent' : 'ink'} />
+        </span>
         <span className="w-[11px] h-[11px] rounded-[3px] shrink-0" style={{ background: color }} aria-hidden />
         {/* Name links to the domain detail page — settings, cadence rule, and
             the illustration panel live there. Previously the only doorway was
@@ -338,13 +346,6 @@ function DomainSection({
 
       {!collapsed && (
         <div className="pt-3.5">
-          {/* Fork: the domain's engraving — committed art, or the name-seeded
-              procedural motif — shown once at near-full design scale under
-              the sticky header. Scrolls away with the section; accent-inked
-              when the domain is slipping. Identity, not information. */}
-          <div className="hidden lg:block h-[96px] w-[230px] mb-3.5 overflow-hidden opacity-70" aria-hidden>
-            <DomainIllustration name={domain.name} svg={artSvg} tone={domain.urgency === 'over' ? 'accent' : 'ink'} />
-          </div>
           {domain.projects.length > 0 && (
             <div
               className="grid gap-3.5 mb-3"
