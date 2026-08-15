@@ -23,10 +23,14 @@ export async function TaskItem({
   task,
   showStar = true,
   showProject = true,
+  parentCrumb = null,
 }: {
   task: Task;
   showStar?: boolean;
   showProject?: boolean;
+  // Parent task title for subtask rows surfaced outside their parent's
+  // context (Today rail, date views) — renders as a "↳ parent" crumb.
+  parentCrumb?: string | null;
 }) {
   const tz = await getAppTimezone();
   const today = todayIsoDate(tz);
@@ -91,8 +95,13 @@ export async function TaskItem({
         >
           {task.title}
         </Link>
-        {(isWaiting || project || (dueLabel && !isDone && !isWaiting) || recurrence) && (
+        {(isWaiting || project || parentCrumb || (dueLabel && !isDone && !isWaiting) || recurrence) && (
           <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5">
+            {parentCrumb && (
+              <span className="font-sans text-[11px] text-ink-3 truncate max-w-[200px]">
+                ↳ {parentCrumb}
+              </span>
+            )}
             {isWaiting && (
               <span
                 className={`font-mono text-[10px] uppercase tracking-wider ${

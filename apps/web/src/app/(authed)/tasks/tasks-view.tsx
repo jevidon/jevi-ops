@@ -77,6 +77,30 @@ export function TasksView({
     });
 
   const active = useMemo(() => tasks.filter((t) => t.status !== 'done'), [tasks]);
+
+  // Subtask visibility (fork, Addendum: subtasks): browse contexts (the
+  // No-date group, Project view) hide subtasks — the parent row carries a
+  // "▸ done / total" chip and the children live on the parent's detail
+  // page. Deadline/state groups (Overdue/Today/Upcoming/Waiting) keep
+  // dated or waiting subtasks as their own rows — a deadline is a
+  // deadline — wearing a "↳ parent" crumb for context.
+  const { childrenByParent, titleById } = useMemo(() => {
+    const kids = new Map<string, Task[]>();
+    for (const t of tasks) {
+      if (!t.parent_task_id) continue;
+      kids.set(t.parent_task_id, [...(kids.get(t.parent_task_id) ?? []), t]);
+    }
+    return { childrenByParent: kids, titleById: new Map(tasks.map((t) => [t.id, t.title])) };
+  }, [tasks]);
+  const isSubtask = (t: Task) => t.parent_task_id != null;
+  const badgeFor = (t: Task): string | null => {
+    const kids = childrenByParent.get(t.id);
+    if (!kids?.length) return null;
+    const done = kids.filter((k) => k.status === 'done').length;
+    return `▸ ${done} / ${kids.length}`;
+  };
+  const crumbFor = (t: Task): string | null =>
+    t.parent_task_id ? (titleById.get(t.parent_task_id) ?? null) : null;
   // Completed TODAY only (app tz) — the API returns all done tasks, so without
   // this the "Completed today" section would list every done task in history.
   const completed = useMemo(
@@ -125,6 +149,8 @@ export function TasksView({
   const inGroup = (g: GroupName) =>
     visible
       .filter((t) => groupOf(t) === g)
+      // No-date is a browse group — subtasks stay folded under their parent.
+      .filter((t) => g !== 'No date' || !isSubtask(t))
       .sort((a, b) =>
         g === 'Waiting'
           ? (a.waiting_since ?? a.created_at).localeCompare(b.waiting_since ?? b.created_at)
@@ -132,9 +158,11 @@ export function TasksView({
       );
 
   // Project view groups by project name instead of by date window.
+  // Subtasks fold under their parents here too.
   const byProject = useMemo(() => {
     const m = new Map<string, Task[]>();
     for (const t of visible) {
+      if (t.parent_task_id != null) continue;
       const key = t.project?.name ?? `${t.domain?.name ?? 'Domain'} · direct`;
       m.set(key, [...(m.get(key) ?? []), t]);
     }
@@ -218,12 +246,21 @@ export function TasksView({
             </div>
             <h1 className="font-serif text-[40px] font-medium leading-[1.02] tracking-[-0.022em] text-ink">Tasks</h1>
           </div>
-          <Link
-            href="/tasks/new"
-            className="inline-flex items-center gap-1.5 h-[34px] px-3 rounded bg-ink border border-ink font-mono text-[10px] uppercase tracking-[0.09em] text-bg hover:bg-ink-2 transition-colors shrink-0"
-          >
-            <Icon name="capture" size={14} /> Add task
-          </Link>
+          <div className="flex items-center gap-4 shrink-0">
+            {/* Fork: recurring-upkeep rotation subview. */}
+            <Link
+              href="/tasks/maintenance"
+              className="font-mono text-[10px] uppercase tracking-[0.09em] text-ink-3 hover:text-accent transition-colors"
+            >
+              Maintenance ↻
+            </Link>
+            <Link
+              href="/tasks/new"
+              className="inline-flex items-center gap-1.5 h-[34px] px-3 rounded bg-ink border border-ink font-mono text-[10px] uppercase tracking-[0.09em] text-bg hover:bg-ink-2 transition-colors"
+            >
+              <Icon name="capture" size={14} /> Add task
+            </Link>
+          </div>
         </div>
 
         {view === 'project' ? (
@@ -231,7 +268,7 @@ export function TasksView({
             <EmptyState filtered={activeFilters > 0} />
           ) : (
             byProject.map(([label, ts]) => (
-              <TaskGroup key={label} label={label} count={ts.length} tasks={ts} today={today} />
+              <TaskGroup key={label} label={label} count={ts.length} tasks={ts} today={today} badgeFor={badgeFor} crumbFor={crumbFor} />
             ))
           )
         ) : (
@@ -239,7 +276,7 @@ export function TasksView({
             {groupsToShow.map((g) => {
               const ts = inGroup(g);
               if (!ts.length) return null;
-              return <TaskGroup key={g} label={g} count={ts.length} tasks={ts} today={today} accent={g === 'Overdue'} />;
+              return <TaskGroup key={g} label={g} count={ts.length} tasks={ts} today={today} accent={g === 'Overdue'} badgeFor={badgeFor} crumbFor={crumbFor} />;
             })}
             {visible.length === 0 && <EmptyState filtered={activeFilters > 0} />}
           </>
@@ -281,13 +318,15 @@ export function TasksView({
 }
 
 function TaskGroup({
-  label, count, tasks, today, accent,
+  label, count, tasks, today, accent, badgeFor, crumbFor,
 }: {
   label: string;
   count: number;
   tasks: Task[];
   today: string;
   accent?: boolean;
+  badgeFor: (t: Task) => string | null;
+  crumbFor: (t: Task) => string | null;
 }) {
   return (
     <section className="mb-6">
@@ -295,12 +334,17 @@ function TaskGroup({
         <h4 className="font-mono text-[10px] font-semibold uppercase tracking-[0.1em] text-ink-3">{label}</h4>
         <span className={`font-mono text-[11px] ${accent ? 'text-accent' : 'text-ink-3'}`}>{count}</span>
       </div>
-      {tasks.map((t) => <TaskRow key={t.id} t={t} today={today} />)}
+      {tasks.map((t) => <TaskRow key={t.id} t={t} today={today} subtaskBadge={badgeFor(t)} parentCrumb={crumbFor(t)} />)}
     </section>
   );
 }
 
-function TaskRow({ t, today }: { t: Task; today: string }) {
+function TaskRow({ t, today, subtaskBadge, parentCrumb }: {
+  t: Task;
+  today: string;
+  subtaskBadge?: string | null;
+  parentCrumb?: string | null;
+}) {
   const isWaiting = t.status === 'waiting';
   const info = dueInfo(t.due_date, today);
   const waitDays = isWaiting && t.waiting_since ? Math.max(0, daysBetween(t.waiting_since, today)) : null;
@@ -340,11 +384,17 @@ function TaskRow({ t, today }: { t: Task; today: string }) {
               </span>
             )
           )}
+          {parentCrumb && (
+            <span className="normal-case tracking-normal font-sans text-[11px] text-ink-3 truncate max-w-[220px]">↳ {parentCrumb}</span>
+          )}
           {projectLabel && (
             <span className="inline-flex items-center gap-1.5 text-ink-3">
               <span className="w-[7px] h-[7px] rounded-[2px] shrink-0" style={{ background: domainName ? domainColor(domainName) : '#B6AFA4' }} aria-hidden />
               {projectLabel}
             </span>
+          )}
+          {subtaskBadge && (
+            <span className="text-ink-3 border border-line-strong rounded px-1.5 py-0.5">{subtaskBadge}</span>
           )}
           {t.recurrence_rule && isRecurrencePattern(t.recurrence_rule) && (
             <span className="text-ink-3">↻ {t.recurrence_rule}</span>

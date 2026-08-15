@@ -198,3 +198,43 @@ export async function deleteTaskAction(formData: FormData): Promise<void> {
   revalidatePath('/attention');
   redirect('/today');
 }
+
+// ─── Subtasks (fork) ─────────────────────────────────────────────────────
+//
+// Quick-add child from the parent's detail-page ledger. One level deep:
+// the ledger only renders on tasks that aren't subtasks themselves, so
+// this never chains. The child inherits the parent's project/domain via
+// hidden fields (the form decides which one applies).
+
+const SubtaskFormSchema = z.object({
+  parentId: z.string().uuid(),
+  title: z.string().trim().min(1),
+  projectId: z.string().uuid().optional(),
+  domainId: z.string().uuid().optional(),
+});
+
+export async function createSubtaskAction(formData: FormData): Promise<void> {
+  const parsed = SubtaskFormSchema.safeParse({
+    parentId: formData.get('parentId'),
+    title: formData.get('title'),
+    projectId: formData.get('projectId') || undefined,
+    domainId: formData.get('domainId') || undefined,
+  });
+  if (!parsed.success) return;
+  try {
+    await tasksApi.create({
+      title: parsed.data.title,
+      parent_task_id: parsed.data.parentId,
+      project_id: parsed.data.projectId ?? null,
+      domain_id: parsed.data.domainId ?? null,
+      priority: 4,
+      source: 'manual',
+    });
+  } catch {
+    /* best-effort; the page re-renders and reflects reality */
+  }
+  revalidatePath(`/tasks/${parsed.data.parentId}`);
+  revalidatePath('/tasks');
+  revalidatePath('/today');
+  revalidatePath('/work');
+}

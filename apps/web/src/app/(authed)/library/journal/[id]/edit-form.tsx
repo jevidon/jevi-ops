@@ -9,6 +9,7 @@ import {
 } from './actions';
 import type { Attachment } from '@/lib/api';
 import { ImageUploader } from '@/components/ImageUploader';
+import { ImmichStrip } from './immich-strip';
 import { DateInput } from '@/components/DateInput';
 import { useTransientSaveResult } from '@/lib/use-transient-save-result';
 
@@ -66,6 +67,15 @@ export function JournalEditForm({ initial }: { initial: JournalFormInitial }) {
             // chars of the body to slugify into a filename. The
             // server's slugifier caps it at 4 words.
             titleHint={() => text.trim().slice(0, 120)}
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <span className="eyebrow">Photos from this day</span>
+          <ImmichStrip
+            entryId={initial.id}
+            entryDate={initial.entry_date}
+            attachments={attachments}
+            onAttached={setAttachments}
           />
         </div>
         <input type="hidden" name="attachments" value={JSON.stringify(attachments)} />

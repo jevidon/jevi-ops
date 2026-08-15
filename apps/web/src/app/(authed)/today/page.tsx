@@ -380,7 +380,13 @@ export default async function TodayPage() {
                     No tasks overdue or due today. Star one below to pin it as Top 3.
                   </p>
                 ) : (
-                  railTasks.map((t) => <TaskItem key={t.id} task={t} />)
+                  railTasks.map((t) => (
+                    <TaskItem
+                      key={t.id}
+                      task={t}
+                      parentCrumb={t.parent_task_id ? (allTasks.find((p) => p.id === t.parent_task_id)?.title ?? null) : null}
+                    />
+                  ))
                 )}
                 {top3.length < 3 && railTasks.length > 0 && (
                   <p className="mt-2 font-mono text-[10px] uppercase tracking-wider text-ink-3">

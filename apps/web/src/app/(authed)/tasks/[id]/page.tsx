@@ -7,6 +7,7 @@ import { todayIsoDate } from '@/lib/today';
 import type { Task } from '@jevi-ops/shared';
 import { INBOX_DOMAIN_ID } from '@jevi-ops/shared';
 import { TaskForm } from '../task-form';
+import { SubtasksSection } from './subtasks-section';
 import { setTaskStatusAction } from './actions';
 
 // /tasks/[id] — task detail + edit. Lets you change everything voice would
@@ -26,13 +27,16 @@ export default async function TaskDetailPage({
   let domains: { id: string; name: string; is_system?: boolean }[] = [];
   let contentItems: { id: string; title: string }[] = [];
 
-  const [taskRes, projectsRes, domainsRes, contentRes, milestonesRes] = await Promise.allSettled([
+  const [taskRes, projectsRes, domainsRes, contentRes, milestonesRes, subtasksRes] = await Promise.allSettled([
     tasksApi.get(id),
     projectsApi.list(),
     domainsApi.list(),
     contentApi.list(),
     projectsApi.milestones.listAll(),
+    // Fork: children of this task for the subtasks ledger (one level deep).
+    tasksApi.list({ parent_task_id: id }),
   ]);
+  const subtasks: Task[] = subtasksRes.status === 'fulfilled' ? subtasksRes.value.tasks : [];
 
   if (taskRes.status === 'fulfilled') {
     task = taskRes.value;
@@ -81,10 +85,10 @@ export default async function TaskDetailPage({
 
   // Milestones grouped by project — powers the task form's milestone picker
   // (Addendum 08). Only the selected project's list is shown.
-  const projectMilestones: Record<string, { id: string; title: string }[]> = {};
+  const projectMilestones: Record<string, { id: string; title: string; status?: 'open' | 'done' }[]> = {};
   if (milestonesRes.status === 'fulfilled') {
     for (const m of milestonesRes.value.milestones) {
-      (projectMilestones[m.project_id] ??= []).push({ id: m.id, title: m.title });
+      (projectMilestones[m.project_id] ??= []).push({ id: m.id, title: m.title, status: m.status });
     }
   }
 
@@ -204,6 +208,14 @@ export default async function TaskDetailPage({
           contentItems={contentItems}
           projectMilestones={projectMilestones}
         />
+
+        {/* Subtasks ledger (fork) — only on tasks that aren't subtasks
+            themselves; hierarchy is one level deep by design. */}
+        {!task.parent_task_id && (
+          <div className="mt-10">
+            <SubtasksSection parent={task} subtasks={subtasks} />
+          </div>
+        )}
       </div>
     </div>
   );
