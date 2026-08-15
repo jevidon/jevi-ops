@@ -58,10 +58,10 @@ export default async function NewTaskPage({
   }
 
   // Milestones grouped by project — for the task form's milestone picker.
-  const projectMilestones: Record<string, { id: string; title: string }[]> = {};
+  const projectMilestones: Record<string, { id: string; title: string; status?: 'open' | 'done' }[]> = {};
   if (milestonesRes.status === 'fulfilled') {
     for (const m of milestonesRes.value.milestones) {
-      (projectMilestones[m.project_id] ??= []).push({ id: m.id, title: m.title });
+      (projectMilestones[m.project_id] ??= []).push({ id: m.id, title: m.title, status: m.status });
     }
   }
 

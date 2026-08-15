@@ -47,7 +47,9 @@ interface InitialValues {
 
 // Milestones the picker can offer, keyed by project id. Only the selected
 // project's list is shown; changing projects clears any stale selection.
-type ProjectMilestones = Record<string, { id: string; title: string }[]>;
+// status rides along so done milestones wear a ✓ in the picker (fork) —
+// linking new work to a finished milestone is legal but worth signalling.
+type ProjectMilestones = Record<string, { id: string; title: string; status?: 'open' | 'done' }[]>;
 
 // Shared form used by /tasks/new (create) and /tasks/[id] (edit). The
 // difference is just which server action it submits to + whether the
@@ -171,7 +173,7 @@ export function TaskForm({
             >
               <option value="">General (no milestone)</option>
               {milestoneOptions.map((m) => (
-                <option key={m.id} value={m.id}>{m.title}</option>
+                <option key={m.id} value={m.id}>{m.title}{m.status === 'done' ? ' ✓' : ''}</option>
               ))}
             </select>
           </Field>
@@ -217,6 +219,7 @@ export function TaskForm({
             <option value="weekly">Weekly</option>
             <option value="biweekly">Every 2 weeks</option>
             <option value="monthly">Monthly</option>
+            <option value="quarterly">Every 3 months</option>
             <option value="semiannually">Every 6 months</option>
             <option value="yearly">Yearly</option>
           </select>
