@@ -74,11 +74,14 @@ fi
 
 if [ -n "$PSQL_BIN" ]; then
   run_psql() { PGOPTIONS='-c client_min_messages=warning' "$PSQL_BIN" "$URL" "$@"; }
-elif [ "$URL" = "$DEV_URL_DEFAULT" ] \
+elif [[ "$URL" == *"localhost:54329/"* ]] \
     && docker ps --format '{{.Names}}' 2>/dev/null | grep -qx jevi-ops-dev-pg; then
+  # Any database inside the dev container (jeviops, jeviops_fresh, scratch
+  # copies) — extract the db name from the URL and exec against the socket.
+  DEV_DB="${URL##*/}"; DEV_DB="${DEV_DB%%\?*}"
   run_psql() {
     docker exec -i -e PGOPTIONS='-c client_min_messages=warning' \
-      jevi-ops-dev-pg psql -U jevi -d jeviops "$@"
+      jevi-ops-dev-pg psql -U jevi -d "$DEV_DB" "$@"
   }
 else
   echo "psql not found on PATH and no jevi-ops-dev-pg container to exec into." >&2

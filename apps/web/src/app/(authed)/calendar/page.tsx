@@ -105,7 +105,7 @@ export default async function CalendarPage() {
 
       {errorMessage ? (
         <div className="px-5 lg:px-0 mt-6 font-sans text-[13px] text-ink-3">
-          Couldn't load events: {errorMessage}
+          Couldn&rsquo;t load events: {errorMessage}
         </div>
       ) : allDays.length === 0 ? (
         <div className="px-5 lg:px-0 mt-6 font-sans text-[13px] text-ink-3">

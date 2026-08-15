@@ -118,7 +118,7 @@ export default async function SettingsPage({
 
       <SettingsSection title="Google Calendar">
         {statusError ? (
-          <Hint>Couldn't read status: {statusError}</Hint>
+          <Hint>Couldn&rsquo;t read status: {statusError}</Hint>
         ) : !status.configured ? (
           <Hint>
             Set <code className="font-mono">GOOGLE_OAUTH_CLIENT_ID</code>,{' '}
@@ -144,8 +144,8 @@ function DisconnectedView() {
   return (
     <div className="flex flex-col gap-3">
       <p className="font-sans text-[13px] text-ink-2 leading-relaxed">
-        Connect your Google Calendar to pull events into Today's "Up next" view, and to
-        push events created via voice ("schedule call Thursday at 2") back to Google.
+        Connect your Google Calendar to pull events into Today&rsquo;s &ldquo;Up next&rdquo; view, and to
+        push events created via voice (&ldquo;schedule call Thursday at 2&rdquo;) back to Google.
         Calendly bookings will appear here too because Calendly writes them to your
         Google Calendar.
       </p>
