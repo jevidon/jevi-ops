@@ -311,9 +311,15 @@ function DomainSection({
           with a 2px ink rule under it. Sticks below the 60px topbar. */}
       <div className="sticky top-0 lg:top-[60px] z-20 flex items-center gap-3 py-3 bg-bg border-b-2 border-ink">
         <span className="w-[11px] h-[11px] rounded-[3px] shrink-0" style={{ background: color }} aria-hidden />
-        <span className="font-serif text-[21px] font-medium leading-none tracking-[-0.015em] text-ink truncate shrink min-w-0">
+        {/* Name links to the domain detail page — settings, cadence rule, and
+            the illustration panel live there. Previously the only doorway was
+            the Direct-tasks chip, which not every domain renders. */}
+        <Link
+          href={`/domains/${domain.id}`}
+          className="font-serif text-[21px] font-medium leading-none tracking-[-0.015em] text-ink truncate shrink min-w-0 hover:text-accent transition-colors"
+        >
           {domain.name}
-        </span>
+        </Link>
         <Pill state={domain.urgency} />
         <div className="flex items-center gap-3 ml-auto min-w-0 overflow-hidden font-mono text-[11px] font-medium text-ink-3">
           <span className="whitespace-nowrap">{r.open} open</span>
