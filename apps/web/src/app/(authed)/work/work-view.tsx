@@ -1,15 +1,14 @@
 'use client';
 
-import { useMemo, useState, useTransition } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState, useTransition } from 'react';
 import Link from 'next/link';
 import type { WorkPayload, WorkDomain, WorkProjectCard, WorkContentRow } from '@/lib/api';
 import type { Urgency } from '@jevi-ops/shared';
-import { URGENCY_LABEL } from '@jevi-ops/shared';
+import { URGENCY_LABEL, proceduralIllustration } from '@jevi-ops/shared';
 import { Pill } from '@/components/Pill';
 import { Icon } from '@/components/Icon';
 import { FacetRail, FacetGroup, FacetRow, FacetTag, FacetTags, FacetSep } from '@/components/FacetRail';
 import { domainColor } from '@/lib/domain-colors';
-import { DomainIllustration } from '../domains/domain-illustration';
 import { flipHolderAction } from './actions';
 import { FocusControl, type FocusOption } from './focus-control';
 
@@ -289,6 +288,55 @@ export function WorkView({
   );
 }
 
+// Header art, fitted to its ink. Motifs frame themselves differently inside
+// the 240×100 canvas (strokes typically live in y 20–80, x varies per
+// drawing), so a fixed viewBox leaves arbitrary dead margins — the art
+// looked detached from the title. This measures the rendered strokes
+// (getBBox) and tightens the viewBox to the actual drawing, so every
+// motif — procedural or committed — hugs the title and rests on the rule.
+// First paint uses the contract band (0 14 240 72); the fit lands before
+// the browser paints (useLayoutEffect), and the box has a fixed height so
+// nothing shifts.
+function FittedArt({ name, svg, tone }: { name: string; svg?: string | null; tone: 'ink' | 'accent' }) {
+  const gRef = useRef<SVGGElement>(null);
+  const [viewBox, setViewBox] = useState('0 14 240 72');
+  const inner = svg && svg.trim() ? svg : proceduralIllustration(name);
+
+  useLayoutEffect(() => {
+    const g = gRef.current;
+    if (!g) return;
+    try {
+      const b = g.getBBox();
+      if (b.width > 4 && b.height > 4) {
+        const pad = 2.5;
+        setViewBox(`${b.x - pad} ${b.y - pad} ${b.width + pad * 2} ${b.height + pad * 2}`);
+      }
+    } catch {
+      /* detached/unsupported — keep the contract band */
+    }
+  }, [inner]);
+
+  return (
+    <svg
+      viewBox={viewBox}
+      preserveAspectRatio="xMinYMax meet"
+      aria-hidden="true"
+      className={`domain-ill h-full w-auto ${
+        tone === 'accent' ? 'domain-ill-accent text-accent-slip/80' : 'text-ink-3'
+      }`}
+    >
+      <g
+        ref={gRef}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1"
+        strokeLinecap="round"
+        dangerouslySetInnerHTML={{ __html: inner }}
+      />
+    </svg>
+  );
+}
+
 function DomainSection({
   domain, kinds, artSvg, collapsed, onToggle,
 }: {
@@ -328,10 +376,10 @@ function DomainSection({
           {domain.name}
         </Link>
         <span
-          className="hidden lg:block h-[48px] w-[160px] shrink-0 overflow-hidden opacity-80"
+          className="hidden lg:block h-[48px] max-w-[190px] shrink-0 overflow-hidden opacity-80"
           aria-hidden
         >
-          <DomainIllustration name={domain.name} svg={artSvg} crop tone={domain.urgency === 'over' ? 'accent' : 'ink'} />
+          <FittedArt name={domain.name} svg={artSvg} tone={domain.urgency === 'over' ? 'accent' : 'ink'} />
         </span>
         <div className="flex items-baseline gap-3 ml-auto mb-[2px] min-w-0 overflow-hidden font-mono text-[11px] font-medium text-ink-3">
           <span className="whitespace-nowrap">{r.open} open</span>
