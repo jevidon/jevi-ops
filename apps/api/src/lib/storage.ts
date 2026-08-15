@@ -47,6 +47,7 @@ const EXT_BY_MIME: Record<string, string> = {
   'image/png': 'png',
   'image/webp': 'webp',
   'image/gif': 'gif',
+  'image/avif': 'avif',
   'image/heic': 'heic',
   'image/heif': 'heif',
 };

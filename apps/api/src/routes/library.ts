@@ -8,6 +8,7 @@ import {
   CreateQuoteSchema, UpdateQuoteSchema,
 } from '@jevi-ops/shared/schemas';
 import { getDb } from '../lib/db.js';
+import { getAppTz } from '../lib/app-settings.js';
 import {
   books,
   journal_entries,
@@ -266,9 +267,14 @@ export const libraryRoutes: FastifyPluginAsync = async (app) => {
       transcription_text: typeof body.transcription_text === 'string'
         ? body.transcription_text
         : null,
+      // Default to today in the app timezone, not UTC — an evening entry
+      // in Denver otherwise lands on tomorrow's date.
       entry_date: typeof body.entry_date === 'string' && body.entry_date
         ? body.entry_date
-        : new Date().toISOString().slice(0, 10),
+        : new Intl.DateTimeFormat('en-CA', {
+            timeZone: await getAppTz(),
+            year: 'numeric', month: '2-digit', day: '2-digit',
+          }).format(new Date()),
       attachments: Array.isArray(body.attachments) ? (body.attachments as StoredAttachment[]) : [],
       // 'typed' — the journal_entries source vocabulary is
       // handwritten_photo | voice | typed (a bare 'manual' violates the

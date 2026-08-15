@@ -94,6 +94,65 @@ export async function fetchThumbnail(assetId: string): Promise<{ bytes: Buffer; 
   };
 }
 
+// Formats every mainstream browser can render. Immich originals from
+// iPhones are HEIC — storing those verbatim yields broken <img> tags
+// everywhere except Safari, so the attach flow falls back to Immich's
+// preview JPEG for anything outside this set.
+const WEB_SAFE_IMAGE_TYPES = new Set([
+  'image/jpeg',
+  'image/jpg',
+  'image/png',
+  'image/webp',
+  'image/gif',
+  'image/avif',
+]);
+
+export function isWebSafeImage(contentType: string): boolean {
+  return WEB_SAFE_IMAGE_TYPES.has(contentType.toLowerCase());
+}
+
+export interface ImmichAssetInfo {
+  taken_at: string | null;
+  gps: { lat: number; lon: number } | null;
+  location: string | null;
+}
+
+/**
+ * Asset metadata from Immich — used to backfill taken_at/gps/location when
+ * the attached bytes carry no EXIF (the preview-JPEG fallback strips it).
+ */
+export async function fetchAssetInfo(assetId: string): Promise<ImmichAssetInfo> {
+  const cfg = await resolveConfig();
+  if (!cfg) throw new Error('immich_not_configured');
+  const res = await fetch(`${cfg.baseUrl}/api/assets/${encodeURIComponent(assetId)}`, {
+    headers: { 'x-api-key': cfg.apiKey, Accept: 'application/json' },
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!res.ok) throw new Error(`immich_asset_info_failed:${res.status}`);
+  const body = (await res.json()) as {
+    localDateTime?: string;
+    exifInfo?: {
+      dateTimeOriginal?: string | null;
+      latitude?: number | null;
+      longitude?: number | null;
+      city?: string | null;
+      state?: string | null;
+      country?: string | null;
+    };
+  };
+  const exif = body.exifInfo;
+  const gps =
+    typeof exif?.latitude === 'number' && typeof exif?.longitude === 'number'
+      ? { lat: exif.latitude, lon: exif.longitude }
+      : null;
+  const locationParts = [exif?.city, exif?.state, exif?.country].filter(Boolean);
+  return {
+    taken_at: exif?.dateTimeOriginal ?? body.localDateTime ?? null,
+    gps,
+    location: locationParts.length > 0 ? locationParts.join(', ') : null,
+  };
+}
+
 /** Download the original asset (for the attach-to-journal copy). */
 export async function fetchOriginal(assetId: string): Promise<{ bytes: Buffer; contentType: string }> {
   const cfg = await resolveConfig();
@@ -110,9 +169,11 @@ export async function fetchOriginal(assetId: string): Promise<{ bytes: Buffer; c
 }
 
 // Midnight of `date` in `tz`, as a UTC Date. Same offset technique the
-// reminder libs use.
+// reminder libs use. The guess MUST be parsed as UTC (trailing Z): a
+// bare local-time parse applies the server's own offset on top of the
+// app-tz one, shifting the whole day window (6h late on a Denver host).
 function zonedMidnightUtc(date: string, tz: string): Date {
-  const naive = new Date(`${date}T00:00:00`);
+  const naive = new Date(`${date}T00:00:00Z`);
   const dtf = new Intl.DateTimeFormat('en-US', {
     timeZone: tz,
     hour12: false,

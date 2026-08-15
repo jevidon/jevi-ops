@@ -3,9 +3,11 @@ import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 import {
   assetsForDate,
+  fetchAssetInfo,
   fetchOriginal,
   fetchThumbnail,
   isImmichConfigured,
+  isWebSafeImage,
 } from '../lib/immich.js';
 import { getDb } from '../lib/db.js';
 import { journal_entries } from '../db/schema.js';
@@ -115,13 +117,29 @@ export const immichRoutes: FastifyPluginAsync = async (app) => {
           continue;
         }
         try {
-          const { bytes, contentType } = await fetchOriginal(assetId);
+          let { bytes, contentType } = await fetchOriginal(assetId);
+          // iPhone originals are HEIC — browsers other than Safari render
+          // them as broken images. Store Immich's preview JPEG instead for
+          // anything a browser can't display.
+          if (!isWebSafeImage(contentType)) {
+            ({ bytes, contentType } = await fetchThumbnail(assetId));
+          }
           const stored = await uploadImage({
             bytes,
             contentType,
             prefix: 'journal',
             titleHint: `immich ${entry.entry_date}`,
           });
+          // The preview fallback strips EXIF, so uploadImage finds no
+          // date/GPS — backfill from Immich's own metadata (best-effort).
+          if (!stored.taken_at || !stored.gps) {
+            const info = await fetchAssetInfo(assetId).catch(() => null);
+            if (info) {
+              stored.taken_at = stored.taken_at ?? info.taken_at;
+              stored.gps = stored.gps ?? info.gps;
+              stored.location = stored.location ?? info.location;
+            }
+          }
           added.push({ ...stored, immich_asset_id: assetId });
         } catch (err) {
           req.log.warn({ err, assetId }, 'immich attach failed for asset');
