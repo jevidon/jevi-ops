@@ -40,6 +40,12 @@ export const AppSettingsSchema = z.object({
   stt_model: z.string().nullable(),
   immich_base_url: z.string().nullable(),
   immich_api_key: z.string().nullable(),
+  // Module feature flags (migration 0036). The Editorial v2 layout gates
+  // nav items and routes on these; rule_module_enabled stays false (the
+  // upstream Daily Rule module isn't ported).
+  health_module_enabled: z.boolean(),
+  routines_module_enabled: z.boolean(),
+  rule_module_enabled: z.boolean(),
   updated_at: z.string().datetime({ offset: true }),
 });
 
@@ -56,6 +62,9 @@ export const UpdateAppSettingsSchema = z.object({
   stt_model: ClearableString.optional(),
   immich_base_url: ClearableUrl.optional(),
   immich_api_key: ClearableString.optional(),
+  health_module_enabled: z.boolean().optional(),
+  routines_module_enabled: z.boolean().optional(),
+  rule_module_enabled: z.boolean().optional(),
 });
 
 export type AppSettings = z.infer<typeof AppSettingsSchema>;

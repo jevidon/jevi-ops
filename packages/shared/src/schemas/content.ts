@@ -11,9 +11,33 @@ export const ContentItemStatusSchema = z.enum([
 export type ContentItemStatus = z.infer<typeof ContentItemStatusSchema>;
 
 export const ContentItemTypeSchema = z.enum([
-  'video', 'article', 'short_clip', 'podcast_episode', 'newsletter',
+  'video', 'article', 'short_clip', 'podcast_episode', 'newsletter', 'course',
 ]);
 export type ContentItemType = z.infer<typeof ContentItemTypeSchema>;
+
+// Short-clip distribution platforms (Addendum 07). App-validated; the DB
+// column stays a plain text[].
+export const CONTENT_PLATFORMS = [
+  'yt_shorts', 'ig_reels', 'fb_reels', 'tiktok', 'threads', 'x',
+] as const;
+export const ContentPlatformSchema = z.enum(CONTENT_PLATFORMS);
+export type ContentPlatform = z.infer<typeof ContentPlatformSchema>;
+
+export const CONTENT_PLATFORM_LABELS: Record<ContentPlatform, string> = {
+  yt_shorts: 'YouTube Shorts',
+  ig_reels: 'Instagram Reels',
+  fb_reels: 'Facebook Reels',
+  tiktok: 'TikTok',
+  threads: 'Threads',
+  x: 'X',
+};
+
+// Type-specific scalars kept in the `meta` jsonb (Addendum 07) — episode /
+// module numbers, guest name, newsletter platform, companion post url.
+// Open-ended on purpose; promote a field to a real column only if it later
+// needs cross-type filtering.
+export const ContentMetaSchema = z.record(z.string(), z.unknown());
+export type ContentMeta = z.infer<typeof ContentMetaSchema>;
 
 export const ContentItemSchema = z.object({
   id: z.string().uuid(),
@@ -27,6 +51,18 @@ export const ContentItemSchema = z.object({
   published_at: z.string().datetime({ offset: true }).nullable().optional(),
   parent_id: z.string().uuid().nullable().optional(),
   derivative_type: z.string().nullable().optional(),
+  // Content Manager v2 (Addendum 07).
+  meta: ContentMetaSchema.default({}),
+  produced_on: z.string().date().nullable().optional(),
+  target_publish_date: z.string().date().nullable().optional(),
+  canonical_url: z.string().nullable().optional(),
+  platforms: z.array(ContentPlatformSchema).nullable().optional(),
+  body_rich: z.string().nullable().optional(),
+  // Work Page (Addendum 08): holder + idea lifecycle.
+  holder: z.enum(['me', 'editor']).default('me'),
+  holder_since: z.string().datetime({ offset: true }).nullable().optional(),
+  archived_at: z.string().datetime({ offset: true }).nullable().optional(),
+  idea_reviewed_at: z.string().datetime({ offset: true }).nullable().optional(),
   created_at: z.string().datetime({ offset: true }),
   updated_at: z.string().datetime({ offset: true }),
 });
@@ -44,6 +80,17 @@ export const CreateContentItemSchema = z.object({
   published_at: z.string().nullable().optional(), // ISO date or datetime; DB column is timestamptz
   parent_id: z.string().uuid().nullable().optional(),
   derivative_type: z.string().nullable().optional(),
+  // Content Manager v2 (Addendum 07).
+  meta: ContentMetaSchema.optional(),
+  produced_on: z.string().date().nullable().optional(),
+  target_publish_date: z.string().date().nullable().optional(),
+  canonical_url: z.string().nullable().optional(),
+  platforms: z.array(ContentPlatformSchema).nullable().optional(),
+  body_rich: z.string().nullable().optional(),
+  holder: z.enum(['me', 'editor']).optional(),
+  holder_since: z.string().datetime({ offset: true }).nullable().optional(),
+  archived_at: z.string().datetime({ offset: true }).nullable().optional(),
+  idea_reviewed_at: z.string().datetime({ offset: true }).nullable().optional(),
 });
 
 export const UpdateContentItemSchema = CreateContentItemSchema.partial();

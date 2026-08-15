@@ -20,6 +20,12 @@ export interface AppSettings {
   stt_model: string | null;
   immich_base_url: string | null;
   immich_api_key: string | null;
+  // Module feature flags (migration 0036). Defaults mirror the column
+  // defaults so a pre-migration boot fails safe (health/rule hidden,
+  // routines visible).
+  health_module_enabled: boolean;
+  routines_module_enabled: boolean;
+  rule_module_enabled: boolean;
 }
 
 const DEFAULTS: AppSettings = {
@@ -32,6 +38,9 @@ const DEFAULTS: AppSettings = {
   stt_model: null,
   immich_base_url: null,
   immich_api_key: null,
+  health_module_enabled: false,
+  routines_module_enabled: true,
+  rule_module_enabled: false,
 };
 
 // In-memory cache. Reset by invalidateAppSettings() when /api/settings/app
@@ -55,6 +64,9 @@ async function load(): Promise<AppSettings> {
       stt_model: row.stt_model ?? null,
       immich_base_url: row.immich_base_url ?? null,
       immich_api_key: row.immich_api_key ?? null,
+      health_module_enabled: row.health_module_enabled ?? false,
+      routines_module_enabled: row.routines_module_enabled ?? true,
+      rule_module_enabled: row.rule_module_enabled ?? false,
     };
   } catch {
     // Pre-migration or transient DB error — keep the app running with

@@ -21,6 +21,8 @@ import { chatRoutes } from './routes/chat.js';
 import { notificationRoutes } from './routes/notifications.js';
 import { observationRoutes } from './routes/observations.js';
 import { attentionRoutes } from './routes/attention.js';
+import { focusRoutes } from './routes/focus.js';
+import { workRoutes } from './routes/work.js';
 import { cronRoutes } from './routes/cron.js';
 import { settingsRoutes } from './routes/settings.js';
 import { healthRoutes } from './routes/health.js';
@@ -100,6 +102,8 @@ export async function buildServer() {
   await app.register(notificationRoutes);
   await app.register(observationRoutes);
   await app.register(attentionRoutes);
+  await app.register(focusRoutes);
+  await app.register(workRoutes);
   await app.register(cronRoutes);
   await app.register(libraryRoutes);
   await app.register(contentRoutes);
