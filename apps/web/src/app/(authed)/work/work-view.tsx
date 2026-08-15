@@ -313,8 +313,11 @@ function DomainSection({
           (committed art or the name-seeded procedural motif) hangs off the
           title and rests its strokes on the rule; accent-inked when
           slipping. */}
-      <div className="sticky top-0 lg:top-[60px] z-20 flex items-center gap-3 py-2 bg-bg border-b-2 border-ink">
-        <span className="w-[11px] h-[11px] rounded-[3px] shrink-0" style={{ background: color }} aria-hidden />
+      {/* items-end + a small bottom standoff: chip, title baseline, art
+          ground-line, counts, toggle, and pill all settle onto the same
+          shelf just above the 2px rule instead of floating mid-row. */}
+      <div className="sticky top-0 lg:top-[60px] z-20 flex items-end gap-3 pt-2 pb-[9px] bg-bg border-b-2 border-ink">
+        <span className="w-[11px] h-[11px] rounded-[3px] shrink-0 mb-[4px]" style={{ background: color }} aria-hidden />
         {/* Name links to the domain detail page — settings, cadence rule, and
             the illustration panel live there. Previously the only doorway was
             the Direct-tasks chip, which not every domain renders. */}
@@ -325,12 +328,12 @@ function DomainSection({
           {domain.name}
         </Link>
         <span
-          className="hidden lg:block h-[52px] w-[125px] shrink-0 self-end overflow-hidden opacity-80"
+          className="hidden lg:block h-[52px] w-[125px] shrink-0 overflow-hidden opacity-80"
           aria-hidden
         >
           <DomainIllustration name={domain.name} svg={artSvg} tone={domain.urgency === 'over' ? 'accent' : 'ink'} />
         </span>
-        <div className="flex items-center gap-3 ml-auto min-w-0 overflow-hidden font-mono text-[11px] font-medium text-ink-3">
+        <div className="flex items-baseline gap-3 ml-auto mb-[2px] min-w-0 overflow-hidden font-mono text-[11px] font-medium text-ink-3">
           <span className="whitespace-nowrap">{r.open} open</span>
           {r.overdue > 0 && <span className="whitespace-nowrap text-accent">{r.overdue} overdue</span>}
           {r.waiting > 0 && <span className="whitespace-nowrap">{r.waiting} waiting</span>}
