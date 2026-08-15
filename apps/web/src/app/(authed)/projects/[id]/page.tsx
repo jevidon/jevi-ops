@@ -76,8 +76,23 @@ export default async function ProjectDetailPage({
   const overdueCount = openTasks.filter((t) => t.due_date && t.due_date < today).length;
   const dueTodayCount = openTasks.filter((t) => t.due_date === today).length;
 
-  // Drill-in grouping (Addendum 08 §10).
-  const livePool = [...openTasks, ...waitingTasks];
+  // Subtasks fold under their parent (fork, one level deep): children whose
+  // parent is renderable in this list never sit flat — the parent row
+  // becomes a details-fold with the kids indented beneath it. Children of a
+  // parent outside this project's live pool (done, or another project) fall
+  // back to the loose list.
+  const childrenByParent = new Map<string, Task[]>();
+  for (const t of tasks) {
+    if (!t.parent_task_id) continue;
+    childrenByParent.set(t.parent_task_id, [...(childrenByParent.get(t.parent_task_id) ?? []), t]);
+  }
+  const liveIds = new Set([...openTasks, ...waitingTasks].map((t) => t.id));
+  const isFoldedChild = (t: Task) => t.parent_task_id != null && liveIds.has(t.parent_task_id);
+  const kidsOf = (t: Task) => childrenByParent.get(t.id) ?? [];
+
+  // Drill-in grouping (Addendum 08 §10) — folded children excluded; they
+  // render inside their parent's fold instead.
+  const livePool = [...openTasks, ...waitingTasks].filter((t) => !isFoldedChild(t));
   const defaultMode: 'milestone' | 'due' = !isRetainer && !isArea && milestones.length > 0 ? 'milestone' : 'due';
   const groupMode: 'milestone' | 'due' =
     groupParam === 'milestone' ? 'milestone' : groupParam === 'due' ? 'due' : defaultMode;
@@ -204,7 +219,13 @@ export default async function ProjectDetailPage({
                         <span className={`font-sans text-[14px] font-semibold ${g.muted ? 'text-ink-3' : 'text-ink'}`}>{g.title}</span>
                         <span className={`font-mono text-[10px] uppercase tracking-wider ${g.accent ? 'text-accent' : 'text-ink-3'}`}>{g.meta}</span>
                       </div>
-                      {g.tasks.map((t) => (<TaskItem key={t.id} task={t} showStar={false} showProject={false} />))}
+                      {g.tasks.map((t) =>
+                        kidsOf(t).length > 0 ? (
+                          <ParentFold key={t.id} parent={t} kids={kidsOf(t)} />
+                        ) : (
+                          <TaskItem key={t.id} task={t} showStar={false} showProject={false} />
+                        ),
+                      )}
                     </div>
                   ))}
                 </>
@@ -254,6 +275,42 @@ export default async function ProjectDetailPage({
         }
       />
     </div>
+  );
+}
+
+// Parent task with live children — a details-fold (fork, one level deep).
+// The chip carries done/total; open kids render with live checkboxes.
+function ParentFold({ parent, kids }: { parent: Task; kids: Task[] }) {
+  const openKids = kids.filter((k) => k.status !== 'done');
+  const doneKidCount = kids.length - openKids.length;
+  return (
+    <details className="group border-b border-line">
+      <summary className="cursor-pointer list-none flex items-start gap-3 py-2">
+        <span
+          className="flex h-5 w-5 shrink-0 items-center justify-center pt-0.5 font-mono text-[10px] text-ink-3 transition-transform group-open:rotate-90"
+          aria-hidden
+        >
+          ▶
+        </span>
+        <Link
+          href={`/tasks/${parent.id}`}
+          className="flex-1 min-w-0 font-sans text-[14px] leading-snug text-ink hover:text-accent transition-colors pt-0.5"
+        >
+          {parent.title}
+        </Link>
+        <span className="shrink-0 mt-0.5 bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] tracking-wider text-ink-2">
+          {doneKidCount} / {kids.length}
+        </span>
+      </summary>
+      <div className="ml-[9px] border-l border-line-strong pl-4 pb-2">
+        {openKids.map((k) => (
+          <TaskItem key={k.id} task={k} showStar={false} showProject={false} />
+        ))}
+        {openKids.length === 0 && (
+          <p className="font-sans text-[13px] text-ink-3 italic py-1">All subtasks done.</p>
+        )}
+      </div>
+    </details>
   );
 }
 

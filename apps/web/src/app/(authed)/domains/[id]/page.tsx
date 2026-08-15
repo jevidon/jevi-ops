@@ -136,8 +136,26 @@ export default async function DomainDetailPage({
   // Split tasks into direct (no project) and project-grouped. The two
   // sections render with the same row shape — the only difference is the
   // group header above each subset.
-  const directTasks = openTasks.filter((t) => !t.project_id);
-  const projectTasks = openTasks.filter((t) => t.project_id);
+  // Subtasks fold under their parent (fork): children whose parent is also
+  // in this domain's open list stay off the flat rows — the parent carries a
+  // "▸ done/total" chip and the children live on its detail page. Children
+  // of an absent parent (done, other domain) stay visible.
+  // (This page only fetches open+waiting tasks, so the chip counts live
+  // children rather than done/total — the full ledger is on the parent.)
+  const kidCounts = new Map<string, number>();
+  for (const t of [...openTasks, ...waitingTasks]) {
+    if (!t.parent_task_id) continue;
+    kidCounts.set(t.parent_task_id, (kidCounts.get(t.parent_task_id) ?? 0) + 1);
+  }
+  const openIds = new Set(openTasks.map((t) => t.id));
+  const folded = (t: Task) => t.parent_task_id != null && openIds.has(t.parent_task_id);
+  const badgeFor = (t: Task): string | null => {
+    const n = kidCounts.get(t.id);
+    return n ? `▸ ${n} subtask${n === 1 ? '' : 's'}` : null;
+  };
+
+  const directTasks = openTasks.filter((t) => !t.project_id && !folded(t));
+  const projectTasks = openTasks.filter((t) => t.project_id && !folded(t));
   const projectGroups = new Map<string, { name: string; tasks: Task[] }>();
   for (const t of projectTasks) {
     const projectId = t.project_id!;
@@ -284,7 +302,7 @@ export default async function DomainDetailPage({
                   </div>
                   <ul className="border-t border-line/40">
                     {directTasks.map((t) => (
-                      <TaskRow key={t.id} task={t} tz={tz} today={today} />
+                      <TaskRow key={t.id} task={t} tz={tz} today={today} badge={badgeFor(t)} />
                     ))}
                   </ul>
                 </div>
@@ -300,7 +318,7 @@ export default async function DomainDetailPage({
                   </Link>
                   <ul className="border-t border-line/40">
                     {group.tasks.map((t) => (
-                      <TaskRow key={t.id} task={t} tz={tz} today={today} />
+                      <TaskRow key={t.id} task={t} tz={tz} today={today} badge={badgeFor(t)} />
                     ))}
                   </ul>
                 </div>
@@ -317,7 +335,7 @@ export default async function DomainDetailPage({
             </div>
             <ul className="border-t border-line/40">
               {waitingTasks.map((t) => (
-                <TaskRow key={t.id} task={t} tz={tz} today={today} />
+                <TaskRow key={t.id} task={t} tz={tz} today={today} badge={badgeFor(t)} />
               ))}
             </ul>
           </div>
@@ -398,7 +416,7 @@ export default async function DomainDetailPage({
   );
 }
 
-function TaskRow({ task, tz, today }: { task: Task; tz: string; today: string }) {
+function TaskRow({ task, tz, today, badge }: { task: Task; tz: string; today: string; badge?: string | null }) {
   const isWaiting = task.status === 'waiting';
   const waitDays = isWaiting && task.waiting_since
     ? Math.max(0, Math.round((Date.parse(today) - Date.parse(task.waiting_since)) / 86_400_000))
@@ -412,6 +430,9 @@ function TaskRow({ task, tz, today }: { task: Task; tz: string; today: string })
       >
         <span className={`font-sans text-[14px] truncate ${isWaiting ? 'text-ink-2' : 'text-ink'}`}>
           {task.title}
+          {badge && (
+            <span className="ml-2.5 font-mono text-[10px] tracking-wider text-ink-3 bg-surface-2 px-1.5 py-0.5">{badge}</span>
+          )}
         </span>
         {isWaiting ? (
           <span
