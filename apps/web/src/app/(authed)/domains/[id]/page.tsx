@@ -6,6 +6,9 @@ import type { Domain, Task } from '@jevi-ops/shared';
 import { EditDomainForm } from './edit-domain-form';
 import { CadenceEditor } from './cadence-editor';
 import { MarkShipped } from './mark-shipped';
+import { IllustrationControls } from './illustration-controls';
+import { TaskQuickAdd, ProjectQuickCreate } from './quick-create';
+import { DomainIllustration } from '../domain-illustration';
 import { PRIMARY_CADENCE_RULES, type CadenceRuleType } from './cadence-rules';
 import { getAppTimezone } from '@/lib/app-settings';
 import { todayIsoDate } from '@/lib/today';
@@ -24,6 +27,23 @@ function extractCadenceRule(patterns: unknown): { rule: CadenceRuleType; value: 
     }
   }
   return { rule: 'none', value: null };
+}
+
+// Provenance line under an illustration panel: who drew it and when.
+// Null = nothing stored yet, so headers show the name-seeded library motif.
+function illustrationMeta(
+  ill: { source: 'llm' | 'procedural'; generated_at: string } | null,
+  tz: string,
+): string {
+  if (!ill) return 'library motif · not yet drawn';
+  const when = new Date(ill.generated_at).toLocaleString('en-US', {
+    timeZone: tz,
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+  return `${ill.source === 'llm' ? 'drawn by the model' : 'library motif'} · ${when}`;
 }
 
 function advancedPatterns(patterns: unknown): unknown[] {
@@ -135,8 +155,8 @@ export default async function DomainDetailPage({
   return (
     <div>
       <div className="px-5 lg:px-0 pt-4 pb-1 font-mono text-[10px] uppercase tracking-wider text-ink-3">
-        <Link href="/domains" className="hover:text-ink-2 transition-colors">
-          ← Domains
+        <Link href="/work" className="hover:text-ink-2 transition-colors">
+          ← Work
         </Link>
       </div>
 
@@ -185,11 +205,74 @@ export default async function DomainDetailPage({
           />
         )}
 
+        {/* ─── Domain illustration ────────────────────────────────────
+            The engraved spot art for this domain. Drawing a candidate
+            never overwrites the saved art: the render lands in
+            illustration_draft (migration 0033) and appears here as
+            Candidate until it's explicitly kept or discarded. */}
+        {!isInbox && (
+          <div className="mt-12 pt-6 border-t border-line">
+            <div className="eyebrow mb-3">Domain illustration</div>
+            <div className="flex flex-wrap gap-5 mb-3">
+              <figure className="m-0">
+                <div className="font-mono text-[9px] uppercase tracking-[0.06em] text-ink-3 mb-1.5">
+                  Current
+                </div>
+                <div className="border border-line w-[260px] max-w-full">
+                  <div className="h-[96px] overflow-hidden">
+                    <DomainIllustration name={domain.name} svg={domain.illustration?.svg} />
+                  </div>
+                </div>
+                <figcaption className="mt-1.5 font-mono text-[9px] uppercase tracking-[0.06em] text-ink-4">
+                  {illustrationMeta(domain.illustration ?? null, tz)}
+                </figcaption>
+              </figure>
+              {domain.illustration_draft && (
+                <figure className="m-0">
+                  <div className="font-mono text-[9px] uppercase tracking-[0.06em] text-accent mb-1.5">
+                    Candidate
+                  </div>
+                  <div className="border border-accent/40 w-[260px] max-w-full">
+                    <div className="h-[96px] overflow-hidden">
+                      <DomainIllustration name={domain.name} svg={domain.illustration_draft.svg} />
+                    </div>
+                  </div>
+                  <figcaption className="mt-1.5 font-mono text-[9px] uppercase tracking-[0.06em] text-ink-4">
+                    {illustrationMeta(domain.illustration_draft, tz)}
+                  </figcaption>
+                </figure>
+              )}
+            </div>
+            <p className="font-sans text-[12px] text-ink-3 mb-3 leading-relaxed">
+              Shown as section art on the Work page. Drawing a candidate asks
+              the model for a fresh engraving (the built-in library stands in
+              if the model isn&rsquo;t reachable) — the current art stays until
+              you keep the candidate.
+            </p>
+            <IllustrationControls
+              domainId={domain.id}
+              hasDraft={Boolean(domain.illustration_draft)}
+            />
+          </div>
+        )}
+
         {/* ─── Open tasks under this domain ───────────────────────────── */}
         <div className="mt-12">
-          <div className="eyebrow mb-3 pb-2 border-b border-line">
-            Open tasks · {openTasks.length}
+          <div className="flex items-baseline justify-between gap-3 mb-3 pb-2 border-b border-line">
+            <span className="eyebrow">Open tasks · {openTasks.length}</span>
+            {!isInbox && (
+              <Link
+                href={`/tasks/new?domain_id=${domain.id}`}
+                className="font-mono text-[10px] uppercase tracking-wider text-accent hover:text-ink transition-colors shrink-0"
+              >
+                Full editor →
+              </Link>
+            )}
           </div>
+          {/* Title-only quick capture straight into this domain; due
+              dates, priority, and project routing live in the full
+              editor linked above. */}
+          {!isInbox && <TaskQuickAdd domainId={domain.id} />}
           {openTasks.length === 0 ? (
             <p className="font-sans text-[13px] text-ink-3 italic">No open tasks here.</p>
           ) : (
@@ -237,6 +320,25 @@ export default async function DomainDetailPage({
                 <TaskRow key={t.id} task={t} tz={tz} today={today} />
               ))}
             </ul>
+          </div>
+        )}
+
+        {/* ─── New project / area in this domain ──────────────────────
+            Quick create routes straight to the new project's page (via
+            the projects screen's own create action); the full editor
+            link opens /projects/new with this domain pre-selected. */}
+        {!isInbox && (
+          <div className="mt-12">
+            <div className="flex items-baseline justify-between gap-3 mb-3 pb-2 border-b border-line">
+              <span className="eyebrow">New project or area</span>
+              <Link
+                href={`/projects/new?domain_id=${domain.id}`}
+                className="font-mono text-[10px] uppercase tracking-wider text-accent hover:text-ink transition-colors shrink-0"
+              >
+                Full editor →
+              </Link>
+            </div>
+            <ProjectQuickCreate domainId={domain.id} />
           </div>
         )}
 

@@ -9,6 +9,7 @@ import { Pill } from '@/components/Pill';
 import { Icon } from '@/components/Icon';
 import { FacetRail, FacetGroup, FacetRow, FacetTag, FacetTags, FacetSep } from '@/components/FacetRail';
 import { domainColor } from '@/lib/domain-colors';
+import { DomainIllustration } from '../domains/domain-illustration';
 import { flipHolderAction } from './actions';
 import { FocusControl, type FocusOption } from './focus-control';
 
@@ -58,10 +59,14 @@ export function WorkView({
   payload,
   tomorrowFocus,
   tomorrowDate,
+  art = {},
 }: {
   payload: WorkPayload;
   tomorrowFocus: { title: string; href: string } | null;
   tomorrowDate: string;
+  // Fork: committed domain engravings (domain id → inner-SVG), rendered as
+  // muted spot art in section headers. Absent entries render no art.
+  art?: Record<string, string>;
 }) {
   const [attention, setAttention] = useState(false);
   const [dsel, setDsel] = useState<Set<string>>(new Set());
@@ -251,7 +256,7 @@ export function WorkView({
           </div>
         ) : (
           visibleDomains.map((d) => (
-            <DomainSection key={d.id} domain={d} kinds={kinds} collapsed={collapsed.has(d.id)} onToggle={() => toggle(setCollapsed, d.id)} />
+            <DomainSection key={d.id} domain={d} kinds={kinds} artSvg={art[d.id]} collapsed={collapsed.has(d.id)} onToggle={() => toggle(setCollapsed, d.id)} />
           ))
         )}
 
@@ -273,7 +278,7 @@ export function WorkView({
                   .map(applyFacets)
                   .filter((d): d is WorkDomain => d !== null)
                   .map((d) => (
-                    <DomainSection key={d.id} domain={d} kinds={kinds} collapsed={collapsed.has(d.id)} onToggle={() => toggle(setCollapsed, d.id)} />
+                    <DomainSection key={d.id} domain={d} kinds={kinds} artSvg={art[d.id]} collapsed={collapsed.has(d.id)} onToggle={() => toggle(setCollapsed, d.id)} />
                   ))}
               </div>
             )}
@@ -285,10 +290,12 @@ export function WorkView({
 }
 
 function DomainSection({
-  domain, kinds, collapsed, onToggle,
+  domain, kinds, artSvg, collapsed, onToggle,
 }: {
   domain: WorkDomain;
   kinds: Set<Kind>;
+  // Fork: committed engraving (inner-SVG) shown as muted header spot art.
+  artSvg?: string;
   collapsed: boolean;
   onToggle: () => void;
 }) {
@@ -313,6 +320,14 @@ function DomainSection({
           {r.overdue > 0 && <span className="whitespace-nowrap text-accent">{r.overdue} overdue</span>}
           {r.waiting > 0 && <span className="whitespace-nowrap">{r.waiting} waiting</span>}
         </div>
+        {/* Fork experiment: the domain's committed engraving as quiet header
+            art — accent-inked when the domain is slipping. Wide screens only;
+            it's identity, not information. */}
+        {artSvg && (
+          <span className="hidden xl:block h-[30px] w-[76px] shrink-0 opacity-70" aria-hidden>
+            <DomainIllustration name={domain.name} svg={artSvg} tone={domain.urgency === 'over' ? 'accent' : 'ink'} />
+          </span>
+        )}
         <button
           type="button"
           onClick={onToggle}

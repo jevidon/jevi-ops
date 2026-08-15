@@ -60,6 +60,12 @@ scripts/db-migrate.sh            # apply pending (each in its own transaction, t
 If the DB predates the tracking table and you know it's current through some
 number: `scripts/db-migrate.sh --baseline-through 0035`.
 
+**Baseline caveat**: `--baseline` marks files applied without checking the
+schema — a DB that silently skipped a migration stays broken and now looks
+current. If a column seems missing later, check `information_schema.columns`
+against the migration files; most migrations use `add column if not exists`
+and can be re-applied directly with psql.
+
 **Authoring schema changes — triple-sync rule**: every change lands in all
 three of `infrastructure/migrations/NNNN_*.sql`, `infrastructure/schema-selfhost.sql`,
 and `apps/api/src/db/schema.ts` (Drizzle). A PR touching one without the others

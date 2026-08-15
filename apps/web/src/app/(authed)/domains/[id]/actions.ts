@@ -1,7 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { domainsApi, ApiError } from '@/lib/api';
+import { domainsApi, tasksApi, ApiError } from '@/lib/api';
 import {
   CADENCE_RULE_TYPES,
   PRIMARY_CADENCE_RULES,
@@ -9,6 +9,42 @@ import {
 } from './cadence-rules';
 
 export type SaveResult = { ok: true } | { ok: false; error: string };
+
+// ─── Quick-add task ──────────────────────────────────────────────────────
+//
+// Title-only capture straight into this domain (a direct task — no
+// project), mirroring /today's quick add but routed here instead of
+// Inbox. Everything else (due date, priority, project) is the full
+// editor's job: /tasks/new?domain_id=… pre-selects this domain.
+
+export async function quickAddTaskAction(
+  _prev: SaveResult | null,
+  formData: FormData,
+): Promise<SaveResult> {
+  const id = String(formData.get('id') ?? '');
+  if (!id) return { ok: false, error: 'Missing id.' };
+  const title = String(formData.get('title') ?? '').trim();
+  if (!title) return { ok: false, error: 'Title is required.' };
+
+  try {
+    await tasksApi.create({
+      title,
+      domain_id: id,
+      priority: 4,
+      source: 'manual',
+    });
+  } catch (err) {
+    if (err instanceof ApiError) return { ok: false, error: `API ${err.status}` };
+    return { ok: false, error: (err as Error).message };
+  }
+
+  revalidatePath(`/domains/${id}`);
+  // The Work page's per-domain rollups and /today's open-task counts
+  // both read from tasks — keep them honest.
+  revalidatePath('/work');
+  revalidatePath('/today');
+  return { ok: true };
+}
 
 export async function updateDomainAction(
   _prev: SaveResult | null,
@@ -121,6 +157,74 @@ export async function setCadenceRuleAction(
   revalidatePath('/domains');
   revalidatePath('/today');
   return { ok: true };
+}
+
+// ─── Domain illustrations ────────────────────────────────────────────────
+//
+// Drawing a candidate never overwrites the saved art. The API owns the
+// whole pipeline (LLM compose → sanitize → persist to the draft slot);
+// these actions just trigger draft / keep / discard and revalidate.
+// Draft only refreshes the detail page; commit and discard also refresh
+// /work (the section headers show committed art).
+
+export type IllustrationActionResult =
+  | { ok: true; source?: 'llm' | 'procedural' }
+  | { ok: false; error: string };
+
+function illustrationError(err: unknown): IllustrationActionResult {
+  if (err instanceof ApiError) {
+    const body = err.body as { error?: string } | null;
+    if (body?.error === 'no_draft') return { ok: false, error: 'No candidate to keep — draw one first.' };
+    return { ok: false, error: body?.error ?? `API ${err.status}` };
+  }
+  return { ok: false, error: (err as Error).message };
+}
+
+export async function draftIllustrationAction(
+  _prev: IllustrationActionResult | null,
+  formData: FormData,
+): Promise<IllustrationActionResult> {
+  const id = String(formData.get('id') ?? '');
+  if (!id) return { ok: false, error: 'Missing id.' };
+  try {
+    const domain = await domainsApi.draftIllustration(id);
+    revalidatePath(`/domains/${id}`);
+    return { ok: true, source: domain.illustration_draft?.source };
+  } catch (err) {
+    return illustrationError(err);
+  }
+}
+
+export async function commitIllustrationAction(
+  _prev: IllustrationActionResult | null,
+  formData: FormData,
+): Promise<IllustrationActionResult> {
+  const id = String(formData.get('id') ?? '');
+  if (!id) return { ok: false, error: 'Missing id.' };
+  try {
+    await domainsApi.commitIllustration(id);
+    revalidatePath(`/domains/${id}`);
+    revalidatePath('/work');
+    return { ok: true };
+  } catch (err) {
+    return illustrationError(err);
+  }
+}
+
+export async function discardIllustrationAction(
+  _prev: IllustrationActionResult | null,
+  formData: FormData,
+): Promise<IllustrationActionResult> {
+  const id = String(formData.get('id') ?? '');
+  if (!id) return { ok: false, error: 'Missing id.' };
+  try {
+    await domainsApi.discardIllustrationDraft(id);
+    revalidatePath(`/domains/${id}`);
+    revalidatePath('/work');
+    return { ok: true };
+  } catch (err) {
+    return illustrationError(err);
+  }
 }
 
 // ─── Mark shipped ────────────────────────────────────────────────────────
