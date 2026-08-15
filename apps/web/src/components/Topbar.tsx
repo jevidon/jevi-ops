@@ -20,7 +20,6 @@ const CRUMBS: Record<string, { label: string; sub?: string }> = {
   tasks: { label: 'Tasks', sub: 'Everything open' },
   content: { label: 'Content', sub: 'Pipeline' },
   people: { label: 'People', sub: 'Relationships' },
-  companies: { label: 'Companies', sub: 'CRM' },
   library: { label: 'Library', sub: 'Archive' },
   routines: { label: 'Routines', sub: 'Daily habits' },
   attention: { label: 'Attention' },

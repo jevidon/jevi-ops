@@ -33,7 +33,6 @@ const NAV: NavItem[] = [
   { href: '/tasks', label: 'Tasks', icon: 'tasks' },
   { href: '/content', label: 'Content', icon: 'content' },
   { href: '/people', label: 'People', icon: 'people' },
-  { href: '/companies', label: 'Companies', icon: 'companies' },
   { href: '/library', label: 'Library', icon: 'library' },
   { href: '/routines', label: 'Routines', icon: 'routines', flag: 'routines' },
   { href: '/health', label: 'Health', icon: 'health', flag: 'health' },

@@ -7,7 +7,7 @@ import {
   DetailBody, DetailSection, RailBlock,
 } from '@/components/detail/DetailShell';
 import { EditDrawer } from '@/components/detail/EditDrawer';
-import { projectsApi, domainsApi, peopleApi, ApiError, type ProjectDetail } from '@/lib/api';
+import { projectsApi, domainsApi, ApiError, type ProjectDetail } from '@/lib/api';
 import { isToday, todayIsoDate } from '@/lib/today';
 import { getAppTimezone } from '@/lib/app-settings';
 import type { Task } from '@jerad-ops/shared';
@@ -17,9 +17,6 @@ import { MilestonesSection } from './milestones-section';
 import { ChecklistSection } from './checklist-section';
 import { LogTimeForm } from './log-time-form';
 import { ActivityRow } from './activity-row';
-import { ContactsSection } from './contacts-section';
-import { ConversationTimeline } from '@/components/conversations/ConversationTimeline';
-import { LogConversationForm } from '@/components/conversations/LogConversationForm';
 
 // /projects/[id] — project detail (Detail Pages v2, Addendum 10 §6). Per-item
 // dashboard: header band + action buttons, a computed stat strip, a two-column
@@ -43,18 +40,15 @@ export default async function ProjectDetailPage({
 
   let detail: ProjectDetail | null = null;
   let domains: { id: string; name: string }[] = [];
-  let people: { id: string; name: string; role_at_company: string | null }[] = [];
   let errorMessage: string | null = null;
 
   try {
-    const [detailRes, domainsRes, peopleRes] = await Promise.all([
+    const [detailRes, domainsRes] = await Promise.all([
       projectsApi.get(id),
       domainsApi.list(),
-      peopleApi.list().catch(() => ({ people: [] })),
     ]);
     detail = detailRes;
     domains = domainsRes.domains.map((d) => ({ id: d.id, name: d.name }));
-    people = peopleRes.people.map((p) => ({ id: p.id, name: p.name, role_at_company: p.role_at_company }));
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) notFound();
     errorMessage = err instanceof ApiError ? `API ${err.status}` : (err as Error).message;
@@ -131,7 +125,6 @@ export default async function ProjectDetailPage({
           <>
             <ActionButton href={`/tasks/new?project_id=${project.id}`}>＋ Task</ActionButton>
             <ActionButton href="#log-work">＋ Log work</ActionButton>
-            <ActionButton href="#conversations">＋ Conversation</ActionButton>
             <EditDrawer title={`Edit ${isArea ? 'area' : 'project'}`}>
               <ProjectForm
                 domains={domains}
@@ -232,13 +225,6 @@ export default async function ProjectDetailPage({
               </DetailSection>
             </section>
 
-            <section id="conversations" className="mt-8">
-              <DetailSection label="Conversations" count={detail.conversations.length > 0 ? detail.conversations.length : undefined} className="mt-0">
-                <ConversationTimeline conversations={detail.conversations} tz={tz} revalidatePath={`/projects/${project.id}`} scope="project" />
-                <LogConversationForm scope={{ project_id: project.id }} revalidatePath={`/projects/${project.id}`} />
-              </DetailSection>
-            </section>
-
             {doneTasks.length > 0 && (
               <details className="mt-8 group">
                 <summary className="eyebrow pb-2 border-b border-line cursor-pointer list-none flex items-center justify-between hover:text-ink-2 transition-colors">
@@ -252,13 +238,6 @@ export default async function ProjectDetailPage({
         }
         rail={
           <>
-            <ContactsSection
-              projectId={project.id}
-              company={project.company ?? null}
-              primaryContact={project.primary_contact ?? null}
-              contacts={detail.contacts}
-              people={people}
-            />
             {!isRetainer && !isArea && <MilestonesSection projectId={project.id} milestones={milestones} />}
             <ChecklistSection projectId={project.id} items={checklist} />
             <RailBlock label="Details">

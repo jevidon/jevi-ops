@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { cookies } from 'next/headers';
 import { z } from 'zod';
-import { tasksApi, observationsApi, conversationsApi, ApiError } from '@/lib/api';
+import { tasksApi, observationsApi, ApiError } from '@/lib/api';
 import { todayIsoDate } from '@/lib/today';
 import { getAppTimezone } from '@/lib/app-settings';
 
@@ -58,30 +58,6 @@ export async function toggleTop3Action(formData: FormData) {
     // ignore — revalidate will resync
   }
   revalidatePath('/today');
-}
-
-// Log a check-in with a silent client straight from Today (Phase 5). Creates a
-// minimal conversation — the create route's trigger stamps the company's
-// last_interaction_at and clears the company_silent attention item, so the
-// client drops off the Silent-clients list on the next render. interaction_type
-// is 'other' (an unspecified touch); refine it on the company page if needed.
-export async function logCheckInAction(formData: FormData) {
-  const companyId = String(formData.get('company_id') ?? '');
-  if (!companyId) return;
-  try {
-    await conversationsApi.create({
-      company_id: companyId,
-      interaction_type: 'other',
-      direction: 'outbound',
-      summary: 'Checked in',
-      occurred_at: new Date().toISOString(),
-    });
-  } catch {
-    /* best-effort — the list reloads on next render */
-  }
-  revalidatePath('/today');
-  revalidatePath('/attention');
-  revalidatePath('/companies');
 }
 
 export async function dismissObservationAction(formData: FormData) {

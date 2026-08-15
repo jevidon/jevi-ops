@@ -12,7 +12,7 @@ import { snoozeAttentionAction, dismissAttentionAction, actedAttentionAction } f
 function sourceHref(type: AttentionSourceType, id: string): string | null {
   switch (type) {
     case 'person': return `/people/${id}`;
-    case 'company': return `/companies/${id}`;
+    case 'company': return null; // CRM not in this fork — vocabulary reserved for a later port
     case 'domain': return `/domains/${id}`;
     case 'project': return `/projects/${id}`;
     case 'task': return `/tasks/${id}`;

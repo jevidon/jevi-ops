@@ -7,7 +7,7 @@
 // so the set stays a 1:1 copy of the source; there is no user data here.
 
 export type IconName =
-  | 'today' | 'work' | 'tasks' | 'content' | 'people' | 'companies'
+  | 'today' | 'work' | 'tasks' | 'content' | 'people'
   | 'library' | 'routines' | 'health'
   | 'search' | 'capture' | 'bell' | 'flag' | 'gear' | 'ask' | 'pin'
   | 'chev' | 'arrow' | 'x' | 'check';
@@ -18,7 +18,6 @@ const ICONS: Record<IconName, string> = {
   tasks: '<rect x="3.5" y="4.5" width="6" height="6" rx=".5"/><path d="M5.2 7.4l1.3 1.3 2.3-2.6"/><rect x="3.5" y="13.5" width="6" height="6" rx=".5"/><path d="M13 7.5h7.5M13 16.5h7.5"/>',
   content: '<rect x="3.5" y="4" width="5" height="16" rx=".5"/><rect x="9.5" y="4" width="5" height="11" rx=".5"/><rect x="15.5" y="4" width="5" height="14" rx=".5"/>',
   people: '<circle cx="12" cy="8" r="3.5"/><path d="M5 20c1.5-4 4.5-6 7-6s5.5 2 7 6"/>',
-  companies: '<rect x="3.5" y="4" width="7.5" height="16" rx=".5"/><rect x="13.5" y="9.5" width="7" height="10.5" rx=".5"/><path d="M6.2 8h2.2M6.2 12h2.2M16.2 13.5h1.8"/>',
   library: '<path d="M4 4.5v15l3 .5V5.5z"/><path d="M10 4.5v15l3 .5V5.5z"/><path d="M16.2 5.8l3 14.7 1.5-.4-3-14.7z"/>',
   routines: '<path d="M4.5 9.5a7.5 7.5 0 0113-4.2M19.5 14.5a7.5 7.5 0 01-13 4.2"/><path d="M4.5 5.5v4h4M19.5 18.5v-4h-4"/>',
   // Health is feature-flagged and usually absent; a simple pulse line.
