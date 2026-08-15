@@ -26,9 +26,10 @@ export const TaskSchema = z.object({
   parent_task_id: z.string().uuid().nullable().optional(),
   // Must belong to the task's project — server nulls a cross-project link.
   milestone_id: z.string().uuid().nullable().optional(),
-  // Waiting state (migration 0038): who it's blocked on + since when.
+  // Waiting state (migration 0038): who it's blocked on + since when
+  // (a DATE, not a timestamp — the aging count is calendar-day math).
   waiting_on: nullableString(),
-  waiting_since: z.string().datetime({ offset: true }).nullable().optional(),
+  waiting_since: nullableDate(),
   recurrence_rule: nullableString(),
   reminder_offsets: z.array(z.number()).default([]),
   source: TaskSourceSchema,
@@ -74,6 +75,8 @@ export const CreateTaskSchema = z.object({
   reminder_offsets: z.array(z.number()).optional(),
   source: TaskSourceSchema.default('manual'),
   top3_for_date: nullableDate(),
+  waiting_on: nullableString(),
+  waiting_since: nullableDate(),
 });
 
 export const UpdateTaskSchema = CreateTaskSchema.partial().extend({

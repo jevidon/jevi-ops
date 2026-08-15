@@ -3,6 +3,7 @@ import { and, desc, eq, type SQL } from 'drizzle-orm';
 import { CreateTaskSchema, UpdateTaskSchema } from '@jevi-ops/shared/schemas';
 import { INBOX_DOMAIN_ID, isRecurrencePattern, nextDueDate } from '@jevi-ops/shared';
 import { getAppTz } from '../lib/app-settings.js';
+import { todayInTz } from '../lib/tz.js';
 import { getDb, type Db } from '../lib/db.js';
 import { clearAttentionForSource } from '../lib/attention.js';
 import { milestones, projects, tasks } from '../db/schema.js';
@@ -157,13 +158,6 @@ export const taskRoutes: FastifyPluginAsync = async (app) => {
         details: parsed.error.flatten().fieldErrors,
       });
     }
-    // The shared TaskStatusSchema already knows 'waiting' (the Editorial v2
-    // types build against it), but migration 0038 hasn't landed — reject
-    // cleanly rather than letting the DB CHECK turn it into a 500. This
-    // guard is removed by the work-page PR that ships the waiting ripple.
-    if (parsed.data.status === 'waiting') {
-      return reply.code(400).send({ error: 'waiting_not_yet_supported' });
-    }
     const db = getDb();
     // domain_id is excluded from the spread: the Zod schema allows null (as
     // "recompute for me") but the column is NOT NULL — the resolver below
@@ -249,30 +243,55 @@ export const taskRoutes: FastifyPluginAsync = async (app) => {
       } else {
         update.completed_at = new Date().toISOString();
       }
+      // Completing (or rolling over) leaves the waiting state (0038).
+      update.waiting_on = null;
+      update.waiting_since = null;
     } else if (parsed.data.status === 'open') {
       // Reopening — clear completion timestamp so analytics don't see a
-      // stale "completed at" on a row that's actually open.
+      // stale "completed at" on a row that's actually open. Reopen never
+      // lands in waiting, so clear the waiting fields too.
       update.completed_at = null;
+      update.waiting_on = null;
+      update.waiting_since = null;
+    } else if (parsed.data.status === 'waiting') {
+      // Entering waiting (blocked on someone else): stamp the aging anchor if
+      // the client didn't provide one. Must be the APP-TZ local date — every
+      // consumer (attention rule, /work bucketing, all the UI day-counts)
+      // diffs against todayInTz(tz), so a UTC stamp would read a day off for
+      // evening waits in a behind-UTC zone. waiting_on flows through from the
+      // patch.
+      if (!('waiting_since' in parsed.data) || !parsed.data.waiting_since) {
+        update.waiting_since = todayInTz(await getAppTz());
+      }
     }
     const [row] = await db.update(tasks).set(update).where(eq(tasks.id, req.params.id)).returning();
     if (!row) return reply.code(404).send({ error: 'not_found' });
 
-    // Live-reconcile the Attention Engine's task_due_soon item: if this edit
-    // means the task no longer qualifies (completed, or moved out of the
-    // 3-day window, or due date cleared — a recurring task's rollover pushes
-    // due_date far out too), delete its live attention item now instead of
-    // waiting for the 5am cron. If it still qualifies, the item stays and the
-    // cron refreshes it. Best-effort — never block the task update.
+    // Live-reconcile this task's Attention items so a status/date change
+    // shows immediately instead of waiting for the 5am cron. Each managed
+    // rule is checked against the task's NEW state; only rules that no
+    // longer apply are deleted (keyed by rule_type so, e.g., editing a
+    // still-waiting task's note doesn't clobber its live task_waiting_aging
+    // item). Best-effort — never block the task update.
     try {
       const tz = await getAppTz();
-      const todayYmd = new Intl.DateTimeFormat('en-CA', {
-        timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
-      }).format(new Date());
+      const todayYmd = todayInTz(tz);
       const plus3Ymd = new Date(new Date(`${todayYmd}T12:00:00Z`).getTime() + 3 * 86_400_000)
         .toISOString().slice(0, 10);
       const stillDueSoon = row.status === 'open' && row.due_date != null && row.due_date <= plus3Ymd;
-      if (!stillDueSoon) {
-        await clearAttentionForSource(db, 'task', req.params.id, ['task_due_soon']);
+
+      // task_waiting_aging lives only while the task is waiting ≥7 days; any
+      // other state (or a fresh block) clears it until the cron recomputes.
+      const waitDays = row.status === 'waiting' && row.waiting_since
+        ? Math.round((Date.parse(`${todayYmd}T00:00:00Z`) - Date.parse(`${row.waiting_since}T00:00:00Z`)) / 86_400_000)
+        : -1;
+      const stillWaitingAging = row.status === 'waiting' && waitDays >= 7;
+
+      const staleRules: string[] = [];
+      if (!stillDueSoon) staleRules.push('task_due_soon');
+      if (!stillWaitingAging) staleRules.push('task_waiting_aging');
+      if (staleRules.length > 0) {
+        await clearAttentionForSource(db, 'task', req.params.id, staleRules);
       }
     } catch (err) {
       req.log.warn({ err, taskId: req.params.id }, 'attention reconcile after task update failed');
@@ -289,7 +308,7 @@ export const taskRoutes: FastifyPluginAsync = async (app) => {
     // Clear any Attention item for the now-gone task (source_id is a plain
     // uuid, no FK cascade). Best-effort.
     try {
-      await clearAttentionForSource(db, 'task', req.params.id, ['task_due_soon']);
+      await clearAttentionForSource(db, 'task', req.params.id, ['task_due_soon', 'task_waiting_aging']);
     } catch { /* best-effort */ }
     return reply.code(204).send();
   });

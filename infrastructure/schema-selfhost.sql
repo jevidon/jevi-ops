@@ -43,6 +43,11 @@ create table if not exists stewardship_domains (
   expected_cadence text,
   active boolean not null default true,
   is_system boolean not null default false,
+  -- Work page (0038): deliberately-paused channel, muted at the bottom.
+  parked boolean not null default false,
+  -- Attention domain_stale config (0040): on/off + threshold (null → 21).
+  stale_enabled boolean not null default true,
+  stale_days integer,
   last_shipped_at timestamptz,
   illustration jsonb,
   illustration_draft jsonb,
@@ -131,6 +136,8 @@ create table if not exists projects (
   color text,
   engagement_type text not null default 'project' check (engagement_type in
     ('project','retainer')),
+  -- Retainer cycle anchor day-of-month (migration 0038); null until set.
+  retainer_anchor_day int check (retainer_anchor_day between 1 and 31),
   kind text not null default 'project' check (kind in ('project','area')),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -204,7 +211,7 @@ create table if not exists content_items (
   title text not null,
   domain_id uuid references stewardship_domains(id) on delete set null,
   type text not null check (type in
-    ('video','article','short_clip','podcast_episode','newsletter')),
+    ('video','article','short_clip','podcast_episode','newsletter','course')),
   status text not null default 'idea' check (status in
     ('idea','outline','filming','editing','published','derivatives_pending','done')),
   outline_md text,
@@ -213,6 +220,18 @@ create table if not exists content_items (
   published_at timestamptz,
   parent_id uuid references content_items(id) on delete set null,
   derivative_type text,
+  -- Work page (0038): who the ball is with + idea lifecycle stamps.
+  holder text not null default 'me' check (holder in ('me','editor')),
+  holder_since timestamptz,
+  archived_at timestamptz,
+  idea_reviewed_at timestamptz,
+  -- Content Manager v2 (0039): production fields.
+  meta jsonb not null default '{}'::jsonb,
+  produced_on date,
+  target_publish_date date,
+  canonical_url text,
+  platforms text[],
+  body_rich text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -265,7 +284,7 @@ create table if not exists tasks (
   id uuid primary key default gen_random_uuid(),
   title text not null,
   notes text,
-  status text not null default 'open' check (status in ('open','done')),
+  status text not null default 'open' check (status in ('open','waiting','done')),
   due_date date,
   due_time time,
   priority integer not null default 4 check (priority between 1 and 4),
@@ -281,6 +300,9 @@ create table if not exists tasks (
   source text not null default 'manual' check (source in
     ('manual','voice','email','observation','import')),
   top3_for_date date,
+  -- Waiting state (migration 0038): who it's blocked on + the aging anchor.
+  waiting_on text,
+  waiting_since date,
   created_at timestamptz not null default now(),
   completed_at timestamptz,
   updated_at timestamptz not null default now()
