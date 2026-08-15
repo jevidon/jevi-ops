@@ -1,3 +1,4 @@
+import { useId } from 'react';
 import { proceduralIllustration } from '@jevi-ops/shared';
 
 // Engraved spot illustration for a domain.
@@ -15,6 +16,45 @@ import { proceduralIllustration } from '@jevi-ops/shared';
 //
 // tone="accent" re-inks the whole drawing rust for slipping domains —
 // tones ride on currentColor, so the same stored art shifts with status.
+
+// Banner variant for the Work page's domain sections: the same 240×100
+// motif tiled horizontally as an engraved frieze (134×56 tiles — the
+// motif at natural aspect), filling whatever width the section has.
+// Same tone contract as DomainIllustration; the caller owns the fade-out
+// mask and opacity.
+export function DomainFrieze({
+  name,
+  svg,
+  tone = 'ink',
+}: {
+  name: string;
+  svg?: string | null;
+  tone?: 'ink' | 'accent';
+}) {
+  const pid = useId();
+  const inner = svg && svg.trim() ? svg : proceduralIllustration(name);
+  return (
+    <svg
+      aria-hidden="true"
+      className={`domain-ill h-full w-full ${
+        tone === 'accent' ? 'domain-ill-accent text-accent-slip/80' : 'text-ink-3'
+      }`}
+    >
+      <defs>
+        <pattern id={pid} patternUnits="userSpaceOnUse" width="134" height="56" viewBox="0 0 240 100">
+          <g
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1"
+            strokeLinecap="round"
+            dangerouslySetInnerHTML={{ __html: inner }}
+          />
+        </pattern>
+      </defs>
+      <rect width="100%" height="100%" fill={`url(#${pid})`} />
+    </svg>
+  );
+}
 
 export function DomainIllustration({
   name,
