@@ -40,6 +40,9 @@ export const AttentionItemSchema = z.object({
   dismissed_at: z.string().datetime({ offset: true }).nullable().optional(),
   acted_on_at: z.string().datetime({ offset: true }).nullable().optional(),
   acted_on_action: z.string().nullable().optional(),
+  // Stable {rule}:{entity}:{bucket} key — the route returns full rows, and
+  // the v2 web types it (used for occurrence-scoped dismiss affordances).
+  dedup_key: z.string(),
   created_at: z.string().datetime({ offset: true }),
 });
 

@@ -697,9 +697,27 @@ export const app_settings = pgTable("app_settings", {
 	stt_model: text(),
 	immich_base_url: text(),
 	immich_api_key: text(),
+	// Module feature flags (migration 0036). rule_module_enabled exists
+	// because the Editorial v2 web tree checks it; the module isn't ported.
+	health_module_enabled: boolean().default(false).notNull(),
+	routines_module_enabled: boolean().default(true).notNull(),
+	rule_module_enabled: boolean().default(false).notNull(),
 	updated_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [
 	check("app_settings_id_check", sql`id`),
+]);
+
+// Tomorrow's Focus (migration 0037) — one optional pointer per day at a
+// project or content item. target_id spans two tables → no FK; validated
+// app-side (routes/focus.ts).
+export const daily_focus = pgTable("daily_focus", {
+	date: date().primaryKey().notNull(),
+	target_type: text().notNull(),
+	target_id: uuid().notNull(),
+	note: text(),
+	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	check("daily_focus_target_type_check", sql`target_type = ANY (ARRAY['project'::text, 'content_item'::text])`),
 ]);
 
 export const routines = pgTable("routines", {

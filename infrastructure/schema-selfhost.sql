@@ -679,6 +679,11 @@ create table if not exists app_settings (
   stt_model text,
   immich_base_url text,
   immich_api_key text,
+  -- Module feature flags (migration 0036). rule_module_enabled exists
+  -- because the Editorial v2 web tree checks it; the module isn't ported.
+  health_module_enabled boolean not null default false,
+  routines_module_enabled boolean not null default true,
+  rule_module_enabled boolean not null default false,
   updated_at timestamptz not null default now()
 );
 
@@ -1004,6 +1009,22 @@ create index if not exists idx_attention_snoozed
   on attention_items(status, snoozed_until) where status = 'snoozed';
 create index if not exists idx_attention_source
   on attention_items(source_type, source_id);
+
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- Tomorrow's Focus (migration 0037)
+-- ─────────────────────────────────────────────────────────────────────────
+-- One optional pointer per day at a project or content item. No status, no
+-- completion, no adherence tracking — a pointer, not a flow. target_id has
+-- no FK (spans two tables); validated app-side.
+
+create table if not exists daily_focus (
+  date date primary key,
+  target_type text not null check (target_type in ('project','content_item')),
+  target_id uuid not null,
+  note text,
+  created_at timestamptz not null default now()
+);
 
 
 -- ─────────────────────────────────────────────────────────────────────────

@@ -157,6 +157,13 @@ export const taskRoutes: FastifyPluginAsync = async (app) => {
         details: parsed.error.flatten().fieldErrors,
       });
     }
+    // The shared TaskStatusSchema already knows 'waiting' (the Editorial v2
+    // types build against it), but migration 0038 hasn't landed — reject
+    // cleanly rather than letting the DB CHECK turn it into a 500. This
+    // guard is removed by the work-page PR that ships the waiting ripple.
+    if (parsed.data.status === 'waiting') {
+      return reply.code(400).send({ error: 'waiting_not_yet_supported' });
+    }
     const db = getDb();
     // domain_id is excluded from the spread: the Zod schema allows null (as
     // "recompute for me") but the column is NOT NULL — the resolver below

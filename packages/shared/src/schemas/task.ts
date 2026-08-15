@@ -1,6 +1,9 @@
 import { z } from 'zod';
 
-export const TaskStatusSchema = z.enum(['open', 'done']);
+// 'waiting' (blocked on someone else) lands with migration 0038; until the
+// tasks route ships its waiting ripple, the API rejects 'waiting' writes —
+// this shared enum leads the route by one PR so the web types can build.
+export const TaskStatusSchema = z.enum(['open', 'waiting', 'done']);
 export const TaskSourceSchema = z.enum(['manual', 'voice', 'email', 'observation', 'import']);
 
 // Fields that can be explicitly cleared in updates need .nullable() —
@@ -23,6 +26,9 @@ export const TaskSchema = z.object({
   parent_task_id: z.string().uuid().nullable().optional(),
   // Must belong to the task's project — server nulls a cross-project link.
   milestone_id: z.string().uuid().nullable().optional(),
+  // Waiting state (migration 0038): who it's blocked on + since when.
+  waiting_on: nullableString(),
+  waiting_since: z.string().datetime({ offset: true }).nullable().optional(),
   recurrence_rule: nullableString(),
   reminder_offsets: z.array(z.number()).default([]),
   source: TaskSourceSchema,
