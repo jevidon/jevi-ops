@@ -882,6 +882,9 @@ export interface ShoppingItem {
   needed: boolean;
   needed_at: string | null;
   recurrence_rule: ShoppingRecurrenceRule | null;
+  // One-time item: archives itself on purchase/dismiss instead of
+  // cycling back to stocked. Mutually exclusive with recurrence_rule.
+  one_off: boolean;
   last_purchased_at: string | null;
   archived_at: string | null;
   created_at: string;
@@ -937,6 +940,7 @@ export const shoppingApi = {
       name: string;
       note?: string | null;
       recurrence_rule?: ShoppingRecurrenceRule | null;
+      one_off?: boolean;
       position?: number;
       needed?: boolean;
     }) => api.post<ShoppingItem>('/api/shopping/items', body),
@@ -947,6 +951,7 @@ export const shoppingApi = {
         name: string;
         note: string | null;
         recurrence_rule: ShoppingRecurrenceRule | null;
+        one_off: boolean;
         position: number;
         archived_at: string | null;
       }>,

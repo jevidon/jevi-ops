@@ -28,11 +28,12 @@ export async function addItemAction(
 ): Promise<SaveResult> {
   const listId = String(formData.get('listId') ?? '');
   const name = String(formData.get('name') ?? '').trim();
+  const oneOff = formData.get('one_off') === 'true';
   if (!listId) return { ok: false, error: 'Missing list id.' };
   if (!name) return { ok: false, error: 'Name required.' };
   try {
     // New items arrive flagged: you add something because you need it.
-    await shoppingApi.items.create({ list_id: listId, name, needed: true });
+    await shoppingApi.items.create({ list_id: listId, name, needed: true, one_off: oneOff });
   } catch (err) {
     return { ok: false, error: errMessage(err) };
   }
@@ -89,14 +90,16 @@ export async function updateItemAction(
   const rawRule = String(formData.get('recurrence_rule') ?? '').trim();
   if (!itemId) return { ok: false, error: 'Missing item id.' };
   if (!name) return { ok: false, error: 'Name required.' };
-  const recurrence_rule: ShoppingRecurrenceRule | null = isRecurrencePattern(rawRule)
-    ? rawRule
-    : null;
+  const oneOff = formData.get('one_off') === 'true';
+  // A one-time item can't carry a cadence — the checkbox wins.
+  const recurrence_rule: ShoppingRecurrenceRule | null =
+    !oneOff && isRecurrencePattern(rawRule) ? rawRule : null;
   try {
     await shoppingApi.items.update(itemId, {
       name,
       note: note || null,
       recurrence_rule,
+      one_off: oneOff,
       ...(listId ? { list_id: listId } : {}),
     });
   } catch (err) {

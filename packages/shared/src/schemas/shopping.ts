@@ -34,6 +34,9 @@ export const ShoppingItemSchema = z.object({
   // isDueAgain in recurrence.ts). Most items have no rule — the user
   // flags them manually when supplies run low.
   recurrence_rule: RecurrenceRuleSchema.nullable().optional(),
+  // One-time item (0045): archives itself on purchase/dismiss instead of
+  // cycling back to stocked. Mutually exclusive with recurrence_rule.
+  one_off: z.boolean(),
   last_purchased_at: z.string().datetime({ offset: true }).nullable().optional(),
   archived_at: z.string().datetime({ offset: true }).nullable().optional(),
   created_at: z.string().datetime({ offset: true }),
@@ -60,24 +63,33 @@ export const UpdateShoppingListSchema = z.object({
   archived_at: z.string().datetime({ offset: true }).nullable().optional(),
 });
 
-export const CreateShoppingItemSchema = z.object({
-  list_id: z.string().uuid(),
-  name: z.string().trim().min(1),
-  note: z.string().nullable().optional(),
-  recurrence_rule: RecurrenceRuleSchema.nullable().optional(),
-  position: z.number().int().optional(),
-  // Allow add-and-flag in one call ("we're out of this, and it's not on
-  // the list yet").
-  needed: z.boolean().optional(),
-});
+export const CreateShoppingItemSchema = z
+  .object({
+    list_id: z.string().uuid(),
+    name: z.string().trim().min(1),
+    note: z.string().nullable().optional(),
+    recurrence_rule: RecurrenceRuleSchema.nullable().optional(),
+    one_off: z.boolean().optional(),
+    position: z.number().int().optional(),
+    // Allow add-and-flag in one call ("we're out of this, and it's not on
+    // the list yet").
+    needed: z.boolean().optional(),
+  })
+  .refine((v) => !(v.one_off && v.recurrence_rule), {
+    message: 'A one-time item cannot have a recurrence rule.',
+    path: ['recurrence_rule'],
+  });
 
 // Metadata only — the needed flag moves through the flag/purchase
 // endpoints so the ledger and recurrence anchor stay consistent.
+// one_off/recurrence exclusivity for partial updates (where only one of
+// the pair may be present) is enforced route-side against the stored row.
 export const UpdateShoppingItemSchema = z.object({
   list_id: z.string().uuid().optional(),
   name: z.string().trim().min(1).optional(),
   note: z.string().nullable().optional(),
   recurrence_rule: RecurrenceRuleSchema.nullable().optional(),
+  one_off: z.boolean().optional(),
   position: z.number().int().optional(),
   archived_at: z.string().datetime({ offset: true }).nullable().optional(),
 });

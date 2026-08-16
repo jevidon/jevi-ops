@@ -803,10 +803,15 @@ create table if not exists shopping_items (
   recurrence_rule text check (recurrence_rule in
     ('daily','weekdays','weekly','biweekly','monthly',
      'quarterly','semiannually','yearly')),
+  -- One-time item (0045): archives itself on purchase/dismiss instead of
+  -- cycling back to stocked. Mutually exclusive with recurrence_rule.
+  one_off boolean not null default false,
   last_purchased_at timestamptz,
   archived_at timestamptz,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  constraint shopping_items_one_off_no_recurrence
+    check (not (one_off and recurrence_rule is not null))
 );
 
 create index if not exists idx_shopping_items_list_position

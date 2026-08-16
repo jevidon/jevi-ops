@@ -137,10 +137,12 @@ export const shoppingRoutes: FastifyPluginAsync = async (app) => {
       name: parsed.data.name,
       note: parsed.data.note ?? null,
       recurrence_rule: parsed.data.recurrence_rule ?? null,
+      one_off: parsed.data.one_off ?? false,
       position,
     };
     // Add-and-flag in one call ("we're out, and it's not on the list yet").
-    if (parsed.data.needed) {
+    // One-time items always arrive needed — they only exist to be bought.
+    if (parsed.data.needed || parsed.data.one_off) {
       insert.needed = true;
       insert.needed_at = new Date().toISOString();
     }
@@ -157,8 +159,24 @@ export const shoppingRoutes: FastifyPluginAsync = async (app) => {
     if (Object.keys(parsed.data).length === 0) {
       return reply.code(400).send({ error: 'empty_payload' });
     }
-    const [row] = await getDb().update(shopping_items)
-      .set(parsed.data)
+    const db = getDb();
+    const update: Partial<typeof shopping_items.$inferInsert> = { ...parsed.data };
+    // one_off and recurrence_rule are mutually exclusive (DB CHECK). For
+    // partial updates, resolve against the stored row and let the field
+    // the caller actually sent win.
+    const existing = await db.query.shopping_items.findFirst({
+      columns: { one_off: true, recurrence_rule: true },
+      where: eq(shopping_items.id, req.params.id),
+    });
+    if (!existing) return reply.code(404).send({ error: 'not_found' });
+    const finalOneOff = update.one_off ?? existing.one_off;
+    const finalRule = 'recurrence_rule' in update ? update.recurrence_rule : existing.recurrence_rule;
+    if (finalOneOff && finalRule) {
+      if ('one_off' in update) update.recurrence_rule = null;
+      else update.one_off = false;
+    }
+    const [row] = await db.update(shopping_items)
+      .set(update)
       .where(eq(shopping_items.id, req.params.id))
       .returning();
     if (!row) return reply.code(404).send({ error: 'not_found' });
@@ -181,20 +199,26 @@ export const shoppingRoutes: FastifyPluginAsync = async (app) => {
     }
     const db = getDb();
     const existing = await db.query.shopping_items.findFirst({
-      columns: { recurrence_rule: true },
+      columns: { recurrence_rule: true, one_off: true },
       where: eq(shopping_items.id, req.params.id),
     });
     if (!existing) return reply.code(404).send({ error: 'not_found' });
 
     const now = new Date().toISOString();
     const update: Partial<typeof shopping_items.$inferInsert> = parsed.data.needed
-      ? { needed: true, needed_at: now }
+      ? { needed: true, needed_at: now, archived_at: null }
       : { needed: false, needed_at: null };
     // Dismiss-without-buying on a rule item bumps the recurrence anchor:
     // a skip counts as satisfied this cycle, otherwise auto_needed would
     // re-flip the item the moment it was dismissed.
     if (!parsed.data.needed && existing.recurrence_rule) {
       update.last_purchased_at = now;
+    }
+    // A dismissed one-time item has no stocked state to return to — it
+    // leaves the list entirely (archived, not deleted, so it can be
+    // recovered from the archive).
+    if (!parsed.data.needed && existing.one_off) {
+      update.archived_at = now;
     }
     const [row] = await db.update(shopping_items)
       .set(update)
@@ -211,7 +235,7 @@ export const shoppingRoutes: FastifyPluginAsync = async (app) => {
     }
     const db = getDb();
     const existing = await db.query.shopping_items.findFirst({
-      columns: { id: true },
+      columns: { id: true, one_off: true },
       where: eq(shopping_items.id, req.params.id),
     });
     if (!existing) return reply.code(404).send({ error: 'not_found' });
@@ -227,8 +251,15 @@ export const shoppingRoutes: FastifyPluginAsync = async (app) => {
       .returning();
     if (!purchase) throw app.httpErrors.internalServerError('insert_returned_no_row');
 
+    // One-time items leave the list once bought — archived (after the
+    // ledger row above), never deleted, so purchase history survives.
     const [item] = await db.update(shopping_items)
-      .set({ needed: false, needed_at: null, last_purchased_at: purchasedAt })
+      .set({
+        needed: false,
+        needed_at: null,
+        last_purchased_at: purchasedAt,
+        ...(existing.one_off ? { archived_at: purchasedAt } : {}),
+      })
       .where(eq(shopping_items.id, req.params.id))
       .returning();
     if (!item) throw app.httpErrors.internalServerError('update_returned_no_row');
@@ -249,11 +280,14 @@ export const shoppingRoutes: FastifyPluginAsync = async (app) => {
       .select({ latest: max(shopping_purchases.purchased_at) })
       .from(shopping_purchases)
       .where(eq(shopping_purchases.item_id, purchase.item_id));
+    // archived_at: null also resurrects a one-off item whose purchase
+    // archived it — undo restores it to the list, flagged again.
     const [item] = await db.update(shopping_items)
       .set({
         needed: true,
         needed_at: new Date().toISOString(),
         last_purchased_at: remaining?.latest ?? null,
+        archived_at: null,
       })
       .where(eq(shopping_items.id, purchase.item_id))
       .returning();

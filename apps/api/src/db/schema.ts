@@ -937,6 +937,7 @@ export const shopping_items = pgTable("shopping_items", {
 	needed: boolean().default(false).notNull(),
 	needed_at: timestamp({ withTimezone: true, mode: 'string' }),
 	recurrence_rule: text(),
+	one_off: boolean().default(false).notNull(),
 	last_purchased_at: timestamp({ withTimezone: true, mode: 'string' }),
 	archived_at: timestamp({ withTimezone: true, mode: 'string' }),
 	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
@@ -949,6 +950,7 @@ export const shopping_items = pgTable("shopping_items", {
 			name: "shopping_items_list_id_fkey"
 		}).onDelete("cascade"),
 	check("shopping_items_recurrence_rule_check", sql`recurrence_rule = ANY (ARRAY['daily'::text, 'weekdays'::text, 'weekly'::text, 'biweekly'::text, 'monthly'::text, 'quarterly'::text, 'semiannually'::text, 'yearly'::text])`),
+	check("shopping_items_one_off_no_recurrence", sql`NOT (one_off AND recurrence_rule IS NOT NULL)`),
 ]);
 
 export const shopping_purchases = pgTable("shopping_purchases", {

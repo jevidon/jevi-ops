@@ -114,6 +114,12 @@ export function ShoppingView({ lists }: { lists: ShoppingList[] }) {
         ))}
       </div>
 
+      {listRefs.length > 0 && (
+        <div className="px-5 lg:px-0 mt-4">
+          <QuickAddForm listRefs={listRefs} />
+        </div>
+      )}
+
       {lists.length === 0 ? (
         <EmptyState
           title="No lists yet"
@@ -172,7 +178,7 @@ function ListSection({
           type="button"
           onClick={() => setMenuOpen(true)}
           aria-label={`Edit list ${list.name}`}
-          className="font-mono text-[10px] uppercase tracking-wider text-ink-3 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:text-ink transition-all"
+          className="font-mono text-[10px] uppercase tracking-wider text-ink-3 hover:text-ink transition-colors"
         >
           Edit
         </button>
@@ -287,6 +293,24 @@ function ItemRow({
           {RECURRENCE_GLYPH} {RECURRENCE_LABELS[rule]}
         </span>
       )}
+      {item.one_off && (
+        <span
+          className="font-mono text-[10px] uppercase tracking-wider text-ink-3 shrink-0"
+          title="One-time item — leaves the list once bought."
+        >
+          once
+        </span>
+      )}
+
+      <button
+        type="button"
+        onClick={() => setEditOpen(true)}
+        aria-label={`Edit ${item.name}`}
+        className="shrink-0 font-mono text-[12px] leading-none text-ink-3 hover:text-ink transition-colors px-1"
+        title="Edit item"
+      >
+        ···
+      </button>
 
       <ItemEditSheet
         item={item}
@@ -333,6 +357,7 @@ function ItemEditSheet({
     updateItemAction,
     null,
   );
+  const [oneOff, setOneOff] = useState(item.one_off);
   useEffect(() => {
     if (state?.ok) onClose();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -368,11 +393,24 @@ function ItemEditSheet({
               ))}
             </select>
           </Field>
+          <label className="flex items-center gap-2 py-1 cursor-pointer select-none">
+            <input
+              type="checkbox" name="one_off" value="true" checked={oneOff}
+              onChange={(e) => setOneOff(e.target.checked)}
+              className="h-4 w-4 accent-ink"
+            />
+            <span className="font-sans text-[13px] text-ink">One-time</span>
+            <span className="font-sans text-[12px] text-ink-3">— leaves the list once bought</span>
+          </label>
           <Field label="Recurs">
             <select
-              name="recurrence_rule" defaultValue={rule}
-              title="When set, the item re-flags itself as needed once this interval passes after a purchase."
-              className="w-full bg-transparent border-b border-line focus:border-ink-2 focus:outline-none py-1.5 font-sans text-[14px] text-ink"
+              name="recurrence_rule" defaultValue={rule} disabled={oneOff}
+              title={
+                oneOff
+                  ? 'One-time items have no cadence.'
+                  : 'When set, the item re-flags itself as needed once this interval passes after a purchase.'
+              }
+              className="w-full bg-transparent border-b border-line focus:border-ink-2 focus:outline-none py-1.5 font-sans text-[14px] text-ink disabled:opacity-40"
             >
               {RULE_OPTIONS.map((o) => (
                 <option key={o.value} value={o.value}>{o.label}</option>
@@ -445,6 +483,65 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 // ─── Add item ──────────────────────────────────────────────────────────
 
+// Small mono "once" toggle shared by both add forms. Unchecked boxes
+// aren't submitted, so the action reads one_off === 'true' only when on.
+function OnceToggle({ disabled }: { disabled?: boolean }) {
+  return (
+    <label
+      className="flex items-center gap-1.5 shrink-0 cursor-pointer select-none"
+      title="One-time item — leaves the list once bought."
+    >
+      <input type="checkbox" name="one_off" value="true" disabled={disabled} className="h-3.5 w-3.5 accent-ink" />
+      <span className="font-mono text-[10px] uppercase tracking-wider text-ink-3">once</span>
+    </label>
+  );
+}
+
+// Global quick add: one input that files into any store. Lives at the top
+// of the page so adding never requires scrolling to the right section.
+function QuickAddForm({ listRefs }: { listRefs: Array<{ id: string; name: string }> }) {
+  const [state, formAction, pending] = useActionState<SaveResult | null, FormData>(
+    addItemAction,
+    null,
+  );
+  const inputRef = useRef<HTMLInputElement>(null);
+  // Remember the last-used store across the form reset — chained entries
+  // usually target the same list.
+  const [listId, setListId] = useState(listRefs[0]?.id ?? '');
+
+  useEffect(() => {
+    if (state?.ok) {
+      inputRef.current?.form?.reset();
+      inputRef.current?.focus();
+    }
+  }, [state]);
+
+  return (
+    <form action={formAction} className="flex flex-wrap items-center gap-3 border border-line px-3 py-2">
+      <span className="text-ink-3 text-[14px] select-none" aria-hidden>+</span>
+      <input
+        ref={inputRef}
+        type="text" name="name" required autoComplete="off" disabled={pending}
+        placeholder="Quick add…"
+        className="flex-1 min-w-[140px] bg-transparent focus:outline-none py-1 font-sans text-[14px] placeholder:text-ink-3/70 text-ink"
+      />
+      <select
+        name="listId" value={listId} disabled={pending}
+        onChange={(e) => setListId(e.target.value)}
+        className="bg-transparent border-b border-line focus:border-ink-2 focus:outline-none py-1 font-mono text-[11px] uppercase tracking-wider text-ink-3 max-w-[160px]"
+      >
+        {listRefs.map((l) => (
+          <option key={l.id} value={l.id}>{l.name}</option>
+        ))}
+      </select>
+      <OnceToggle disabled={pending} />
+      {state && !state.ok && (
+        <span className="font-mono text-[10px] uppercase text-accent">{state.error}</span>
+      )}
+    </form>
+  );
+}
+
 function AddItemForm({ listId }: { listId: string }) {
   const [state, formAction, pending] = useActionState<SaveResult | null, FormData>(
     addItemAction,
@@ -461,7 +558,7 @@ function AddItemForm({ listId }: { listId: string }) {
   }, [state]);
 
   return (
-    <form action={formAction} className="flex items-center gap-2 mt-1">
+    <form action={formAction} className="flex items-center gap-3 mt-1">
       <input type="hidden" name="listId" value={listId} />
       <span className="text-ink-3 text-[14px] select-none" aria-hidden>+</span>
       <input
@@ -470,6 +567,7 @@ function AddItemForm({ listId }: { listId: string }) {
         placeholder="Add an item…"
         className="flex-1 min-w-[160px] bg-transparent border-b border-line focus:border-ink-2 focus:outline-none py-1.5 font-sans text-[14px] placeholder:text-ink-3/70 text-ink"
       />
+      <OnceToggle disabled={pending} />
       {state && !state.ok && (
         <span className="font-mono text-[10px] uppercase text-accent">{state.error}</span>
       )}
