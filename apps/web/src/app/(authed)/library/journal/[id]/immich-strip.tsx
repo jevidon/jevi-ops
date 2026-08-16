@@ -6,10 +6,9 @@ import { ImmichBrowser } from '../immich-browser';
 import { attachImmichAction } from './actions';
 
 // "Photos from this day" — the edit drawer's attach flow on top of the
-// shared ImmichBrowser. Selected assets are copied server-side into local
-// storage and appended to the entry's attachments (the parent form state is
-// replaced with the post-attach list so a later manual save can't clobber
-// them).
+// shared ImmichBrowser. Selected assets are linked (not copied) into the
+// entry's attachments (the parent form state is replaced with the
+// post-attach list so a later manual save can't clobber them).
 //
 // entryDate is the *committed* date field value (live from the edit form),
 // savedDate the last persisted entry_date. When they differ, attaching also

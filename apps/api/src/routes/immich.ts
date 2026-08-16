@@ -4,25 +4,24 @@ import { z } from 'zod';
 import {
   assetsForDate,
   fetchAssetInfo,
-  fetchOriginal,
   fetchThumbnail,
   isImmichConfigured,
-  isWebSafeImage,
 } from '../lib/immich.js';
 import { getDb } from '../lib/db.js';
-import { journal_entries } from '../db/schema.js';
-import { isStorageConfigured, uploadImage } from '../lib/storage.js';
+import { journal_entries, type StoredAttachment } from '../db/schema.js';
 
 // Immich ↔ journal integration (Phase H).
 //
 //   GET  /api/library/journal/immich-candidates?date=YYYY-MM-DD
 //        → photos taken that local day, with proxied thumbnail URLs
 //   GET  /api/immich/thumb/:assetId
-//        → thumbnail bytes (the browser can't carry Immich's API key)
+//        → preview bytes (the browser can't carry Immich's API key)
 //   POST /api/library/journal/:id/attach-immich { asset_ids }
-//        → copies the originals into UPLOADS_DIR and appends them to the
-//          entry's attachments jsonb. Copy (not hotlink) so journal
-//          history survives Immich re-indexes/deletions.
+//        → links the assets into the entry's attachments jsonb. Links,
+//          not copies — jevi-ops and Immich share a machine, so copying
+//          would double storage. Attachment urls point at the preview
+//          proxy above; deleting an asset in Immich breaks that photo
+//          in the journal (accepted trade-off, chosen 2026-08-16).
 
 const AttachSchema = z.object({
   asset_ids: z.array(z.string().min(1)).min(1).max(20),
@@ -86,9 +85,6 @@ export const immichRoutes: FastifyPluginAsync = async (app) => {
       if (!(await isImmichConfigured())) {
         return reply.code(503).send({ error: 'immich_not_configured' });
       }
-      if (!isStorageConfigured()) {
-        return reply.code(503).send({ error: 'storage_not_configured' });
-      }
       const parsed = AttachSchema.safeParse(req.body);
       if (!parsed.success) {
         return reply.code(400).send({ error: 'invalid_payload', details: parsed.error.flatten().fieldErrors });
@@ -101,14 +97,14 @@ export const immichRoutes: FastifyPluginAsync = async (app) => {
       });
       if (!entry) return reply.code(404).send({ error: 'not_found' });
 
-      // Dedupe against assets already copied into this entry (stamped with
+      // Dedupe against assets already linked to this entry (stamped with
       // immich_asset_id at attach time). Legacy attachments predate the
       // stamp and can't be recognized — accepted for a single-user app.
       const alreadyStamped = new Set(
         (entry.attachments ?? []).map((a) => a.immich_asset_id).filter(Boolean),
       );
 
-      const added = [];
+      const added: StoredAttachment[] = [];
       const failed: string[] = [];
       const already_attached: string[] = [];
       for (const assetId of parsed.data.asset_ids) {
@@ -117,30 +113,24 @@ export const immichRoutes: FastifyPluginAsync = async (app) => {
           continue;
         }
         try {
-          let { bytes, contentType } = await fetchOriginal(assetId);
-          // iPhone originals are HEIC — browsers other than Safari render
-          // them as broken images. Store Immich's preview JPEG instead for
-          // anything a browser can't display.
-          if (!isWebSafeImage(contentType)) {
-            ({ bytes, contentType } = await fetchThumbnail(assetId));
-          }
-          const stored = await uploadImage({
-            bytes,
-            contentType,
-            prefix: 'journal',
-            titleHint: `immich ${entry.entry_date}`,
+          // Metadata only — no bytes move. fetchAssetInfo doubles as the
+          // existence check (a deleted asset 404s and lands in `failed`).
+          const info = await fetchAssetInfo(assetId);
+          added.push({
+            // The authed preview proxy the strip thumbnails already use;
+            // Immich transcodes previews to JPEG, so HEIC originals render
+            // everywhere.
+            url: `/api/immich/thumb/${assetId}`,
+            storage_path: `immich/${assetId}`,
+            content_type: 'image/jpeg',
+            size_bytes: 0,
+            alt: null,
+            uploaded_at: new Date().toISOString(),
+            gps: info.gps,
+            location: info.location,
+            taken_at: info.taken_at,
+            immich_asset_id: assetId,
           });
-          // The preview fallback strips EXIF, so uploadImage finds no
-          // date/GPS — backfill from Immich's own metadata (best-effort).
-          if (!stored.taken_at || !stored.gps) {
-            const info = await fetchAssetInfo(assetId).catch(() => null);
-            if (info) {
-              stored.taken_at = stored.taken_at ?? info.taken_at;
-              stored.gps = stored.gps ?? info.gps;
-              stored.location = stored.location ?? info.location;
-            }
-          }
-          added.push({ ...stored, immich_asset_id: assetId });
         } catch (err) {
           req.log.warn({ err, assetId }, 'immich attach failed for asset');
           failed.push(assetId);

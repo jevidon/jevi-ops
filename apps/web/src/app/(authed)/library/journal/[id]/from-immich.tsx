@@ -7,8 +7,8 @@ import { useAppTimezone } from '@/components/TimezoneProvider';
 import { attachImmichAction, loadImmichCandidatesAction } from './actions';
 
 // "From Immich · <date>" — the hybrid section on the journal reader. Shows
-// what else exists in Immich from the entry's day (live, proxied, never
-// copied) with one-click promote into the permanent attachments. Lazy and
+// what else exists in Immich from the entry's day, with one-click promote
+// that links the asset into the entry's attachments. Lazy and
 // quiet by design: renders nothing while loading, on any failure, when
 // Immich isn't configured, or when everything from the day is already
 // attached — the calm reader stays pristine and a slow Immich never blocks

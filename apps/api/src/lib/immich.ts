@@ -7,9 +7,10 @@ import { getAppSettings, getAppTz } from './app-settings.js';
 //
 // Endpoints used (Immich v1.106+):
 //   POST /api/search/metadata            — assets by takenAfter/takenBefore
-//   GET  /api/assets/:id/thumbnail?size= — preview bytes (proxied to the UI)
-//   GET  /api/assets/:id/original        — full bytes (attach flow copies
-//                                          these into UPLOADS_DIR)
+//   GET  /api/assets/:id/thumbnail?size= — preview bytes (proxied to the UI;
+//                                          also what linked attachments render)
+//   GET  /api/assets/:id                 — metadata for linked attachments
+//                                          (taken_at / GPS / location)
 
 interface ResolvedImmich {
   baseUrl: string;
@@ -94,23 +95,6 @@ export async function fetchThumbnail(assetId: string): Promise<{ bytes: Buffer; 
   };
 }
 
-// Formats every mainstream browser can render. Immich originals from
-// iPhones are HEIC — storing those verbatim yields broken <img> tags
-// everywhere except Safari, so the attach flow falls back to Immich's
-// preview JPEG for anything outside this set.
-const WEB_SAFE_IMAGE_TYPES = new Set([
-  'image/jpeg',
-  'image/jpg',
-  'image/png',
-  'image/webp',
-  'image/gif',
-  'image/avif',
-]);
-
-export function isWebSafeImage(contentType: string): boolean {
-  return WEB_SAFE_IMAGE_TYPES.has(contentType.toLowerCase());
-}
-
 export interface ImmichAssetInfo {
   taken_at: string | null;
   gps: { lat: number; lon: number } | null;
@@ -150,21 +134,6 @@ export async function fetchAssetInfo(assetId: string): Promise<ImmichAssetInfo> 
     taken_at: exif?.dateTimeOriginal ?? body.localDateTime ?? null,
     gps,
     location: locationParts.length > 0 ? locationParts.join(', ') : null,
-  };
-}
-
-/** Download the original asset (for the attach-to-journal copy). */
-export async function fetchOriginal(assetId: string): Promise<{ bytes: Buffer; contentType: string }> {
-  const cfg = await resolveConfig();
-  if (!cfg) throw new Error('immich_not_configured');
-  const res = await fetch(
-    `${cfg.baseUrl}/api/assets/${encodeURIComponent(assetId)}/original`,
-    { headers: { 'x-api-key': cfg.apiKey }, signal: AbortSignal.timeout(60_000) },
-  );
-  if (!res.ok) throw new Error(`immich_original_failed:${res.status}`);
-  return {
-    bytes: Buffer.from(await res.arrayBuffer()),
-    contentType: res.headers.get('content-type') ?? 'image/jpeg',
   };
 }
 
