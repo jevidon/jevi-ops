@@ -397,14 +397,18 @@ function DomainSection({
       {/* items-end + a small bottom standoff: chip, title baseline, art
           ground-line, counts, toggle, and pill all settle onto the same
           shelf just above the 2px rule instead of floating mid-row. */}
-      <div className="sticky top-0 lg:top-[60px] z-20 flex items-end gap-3 pt-2 pb-[9px] bg-bg border-b-2 border-ink">
+      {/* Mobile: the counts/toggle/pill group wraps to its own second line
+          (basis-full) so the full domain name shows — no truncation below
+          lg. Desktop keeps the one-line shelf: the group rides lg:ml-auto
+          exactly where the old inline items sat. */}
+      <div className="sticky top-0 lg:top-[60px] z-20 flex flex-wrap items-end gap-x-3 gap-y-1 pt-2 pb-[9px] bg-bg border-b-2 border-ink">
         <span className="w-[11px] h-[11px] rounded-[3px] shrink-0 mb-[4px]" style={{ background: color }} aria-hidden />
         {/* Name links to the domain detail page — settings, cadence rule, and
             the illustration panel live there. Previously the only doorway was
             the Direct-tasks chip, which not every domain renders. */}
         <Link
           href={`/domains/${domain.id}`}
-          className="font-serif text-[21px] font-medium leading-none tracking-[-0.015em] text-ink truncate shrink min-w-0 hover:text-accent transition-colors"
+          className="font-serif text-[21px] font-medium leading-[1.1] lg:leading-none tracking-[-0.015em] text-ink shrink min-w-0 lg:truncate hover:text-accent transition-colors"
         >
           {domain.name}
         </Link>
@@ -414,20 +418,22 @@ function DomainSection({
         >
           <FittedArt name={domain.name} svg={artSvg} tone={domain.urgency === 'over' ? 'accent' : 'ink'} />
         </span>
-        <div className="flex items-baseline gap-3 ml-auto mb-[2px] min-w-0 overflow-hidden font-mono text-[11px] font-medium text-ink-3">
-          <span className="whitespace-nowrap">{r.open} open</span>
-          {r.overdue > 0 && <span className="whitespace-nowrap text-accent">{r.overdue} overdue</span>}
-          {r.waiting > 0 && <span className="whitespace-nowrap">{r.waiting} waiting</span>}
+        <div className="flex items-center gap-3 basis-full lg:basis-auto lg:ml-auto min-w-0">
+          <div className="flex items-baseline gap-3 min-w-0 overflow-hidden font-mono text-[11px] font-medium text-ink-3 lg:mb-[2px]">
+            <span className="whitespace-nowrap">{r.open} open</span>
+            {r.overdue > 0 && <span className="whitespace-nowrap text-accent">{r.overdue} overdue</span>}
+            {r.waiting > 0 && <span className="whitespace-nowrap">{r.waiting} waiting</span>}
+          </div>
+          <button
+            type="button"
+            onClick={onToggle}
+            aria-label={collapsed ? 'Expand' : 'Collapse'}
+            className="grid place-items-center w-6 h-6 shrink-0 rounded ml-auto lg:ml-0 text-ink-3 hover:bg-surface-2 hover:text-ink transition-colors"
+          >
+            <Icon name="chev" size={15} style={{ transform: `rotate(${collapsed ? 0 : 90}deg)`, transition: 'transform .15s' }} />
+          </button>
+          <Pill state={domain.urgency} />
         </div>
-        <button
-          type="button"
-          onClick={onToggle}
-          aria-label={collapsed ? 'Expand' : 'Collapse'}
-          className="grid place-items-center w-6 h-6 shrink-0 rounded text-ink-3 hover:bg-surface-2 hover:text-ink transition-colors"
-        >
-          <Icon name="chev" size={15} style={{ transform: `rotate(${collapsed ? 0 : 90}deg)`, transition: 'transform .15s' }} />
-        </button>
-        <Pill state={domain.urgency} />
       </div>
 
       {!collapsed && (
