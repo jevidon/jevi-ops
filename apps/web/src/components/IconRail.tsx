@@ -24,7 +24,7 @@ interface NavItem {
   href: string;
   label: string;
   icon: IconName;
-  flag?: 'health' | 'routines';
+  flag?: 'health' | 'routines' | 'shopping';
 }
 
 const NAV: NavItem[] = [
@@ -35,6 +35,7 @@ const NAV: NavItem[] = [
   { href: '/people', label: 'People', icon: 'people' },
   { href: '/companies', label: 'Companies', icon: 'companies' },
   { href: '/library', label: 'Library', icon: 'library' },
+  { href: '/shopping', label: 'Shopping', icon: 'shopping', flag: 'shopping' },
   { href: '/routines', label: 'Routines', icon: 'routines', flag: 'routines' },
   { href: '/health', label: 'Health', icon: 'health', flag: 'health' },
 ];
@@ -60,12 +61,14 @@ export function IconRail({
   attentionActive = 0,
   healthEnabled = false,
   routinesEnabled = true,
+  shoppingEnabled = true,
 }: {
   email?: string;
   unreadNotifications?: number;
   attentionActive?: number;
   healthEnabled?: boolean;
   routinesEnabled?: boolean;
+  shoppingEnabled?: boolean;
 }) {
   const pathname = usePathname();
   const [pinned, setPinned] = useState(false);
@@ -107,7 +110,9 @@ export function IconRail({
 
   const tabs = NAV.filter(
     (t) =>
-      (t.flag !== 'health' || healthEnabled) && (t.flag !== 'routines' || routinesEnabled),
+      (t.flag !== 'health' || healthEnabled) &&
+      (t.flag !== 'routines' || routinesEnabled) &&
+      (t.flag !== 'shopping' || shoppingEnabled),
   );
 
   const isActive = (href: string) => {

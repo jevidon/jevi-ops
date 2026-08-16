@@ -2,7 +2,7 @@
 // db.query.<table>.findMany({ with: { <key>: ... } }) surfaces them verbatim
 // in JSON responses the web app consumes. Renaming a key changes the API shape.
 import { relations } from "drizzle-orm/relations";
-import { stewardship_domains, projects, people, person_facts, person_interactions, milestones, activity_log, project_checklist_items, content_items, content_checklist_items, tasks, checklist_templates, checklist_instances, books, quotes, quote_annotations, journal_books, journal_entries, notes, observations, routines, routine_completions, health_visits, health_metrics, lab_panels, lab_results, health_documents, companies, conversations, project_contacts } from "./schema.js";
+import { stewardship_domains, projects, people, person_facts, person_interactions, milestones, activity_log, project_checklist_items, content_items, content_checklist_items, tasks, checklist_templates, checklist_instances, books, quotes, quote_annotations, journal_books, journal_entries, notes, observations, routines, routine_completions, health_visits, health_metrics, lab_panels, lab_results, health_documents, companies, conversations, project_contacts, shopping_lists, shopping_items, shopping_purchases } from "./schema.js";
 
 export const projectsRelations = relations(projects, ({one, many}) => ({
 	domain: one(stewardship_domains, {
@@ -251,6 +251,27 @@ export const routine_completionsRelations = relations(routine_completions, ({one
 
 export const routinesRelations = relations(routines, ({many}) => ({
 	completions: many(routine_completions),
+}));
+
+// ─── Shopping module (0044) ──────────────────────────────────────────────
+
+export const shopping_listsRelations = relations(shopping_lists, ({many}) => ({
+	items: many(shopping_items),
+}));
+
+export const shopping_itemsRelations = relations(shopping_items, ({one, many}) => ({
+	list: one(shopping_lists, {
+		fields: [shopping_items.list_id],
+		references: [shopping_lists.id]
+	}),
+	purchases: many(shopping_purchases),
+}));
+
+export const shopping_purchasesRelations = relations(shopping_purchases, ({one}) => ({
+	item: one(shopping_items, {
+		fields: [shopping_purchases.item_id],
+		references: [shopping_items.id]
+	}),
 }));
 
 export const health_metricsRelations = relations(health_metrics, ({one}) => ({

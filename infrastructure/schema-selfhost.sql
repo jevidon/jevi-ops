@@ -707,6 +707,7 @@ create table if not exists app_settings (
   health_module_enabled boolean not null default false,
   routines_module_enabled boolean not null default true,
   rule_module_enabled boolean not null default false,
+  shopping_module_enabled boolean not null default true,
   updated_at timestamptz not null default now()
 );
 
@@ -763,6 +764,70 @@ create index if not exists idx_routine_completions_routine_date
   on routine_completions(routine_id, completed_date desc);
 create index if not exists idx_routine_completions_date
   on routine_completions(completed_date);
+
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- Shopping module (migration 0044)
+-- ─────────────────────────────────────────────────────────────────────────
+-- Recurring shopping lists: a list is a store/section, an item cycles
+-- between stocked and needed (INVERTED vs task done — needed=true means
+-- "buy this"). Purchases append to a ledger, the FK target for a future
+-- finance module. Recurrence reflag is derived at API read time from
+-- last_purchased_at; no cron.
+
+create table if not exists shopping_lists (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  position integer not null default 0,
+  archived_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_shopping_lists_active_position
+  on shopping_lists(position) where archived_at is null;
+
+drop trigger if exists trg_shopping_lists_updated_at on shopping_lists;
+create trigger trg_shopping_lists_updated_at
+  before update on shopping_lists
+  for each row execute function set_updated_at();
+
+create table if not exists shopping_items (
+  id uuid primary key default gen_random_uuid(),
+  list_id uuid not null references shopping_lists(id) on delete cascade,
+  name text not null,
+  note text,
+  position integer not null default 0,
+  needed boolean not null default false,
+  needed_at timestamptz,
+  recurrence_rule text check (recurrence_rule in
+    ('daily','weekdays','weekly','biweekly','monthly',
+     'quarterly','semiannually','yearly')),
+  last_purchased_at timestamptz,
+  archived_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_shopping_items_list_position
+  on shopping_items(list_id, position) where archived_at is null;
+
+drop trigger if exists trg_shopping_items_updated_at on shopping_items;
+create trigger trg_shopping_items_updated_at
+  before update on shopping_items
+  for each row execute function set_updated_at();
+
+create table if not exists shopping_purchases (
+  id uuid primary key default gen_random_uuid(),
+  item_id uuid not null references shopping_items(id) on delete cascade,
+  purchased_at timestamptz not null default now(),
+  price_cents integer check (price_cents is null or price_cents >= 0),
+  note text,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_shopping_purchases_item_date
+  on shopping_purchases(item_id, purchased_at desc);
 
 
 -- ─────────────────────────────────────────────────────────────────────────

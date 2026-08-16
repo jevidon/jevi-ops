@@ -25,12 +25,14 @@ export default async function SettingsPage({
   const healthEnabled = await getFeatureFlag('health_module_enabled');
   const routinesEnabled = await getFeatureFlag('routines_module_enabled');
   const ruleEnabled = await getFeatureFlag('rule_module_enabled');
+  const shoppingEnabled = await getFeatureFlag('shopping_module_enabled');
 
   let appSettings: AppSettings = {
     timezone: tz,
     health_module_enabled: healthEnabled,
     routines_module_enabled: routinesEnabled,
     rule_module_enabled: ruleEnabled,
+    shopping_module_enabled: shoppingEnabled,
   };
   try {
     appSettings = await settingsApi.getApp();
@@ -90,6 +92,7 @@ export default async function SettingsPage({
           healthEnabled={healthEnabled}
           routinesEnabled={routinesEnabled}
           ruleEnabled={ruleEnabled}
+          shoppingEnabled={shoppingEnabled}
         />
       </SettingsSection>
 

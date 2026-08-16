@@ -6,6 +6,7 @@ import {
   toggleHealthModuleAction,
   toggleRoutinesModuleAction,
   toggleRuleModuleAction,
+  toggleShoppingModuleAction,
 } from './actions';
 import type { SyncResult } from './actions';
 
@@ -73,13 +74,21 @@ export function ModulesForm({
   healthEnabled,
   routinesEnabled,
   ruleEnabled,
+  shoppingEnabled,
 }: {
   healthEnabled: boolean;
   routinesEnabled: boolean;
   ruleEnabled: boolean;
+  shoppingEnabled: boolean;
 }) {
   return (
     <div className="flex flex-col">
+      <ModuleRow
+        name="Shopping"
+        description="Recurring shopping lists grouped by store. Check an item when it needs buying; marking it bought logs a purchase and resets it. When disabled it's hidden from the nav and its routes return 404. Lists and purchase history are retained."
+        enabled={shoppingEnabled}
+        action={toggleShoppingModuleAction}
+      />
       <ModuleRow
         name="Health"
         description="Personal health record — visits, labs, metrics, medications, check-ins. When disabled it's hidden from the nav and its routes return 404. Your data is retained either way."

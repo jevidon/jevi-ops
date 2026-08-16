@@ -36,7 +36,7 @@ interface MoreItem {
   href: string;
   label: string;
   icon: IconName;
-  flag?: 'health' | 'routines';
+  flag?: 'health' | 'routines' | 'shopping';
   badge?: number;
   badgeAccent?: boolean;
 }
@@ -47,12 +47,14 @@ export function BottomTabBar({
   attentionActive = 0,
   healthEnabled = false,
   routinesEnabled = true,
+  shoppingEnabled = true,
 }: {
   email?: string;
   unreadNotifications?: number;
   attentionActive?: number;
   healthEnabled?: boolean;
   routinesEnabled?: boolean;
+  shoppingEnabled?: boolean;
 } = {}) {
   const pathname = usePathname();
   const [moreOpen, setMoreOpen] = useState(false);
@@ -72,6 +74,7 @@ export function BottomTabBar({
   const moreItems: MoreItem[] = ([
     { href: '/tasks', label: 'Tasks', icon: 'tasks' },
     { href: '/companies', label: 'Companies', icon: 'companies' },
+    { href: '/shopping', label: 'Shopping', icon: 'shopping', flag: 'shopping' },
     { href: '/routines', label: 'Routines', icon: 'routines', flag: 'routines' },
     { href: '/health', label: 'Health', icon: 'health', flag: 'health' },
     { href: '/search', label: 'Search', icon: 'search' },
@@ -86,7 +89,10 @@ export function BottomTabBar({
     },
     { href: '/settings', label: 'Settings', icon: 'gear' },
   ] as MoreItem[]).filter(
-    (it) => (it.flag !== 'health' || healthEnabled) && (it.flag !== 'routines' || routinesEnabled),
+    (it) =>
+      (it.flag !== 'health' || healthEnabled) &&
+      (it.flag !== 'routines' || routinesEnabled) &&
+      (it.flag !== 'shopping' || shoppingEnabled),
   );
 
   return (

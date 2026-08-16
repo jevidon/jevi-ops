@@ -864,6 +864,114 @@ export const routinesApi = {
     api.post<unknown>(`/api/routines/${id}/completions`, body),
 };
 
+// ─── Shopping / recurring shopping lists ─────────────────────────────────
+// Semantics are INVERTED from tasks: `needed` checked means "buy this".
+// auto_needed/effective_needed are derived server-side from an optional
+// recurrence rule anchored to last_purchased_at.
+
+export type ShoppingRecurrenceRule =
+  | 'daily' | 'weekdays' | 'weekly' | 'biweekly'
+  | 'monthly' | 'quarterly' | 'semiannually' | 'yearly';
+
+export interface ShoppingItem {
+  id: string;
+  list_id: string;
+  name: string;
+  note: string | null;
+  position: number;
+  needed: boolean;
+  needed_at: string | null;
+  recurrence_rule: ShoppingRecurrenceRule | null;
+  last_purchased_at: string | null;
+  archived_at: string | null;
+  created_at: string;
+  updated_at: string;
+  // Derived (API read time): rule set + a full interval elapsed since
+  // last purchase. effective_needed = needed || auto_needed.
+  auto_needed: boolean;
+  effective_needed: boolean;
+}
+
+export interface ShoppingList {
+  id: string;
+  name: string;
+  position: number;
+  archived_at: string | null;
+  created_at: string;
+  updated_at: string;
+  items: ShoppingItem[];
+}
+
+export interface ShoppingPurchase {
+  id: string;
+  item_id: string;
+  purchased_at: string;
+  price_cents: number | null;
+  note: string | null;
+  created_at: string;
+}
+
+export const shoppingApi = {
+  list: (opts?: { include_archived?: boolean }) => {
+    const qs = new URLSearchParams();
+    if (opts?.include_archived) qs.set('include_archived', 'true');
+    const q = qs.toString();
+    return api.get<{ lists: ShoppingList[] }>(`/api/shopping${q ? `?${q}` : ''}`);
+  },
+  getItem: (id: string) =>
+    api.get<{ item: ShoppingItem; purchases: ShoppingPurchase[] }>(
+      `/api/shopping/items/${id}`,
+    ),
+  lists: {
+    create: (body: { name: string; position?: number }) =>
+      api.post<Omit<ShoppingList, 'items'>>('/api/shopping/lists', body),
+    update: (
+      id: string,
+      body: Partial<{ name: string; position: number; archived_at: string | null }>,
+    ) => api.patch<Omit<ShoppingList, 'items'>>(`/api/shopping/lists/${id}`, body),
+    remove: (id: string) => api.delete(`/api/shopping/lists/${id}`),
+  },
+  items: {
+    create: (body: {
+      list_id: string;
+      name: string;
+      note?: string | null;
+      recurrence_rule?: ShoppingRecurrenceRule | null;
+      position?: number;
+      needed?: boolean;
+    }) => api.post<ShoppingItem>('/api/shopping/items', body),
+    update: (
+      id: string,
+      body: Partial<{
+        list_id: string;
+        name: string;
+        note: string | null;
+        recurrence_rule: ShoppingRecurrenceRule | null;
+        position: number;
+        archived_at: string | null;
+      }>,
+    ) => api.patch<ShoppingItem>(`/api/shopping/items/${id}`, body),
+    remove: (id: string) => api.delete(`/api/shopping/items/${id}`),
+    flag: (id: string, needed: boolean) =>
+      api.post<ShoppingItem>(`/api/shopping/items/${id}/flag`, { needed }),
+    purchase: (
+      id: string,
+      body?: { purchased_at?: string; price_cents?: number | null; note?: string | null },
+    ) =>
+      api.post<{ purchase: ShoppingPurchase; item: ShoppingItem }>(
+        `/api/shopping/items/${id}/purchase`,
+        body ?? {},
+      ),
+  },
+  undoPurchase: (purchaseId: string) =>
+    api.delete<{ item: ShoppingItem }>(`/api/shopping/purchases/${purchaseId}`),
+  import: (text: string) =>
+    api.post<{ lists_created: number; items_created: number; items_skipped: number }>(
+      '/api/shopping/import',
+      { text },
+    ),
+};
+
 // ─── People CRM ──────────────────────────────────────────────────────────
 
 export type RelationshipType =
@@ -1400,6 +1508,8 @@ export interface AppSettings {
   routines_module_enabled: boolean;
   // Daily Rule (Addendum 06), retired by Addendum 09 — defaults false.
   rule_module_enabled: boolean;
+  // Shopping module (migration 0044) — defaults true.
+  shopping_module_enabled: boolean;
   // Fork: self-hosted AI + Immich configuration.
   llm_provider?: 'openai_compatible' | 'anthropic' | null;
   llm_base_url?: string | null;

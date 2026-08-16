@@ -854,6 +854,7 @@ export const app_settings = pgTable("app_settings", {
 	health_module_enabled: boolean().default(false).notNull(),
 	routines_module_enabled: boolean().default(true).notNull(),
 	rule_module_enabled: boolean().default(false).notNull(),
+	shopping_module_enabled: boolean().default(true).notNull(),
 	updated_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [
 	check("app_settings_id_check", sql`id`),
@@ -909,6 +910,62 @@ export const routine_completions = pgTable("routine_completions", {
 			name: "routine_completions_routine_id_fkey"
 		}).onDelete("cascade"),
 	unique("routine_completions_routine_id_completed_date_key").on(table.routine_id, table.completed_date),
+]);
+
+// Shopping module (migration 0044). A list is a store/section; an item
+// cycles between stocked and needed (INVERTED vs task done — needed=true
+// means "buy this"). Purchases append to a ledger, the FK target for a
+// future finance module. Recurrence reflag derives at API read time from
+// last_purchased_at (isDueAgain in shared/recurrence.ts); no cron.
+export const shopping_lists = pgTable("shopping_lists", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	name: text().notNull(),
+	position: integer().default(0).notNull(),
+	archived_at: timestamp({ withTimezone: true, mode: 'string' }),
+	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	updated_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	index("idx_shopping_lists_active_position").using("btree", table.position.asc().nullsLast().op("int4_ops")).where(sql`(archived_at IS NULL)`),
+]);
+
+export const shopping_items = pgTable("shopping_items", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	list_id: uuid().notNull(),
+	name: text().notNull(),
+	note: text(),
+	position: integer().default(0).notNull(),
+	needed: boolean().default(false).notNull(),
+	needed_at: timestamp({ withTimezone: true, mode: 'string' }),
+	recurrence_rule: text(),
+	last_purchased_at: timestamp({ withTimezone: true, mode: 'string' }),
+	archived_at: timestamp({ withTimezone: true, mode: 'string' }),
+	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	updated_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	index("idx_shopping_items_list_position").using("btree", table.list_id.asc().nullsLast().op("uuid_ops"), table.position.asc().nullsLast().op("int4_ops")).where(sql`(archived_at IS NULL)`),
+	foreignKey({
+			columns: [table.list_id],
+			foreignColumns: [shopping_lists.id],
+			name: "shopping_items_list_id_fkey"
+		}).onDelete("cascade"),
+	check("shopping_items_recurrence_rule_check", sql`recurrence_rule = ANY (ARRAY['daily'::text, 'weekdays'::text, 'weekly'::text, 'biweekly'::text, 'monthly'::text, 'quarterly'::text, 'semiannually'::text, 'yearly'::text])`),
+]);
+
+export const shopping_purchases = pgTable("shopping_purchases", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	item_id: uuid().notNull(),
+	purchased_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	price_cents: integer(),
+	note: text(),
+	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	index("idx_shopping_purchases_item_date").using("btree", table.item_id.asc().nullsLast().op("uuid_ops"), table.purchased_at.desc().nullsFirst().op("timestamptz_ops")),
+	foreignKey({
+			columns: [table.item_id],
+			foreignColumns: [shopping_items.id],
+			name: "shopping_purchases_item_id_fkey"
+		}).onDelete("cascade"),
+	check("shopping_purchases_price_cents_check", sql`(price_cents IS NULL) OR (price_cents >= 0)`),
 ]);
 
 export const health_visits = pgTable("health_visits", {
