@@ -20,6 +20,7 @@ import { ActivityRow } from './activity-row';
 import { ContactsSection } from './contacts-section';
 import { ConversationTimeline } from '@/components/conversations/ConversationTimeline';
 import { LogConversationForm } from '@/components/conversations/LogConversationForm';
+import { QuickAddTask } from '@/components/QuickAddTask';
 
 // /projects/[id] — project detail (Detail Pages v2, Addendum 10 §6). Per-item
 // dashboard: header band + action buttons, a computed stat strip, a two-column
@@ -208,9 +209,13 @@ export default async function ProjectDetailPage({
             <DetailSection
               label="Tasks"
               count={<>{openTasks.length} open{overdueCount > 0 && <span className="text-accent"> · {overdueCount} overdue</span>}{waitingTasks.length > 0 && <span> · {waitingTasks.length} waiting</span>}</>}
-              action={<Link href={`/tasks/new?project_id=${project.id}`} className="font-mono text-[10px] uppercase tracking-wider text-ink-3 hover:text-accent transition-colors">＋ Add task</Link>}
               className="mt-0"
             >
+              {/* Quick capture (Wave 2 #2) — title-only add into this
+                  project; the ＋ buttons above stay the full-editor path. */}
+              <div className="mb-4">
+                <QuickAddTask projectId={project.id} placeholder="Quick add a task — just a title…" />
+              </div>
               {livePool.length === 0 ? (
                 <p className="font-sans text-[13px] text-ink-3 italic py-1">No open tasks.</p>
               ) : (

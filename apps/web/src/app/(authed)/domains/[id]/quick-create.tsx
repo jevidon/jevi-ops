@@ -1,51 +1,18 @@
 'use client';
 
-import { useActionState, useEffect, useRef } from 'react';
+import { useActionState } from 'react';
 import { useFormStatus } from 'react-dom';
 import { createProjectAction, type SaveResult as ProjectSaveResult } from '../../projects/actions';
-import { quickAddTaskAction, type SaveResult } from './actions';
 
 // In-page creation for the domain detail view.
 //
-// TaskQuickAdd: title-only capture into this domain (mirrors /today's
-// quick add); the created task appears in the Direct tasks list on
-// revalidate and the input clears for the next one.
+// Task quick-add moved to the shared <QuickAddTask /> (components/
+// QuickAddTask.tsx) when the Work page grew the same control.
 //
 // ProjectQuickCreate: name + kind, reusing the projects screen's
 // createProjectAction verbatim via hidden fields — on success that
 // action redirects to the new project's page, which is where you'd be
 // heading anyway to flesh it out.
-
-export function TaskQuickAdd({ domainId }: { domainId: string }) {
-  const [state, formAction] = useActionState<SaveResult | null, FormData>(
-    quickAddTaskAction,
-    null,
-  );
-  const formRef = useRef<HTMLFormElement>(null);
-  useEffect(() => {
-    if (state?.ok) formRef.current?.reset();
-  }, [state]);
-
-  return (
-    <form ref={formRef} action={formAction} className="mb-4">
-      <div className="flex items-center gap-2">
-        <input type="hidden" name="id" value={domainId} />
-        <input
-          name="title"
-          placeholder="Add a task to this domain…"
-          autoComplete="off"
-          className="flex-1 min-w-0 bg-transparent border-b border-line focus:border-ink-2 focus:outline-none py-1.5 font-sans text-[14px] text-ink placeholder:text-ink-4"
-        />
-        <QuickSubmit label="Add" pendingLabel="Adding…" />
-      </div>
-      {state?.ok === false && (
-        <div className="mt-1.5 font-mono text-[10px] uppercase tracking-wider text-accent">
-          {state.error}
-        </div>
-      )}
-    </form>
-  );
-}
 
 export function ProjectQuickCreate({ domainId }: { domainId: string }) {
   const [state, formAction] = useActionState<ProjectSaveResult | null, FormData>(

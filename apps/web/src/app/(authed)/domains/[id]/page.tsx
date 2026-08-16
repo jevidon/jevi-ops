@@ -7,7 +7,8 @@ import { EditDomainForm } from './edit-domain-form';
 import { CadenceEditor } from './cadence-editor';
 import { MarkShipped } from './mark-shipped';
 import { IllustrationControls } from './illustration-controls';
-import { TaskQuickAdd, ProjectQuickCreate } from './quick-create';
+import { ProjectQuickCreate } from './quick-create';
+import { QuickAddTask } from '@/components/QuickAddTask';
 import { DomainIllustration } from '../domain-illustration';
 import { PRIMARY_CADENCE_RULES, type CadenceRuleType } from './cadence-rules';
 import { getAppTimezone } from '@/lib/app-settings';
@@ -290,7 +291,11 @@ export default async function DomainDetailPage({
           {/* Title-only quick capture straight into this domain; due
               dates, priority, and project routing live in the full
               editor linked above. */}
-          {!isInbox && <TaskQuickAdd domainId={domain.id} />}
+          {!isInbox && (
+            <div className="mb-4">
+              <QuickAddTask domainId={domain.id} placeholder="Add a task to this domain…" />
+            </div>
+          )}
           {openTasks.length === 0 ? (
             <p className="font-sans text-[13px] text-ink-3 italic">No open tasks here.</p>
           ) : (

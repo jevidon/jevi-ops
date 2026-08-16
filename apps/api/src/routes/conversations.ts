@@ -1,5 +1,5 @@
 import type { FastifyPluginAsync } from 'fastify';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, inArray, like } from 'drizzle-orm';
 import type { SQL } from 'drizzle-orm';
 import { CreateConversationSchema, UpdateConversationSchema } from '@jevi-ops/shared/schemas';
 import { getDb } from '../lib/db.js';
@@ -83,11 +83,34 @@ export const conversationRoutes: FastifyPluginAsync = async (app) => {
       .where(eq(conversations.id, req.params.id))
       .returning();
     if (!row) return reply.code(404).send({ error: 'not_found' });
+
+    // Live reconciliation: marking the follow-up done settles its attention
+    // nudge immediately (the item's source_id is the parent entity, so match
+    // on the dedup_key, which carries the conversation id).
+    if (parsed.data.requires_followup === false) {
+      await getDb()
+        .update(attention_items)
+        .set({ status: 'acted_on', acted_on_at: new Date().toISOString(), acted_on_action: 'followup_done' })
+        .where(and(
+          eq(attention_items.rule_type, 'conversation_followup'),
+          like(attention_items.dedup_key, `conversation_followup:${row.id}:%`),
+          inArray(attention_items.status, ['active', 'snoozed']),
+        ));
+    }
     return row;
   });
 
   app.delete<{ Params: { id: string } }>('/api/conversations/:id', async (req, reply) => {
     await getDb().delete(conversations).where(eq(conversations.id, req.params.id));
+    // A deleted conversation's follow-up nudge has nothing to act on — drop
+    // the live item now instead of waiting for the next sweep's auto-resolve.
+    await getDb()
+      .delete(attention_items)
+      .where(and(
+        eq(attention_items.rule_type, 'conversation_followup'),
+        like(attention_items.dedup_key, `conversation_followup:${req.params.id}:%`),
+        inArray(attention_items.status, ['active', 'snoozed']),
+      ));
     return reply.code(204).send();
   });
 };
