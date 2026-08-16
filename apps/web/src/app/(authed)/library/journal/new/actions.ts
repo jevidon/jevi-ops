@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
-import { libraryApi, ApiError, type Attachment } from '@/lib/api';
+import { libraryApi, immichApi, ApiError, type Attachment } from '@/lib/api';
 
 export type SaveResult = { ok: true } | { ok: false; error: string };
 
@@ -24,7 +24,16 @@ export async function createJournalEntryAction(
     if (Array.isArray(parsed)) attachments = parsed as Attachment[];
   } catch { /* ignore */ }
 
-  if (!text && attachments.length === 0) {
+  // Immich picker selection — attached right after the insert (the attach
+  // endpoint needs an entry id, so it can't run before create).
+  const immichRaw = String(formData.get('immich_asset_ids') ?? '[]');
+  let immichIds: string[] = [];
+  try {
+    const parsed = JSON.parse(immichRaw);
+    if (Array.isArray(parsed)) immichIds = parsed.filter((x): x is string => typeof x === 'string');
+  } catch { /* ignore */ }
+
+  if (!text && attachments.length === 0 && immichIds.length === 0) {
     return { ok: false, error: 'Add some text, an image, or both.' };
   }
 
@@ -45,6 +54,15 @@ export async function createJournalEntryAction(
       return { ok: false, error: body?.error ?? `API ${err.status}` };
     }
     return { ok: false, error: (err as Error).message };
+  }
+
+  // Best-effort: a failed copy must not orphan the just-created entry —
+  // the reader's "From Immich" section offers the same photos for retry.
+  // The attach endpoint caps asset_ids at 20 per request, so chunk.
+  for (let i = 0; i < immichIds.length; i += 20) {
+    try {
+      await immichApi.attachToJournal(createdId, immichIds.slice(i, i + 20));
+    } catch { /* best-effort */ }
   }
 
   revalidatePath('/library/journal');

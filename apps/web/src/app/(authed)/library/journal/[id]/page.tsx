@@ -1,11 +1,11 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { libraryApi, ApiError, type JournalEntryDetail, type JournalNeighbor } from '@/lib/api';
-import { getAppTimezone } from '@/lib/app-settings';
 import { PhotoGallery } from '@/components/PhotoGallery';
 import { EditDrawer } from '@/components/detail/EditDrawer';
 import { BoostButton } from '@/components/BoostButton';
 import { JournalEditForm } from './edit-form';
+import { FromImmichSection } from './from-immich';
 
 // /library/journal/[id] — journal reader (Detail Pages v2, Addendum 10 §10).
 // A different job from the operational pages: no stat strip, no state chip. The
@@ -15,7 +15,6 @@ import { JournalEditForm } from './edit-form';
 
 export default async function JournalEntryPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const tz = await getAppTimezone();
 
   let detail: JournalEntryDetail | null = null;
   let errorMessage: string | null = null;
@@ -45,14 +44,14 @@ export default async function JournalEntryPage({ params }: { params: Promise<{ i
         <Link href="/library/journal" className="hover:text-ink-2 transition-colors">← Journal</Link>
       </div>
 
-      <DayNav prev={prev} next={next} tz={tz} className="mt-2 mb-6" />
+      <DayNav prev={prev} next={next} className="mt-2 mb-6" />
 
       <header>
         <div className="font-mono text-[10px] uppercase tracking-[0.11em] text-ink-3">
           Journal{sourceLabel ? ` · ${sourceLabel}` : ''}
         </div>
         <h1 className="mt-2 font-serif text-[34px] leading-[1.08] tracking-[-0.02em] font-medium text-ink text-balance">
-          {fmtFull(entry.entry_date, tz)}
+          {fmtFull(entry.entry_date)}
         </h1>
       </header>
 
@@ -72,6 +71,14 @@ export default async function JournalEntryPage({ params }: { params: Promise<{ i
         <p className="mt-7 font-sans text-[14px] text-ink-3 italic">An empty entry — add a note or a photo from Edit.</p>
       )}
 
+      <FromImmichSection
+        entryId={entry.id}
+        entryDate={entry.entry_date}
+        attachedAssetIds={(entry.attachments ?? [])
+          .map((a) => a.immich_asset_id)
+          .filter((x): x is string => Boolean(x))}
+      />
+
       <footer className="mt-12 pt-5 border-t border-line flex items-center justify-between gap-4 flex-wrap">
         <div className="flex items-center gap-3">
           <span className="eyebrow">Resurfacing</span>
@@ -89,34 +96,36 @@ export default async function JournalEntryPage({ params }: { params: Promise<{ i
         </EditDrawer>
       </footer>
 
-      <DayNav prev={prev} next={next} tz={tz} className="mt-6" />
+      <DayNav prev={prev} next={next} className="mt-6" />
     </div>
   );
 }
 
-function DayNav({ prev, next, tz, className = '' }: { prev: JournalNeighbor | null; next: JournalNeighbor | null; tz: string; className?: string }) {
+function DayNav({ prev, next, className = '' }: { prev: JournalNeighbor | null; next: JournalNeighbor | null; className?: string }) {
   if (!prev && !next) return null;
   return (
     <nav className={`flex items-center justify-between gap-4 font-mono text-[10px] uppercase tracking-wider text-ink-3 ${className}`}>
       {prev
-        ? <Link href={`/library/journal/${prev.id}`} className="hover:text-accent transition-colors">‹ {fmtShort(prev.entry_date, tz)}</Link>
+        ? <Link href={`/library/journal/${prev.id}`} className="hover:text-accent transition-colors">‹ {fmtShort(prev.entry_date)}</Link>
         : <span aria-hidden />}
       {next
-        ? <Link href={`/library/journal/${next.id}`} className="hover:text-accent transition-colors">{fmtShort(next.entry_date, tz)} ›</Link>
+        ? <Link href={`/library/journal/${next.id}`} className="hover:text-accent transition-colors">{fmtShort(next.entry_date)} ›</Link>
         : <span aria-hidden />}
     </nav>
   );
 }
 
-// entry_date is a bare app-tz calendar day; anchor at noon UTC so display never
-// rolls to an adjacent day in any timezone.
-function fmtFull(ymd: string, tz: string): string {
+// entry_date is a bare calendar day — anchor at noon UTC AND format in UTC
+// so the literal date renders verbatim. Formatting in the app timezone can
+// still roll a day for zones at/beyond ±12 (noon UTC is already tomorrow
+// in UTC+12): that produced an entry dated 08-16 titled "August 17".
+function fmtFull(ymd: string): string {
   return new Date(`${ymd}T12:00:00Z`).toLocaleDateString('en-US', {
-    timeZone: tz, weekday: 'long', month: 'long', day: 'numeric', year: 'numeric',
+    timeZone: 'UTC', weekday: 'long', month: 'long', day: 'numeric', year: 'numeric',
   });
 }
-function fmtShort(ymd: string, tz: string): string {
+function fmtShort(ymd: string): string {
   return new Date(`${ymd}T12:00:00Z`).toLocaleDateString('en-US', {
-    timeZone: tz, month: 'short', day: 'numeric',
+    timeZone: 'UTC', month: 'short', day: 'numeric',
   });
 }

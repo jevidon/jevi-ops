@@ -504,6 +504,12 @@ export interface Attachment {
   // Nominatim is unavailable.
   gps?: { lat: number; lon: number } | null;
   location?: string | null;
+  // Set when the asset was linked from Immich — dedupe + "attached" badges.
+  immich_asset_id?: string | null;
+  // Capture wall-clock time, best-effort. The Z suffix is convention, NOT
+  // UTC (matches Immich's localDateTime) — display with timeZone 'UTC' so
+  // the clock time renders verbatim.
+  taken_at?: string | null;
 }
 
 export interface Note {
@@ -1444,11 +1450,14 @@ export const immichApi = {
     api.get<{ date: string; candidates: ImmichCandidate[] }>(
       `/api/library/journal/immich-candidates?date=${encodeURIComponent(date)}`,
     ),
-  attachToJournal: (id: string, asset_ids: string[]) =>
-    api.post<{ attached: Attachment[]; attachments: Attachment[]; failed: string[] }>(
-      `/api/library/journal/${id}/attach-immich`,
-      { asset_ids },
-    ),
+  attachToJournal: (id: string, asset_ids: string[], opts?: { entry_date?: string }) =>
+    api.post<{
+      attached: Attachment[];
+      attachments: Attachment[];
+      failed: string[];
+      already_attached: string[];
+      entry_date: string;
+    }>(`/api/library/journal/${id}/attach-immich`, { asset_ids, ...opts }),
 };
 
 // ─── Auth (API tokens for agents/devices) ────────────────────────────────

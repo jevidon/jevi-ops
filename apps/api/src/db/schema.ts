@@ -16,6 +16,12 @@ export interface StoredAttachment {
   uploaded_at: string;
   gps?: { lat: number; lon: number } | null;
   location?: string | null;
+  // Set when the asset was linked from Immich — dedupe + "attached" badges.
+  immich_asset_id?: string | null;
+  // Capture wall-clock time, best-effort. The Z suffix is convention, NOT
+  // UTC (matches Immich's localDateTime) — display with timeZone 'UTC' so
+  // the clock time renders verbatim.
+  taken_at?: string | null;
 }
 
 /** One rule in stewardship_domains.failure_patterns (see lib/observations.ts). */

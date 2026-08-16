@@ -6,9 +6,14 @@ import { createJournalEntryAction, type SaveResult } from './actions';
 import type { Attachment } from '@/lib/api';
 import { ImageUploader } from '@/components/ImageUploader';
 import { DateInput } from '@/components/DateInput';
+import { ImmichBrowser } from '../immich-browser';
 
 // Manual journal entry compose. Voice / photo capture still go through
 // cmd+J → parser → executor; this is the explicit path for typing.
+//
+// The Immich picker collects a selection only — attaching needs an entry id,
+// so the create action copies the selected assets right after the insert,
+// then redirects to the reader.
 
 export function NewJournalEntryForm({ today }: { today: string }) {
   const [state, formAction] = useActionState<SaveResult | null, FormData>(
@@ -18,6 +23,10 @@ export function NewJournalEntryForm({ today }: { today: string }) {
   const { pending } = useFormStatus();
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [text, setText] = useState('');
+  // Follows the date field live (DateInput onCommit) so the picker shows
+  // the right day before anything is saved.
+  const [committedDate, setCommittedDate] = useState(today);
+  const [immichIds, setImmichIds] = useState<string[]>([]);
 
   return (
     <form action={formAction} className="flex flex-col gap-4 max-w-2xl">
@@ -26,6 +35,7 @@ export function NewJournalEntryForm({ today }: { today: string }) {
         <DateInput
           name="entry_date"
           defaultValue={today}
+          onCommit={setCommittedDate}
           className="bg-transparent border border-line focus:border-accent focus:outline-none p-2 font-sans text-[14px] text-ink w-48"
         />
       </label>
@@ -53,6 +63,22 @@ export function NewJournalEntryForm({ today }: { today: string }) {
         />
       </div>
       <input type="hidden" name="attachments" value={JSON.stringify(attachments)} />
+
+      <div className="flex flex-col gap-1">
+        <span className="eyebrow">Photos from this day</span>
+        <ImmichBrowser
+          entryDate={committedDate}
+          onSelectionChange={setImmichIds}
+          footer={
+            immichIds.length > 0 ? (
+              <span className="font-mono text-[10px] uppercase tracking-wider text-ink-2">
+                {immichIds.length} selected — attaches on save
+              </span>
+            ) : null
+          }
+        />
+      </div>
+      <input type="hidden" name="immich_asset_ids" value={JSON.stringify(immichIds)} />
 
       <div className="flex items-center gap-3 pt-2">
         <SubmitButton />

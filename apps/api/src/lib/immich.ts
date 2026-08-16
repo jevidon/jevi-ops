@@ -7,9 +7,10 @@ import { getAppSettings, getAppTz } from './app-settings.js';
 //
 // Endpoints used (Immich v1.106+):
 //   POST /api/search/metadata            — assets by takenAfter/takenBefore
-//   GET  /api/assets/:id/thumbnail?size= — preview bytes (proxied to the UI)
-//   GET  /api/assets/:id/original        — full bytes (attach flow copies
-//                                          these into UPLOADS_DIR)
+//   GET  /api/assets/:id/thumbnail?size= — preview bytes (proxied to the UI;
+//                                          also what linked attachments render)
+//   GET  /api/assets/:id                 — metadata for linked attachments
+//                                          (taken_at / GPS / location)
 
 interface ResolvedImmich {
   baseUrl: string;
@@ -94,25 +95,59 @@ export async function fetchThumbnail(assetId: string): Promise<{ bytes: Buffer; 
   };
 }
 
-/** Download the original asset (for the attach-to-journal copy). */
-export async function fetchOriginal(assetId: string): Promise<{ bytes: Buffer; contentType: string }> {
+export interface ImmichAssetInfo {
+  taken_at: string | null;
+  gps: { lat: number; lon: number } | null;
+  location: string | null;
+}
+
+/**
+ * Asset metadata from Immich — used to backfill taken_at/gps/location when
+ * the attached bytes carry no EXIF (the preview-JPEG fallback strips it).
+ */
+export async function fetchAssetInfo(assetId: string): Promise<ImmichAssetInfo> {
   const cfg = await resolveConfig();
   if (!cfg) throw new Error('immich_not_configured');
-  const res = await fetch(
-    `${cfg.baseUrl}/api/assets/${encodeURIComponent(assetId)}/original`,
-    { headers: { 'x-api-key': cfg.apiKey }, signal: AbortSignal.timeout(60_000) },
-  );
-  if (!res.ok) throw new Error(`immich_original_failed:${res.status}`);
+  const res = await fetch(`${cfg.baseUrl}/api/assets/${encodeURIComponent(assetId)}`, {
+    headers: { 'x-api-key': cfg.apiKey, Accept: 'application/json' },
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!res.ok) throw new Error(`immich_asset_info_failed:${res.status}`);
+  const body = (await res.json()) as {
+    localDateTime?: string;
+    exifInfo?: {
+      dateTimeOriginal?: string | null;
+      latitude?: number | null;
+      longitude?: number | null;
+      city?: string | null;
+      state?: string | null;
+      country?: string | null;
+    };
+  };
+  const exif = body.exifInfo;
+  const gps =
+    typeof exif?.latitude === 'number' && typeof exif?.longitude === 'number'
+      ? { lat: exif.latitude, lon: exif.longitude }
+      : null;
+  const locationParts = [exif?.city, exif?.state, exif?.country].filter(Boolean);
   return {
-    bytes: Buffer.from(await res.arrayBuffer()),
-    contentType: res.headers.get('content-type') ?? 'image/jpeg',
+    // localDateTime is Immich's wall-clock-at-capture field (the Z suffix is
+    // convention, NOT UTC — this is what Immich's own timeline displays).
+    // taken_at carries that convention: display it with timeZone 'UTC' so
+    // the clock time renders verbatim. dateTimeOriginal is a true instant
+    // and only a last-resort fallback.
+    taken_at: body.localDateTime ?? exif?.dateTimeOriginal ?? null,
+    gps,
+    location: locationParts.length > 0 ? locationParts.join(', ') : null,
   };
 }
 
 // Midnight of `date` in `tz`, as a UTC Date. Same offset technique the
-// reminder libs use.
+// reminder libs use. The guess MUST be parsed as UTC (trailing Z): a
+// bare local-time parse applies the server's own offset on top of the
+// app-tz one, shifting the whole day window (6h late on a Denver host).
 function zonedMidnightUtc(date: string, tz: string): Date {
-  const naive = new Date(`${date}T00:00:00`);
+  const naive = new Date(`${date}T00:00:00Z`);
   const dtf = new Intl.DateTimeFormat('en-US', {
     timeZone: tz,
     hour12: false,
