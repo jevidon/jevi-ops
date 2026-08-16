@@ -118,7 +118,7 @@ export async function uploadImage(params: {
     uploaded_at: new Date().toISOString(),
     gps: location?.gps ?? null,
     location: location?.address ?? null,
-    taken_at: exifDate ? exifDate.toISOString() : null,
+    taken_at: exifDate ? wallClockIso(exifDate) : null,
   };
 }
 
@@ -160,6 +160,17 @@ async function extractDateTaken(bytes: Buffer): Promise<Date | null> {
   } catch {
     return null;
   }
+}
+
+// taken_at convention: the capture wall-clock time with a Z suffix that
+// means "as written", NOT UTC (same convention as Immich's localDateTime).
+// EXIF has no timezone, and exifr hands back a Date whose *local* getters
+// hold the EXIF digits — serialize those directly. toISOString() would
+// shift them through the server's timezone. Display with timeZone 'UTC'.
+function wallClockIso(d: Date): string {
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}` +
+    `T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}Z`;
 }
 
 // YYYYMMDD in the app's configured TZ so the filename matches the day

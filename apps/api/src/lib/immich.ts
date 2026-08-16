@@ -131,7 +131,12 @@ export async function fetchAssetInfo(assetId: string): Promise<ImmichAssetInfo> 
       : null;
   const locationParts = [exif?.city, exif?.state, exif?.country].filter(Boolean);
   return {
-    taken_at: exif?.dateTimeOriginal ?? body.localDateTime ?? null,
+    // localDateTime is Immich's wall-clock-at-capture field (the Z suffix is
+    // convention, NOT UTC — this is what Immich's own timeline displays).
+    // taken_at carries that convention: display it with timeZone 'UTC' so
+    // the clock time renders verbatim. dateTimeOriginal is a true instant
+    // and only a last-resort fallback.
+    taken_at: body.localDateTime ?? exif?.dateTimeOriginal ?? null,
     gps,
     location: locationParts.length > 0 ? locationParts.join(', ') : null,
   };

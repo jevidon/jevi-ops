@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import type { Attachment } from '@/lib/api';
-import { useAppTimezone } from './TimezoneProvider';
 
 // The library reading family's photo treatment (Detail Pages v2, Addendum 10
 // §10): large, composed layouts — a single hero, a 2-up, or a hero + grid for
@@ -15,10 +14,12 @@ function isImage(a: Attachment): boolean {
   return Boolean(a.url) && (!a.content_type || a.content_type.startsWith('image'));
 }
 
-function fmtTakenAt(iso: string, tz: string): string | null {
+// taken_at is wall-clock time with a conventional Z suffix (see the
+// Attachment type) — format in UTC so the clock renders verbatim.
+function fmtTakenAt(iso: string): string | null {
   try {
     return new Intl.DateTimeFormat('en-US', {
-      month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: tz,
+      month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: 'UTC',
     }).format(new Date(iso));
   } catch {
     return null;
@@ -26,7 +27,6 @@ function fmtTakenAt(iso: string, tz: string): string | null {
 }
 
 export function PhotoGallery({ attachments }: { attachments: Attachment[] }) {
-  const tz = useAppTimezone();
   const images = attachments.filter(isImage);
   const [openIdx, setOpenIdx] = useState<number | null>(null);
   const n = images.length;
@@ -109,9 +109,9 @@ export function PhotoGallery({ attachments }: { attachments: Attachment[] }) {
               className="shrink-0 px-4 pb-4 pt-1 text-center flex items-center justify-center gap-4"
               onClick={(e) => e.stopPropagation()}
             >
-              {active.taken_at && fmtTakenAt(active.taken_at, tz) && (
+              {active.taken_at && fmtTakenAt(active.taken_at) && (
                 <span className="font-mono text-[10px] uppercase tracking-wider text-bg/60">
-                  Taken {fmtTakenAt(active.taken_at, tz)}
+                  Taken {fmtTakenAt(active.taken_at)}
                 </span>
               )}
               {active.location && (

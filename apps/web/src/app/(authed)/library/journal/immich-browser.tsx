@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { ImmichCandidate } from '@/lib/api';
-import { useAppTimezone } from '@/components/TimezoneProvider';
 import { loadImmichCandidatesAction } from './[id]/actions';
 
 // Shared Immich candidate browser — the day-strip of selectable thumbnails
@@ -29,12 +28,16 @@ function fmtShortDay(date: string): string {
   }).format(new Date(`${date}T12:00:00Z`));
 }
 
-function fmtTime(iso: string, tz: string): string {
+// taken_at is wall-clock time with a conventional Z suffix (Immich's
+// localDateTime semantics) — format in UTC so the clock renders verbatim,
+// exactly as Immich's own timeline shows it. Converting through the app
+// timezone would shift an already-local time.
+function fmtTime(iso: string): string {
   try {
     return new Intl.DateTimeFormat('en-US', {
       hour: 'numeric',
       minute: '2-digit',
-      timeZone: tz,
+      timeZone: 'UTC',
     }).format(new Date(iso));
   } catch {
     return '';
@@ -52,7 +55,6 @@ export function ImmichBrowser({
   onSelectionChange: (ids: string[]) => void;
   footer?: ReactNode;
 }) {
-  const tz = useAppTimezone();
   const [browseDate, setBrowseDate] = useState(entryDate);
   const [candidates, setCandidates] = useState<ImmichCandidate[] | null>(null);
   const [configured, setConfigured] = useState(true);
@@ -169,7 +171,7 @@ export function ImmichBrowser({
             {candidates.map((c) => {
               const isAttached = attached.has(c.id);
               const isSelected = selected.has(c.id);
-              const time = fmtTime(c.taken_at, tz);
+              const time = fmtTime(c.taken_at);
               return (
                 <button
                   key={c.id}

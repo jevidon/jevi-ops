@@ -3,7 +3,6 @@
 import { useEffect, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import type { ImmichCandidate } from '@/lib/api';
-import { useAppTimezone } from '@/components/TimezoneProvider';
 import { attachImmichAction, loadImmichCandidatesAction } from './actions';
 
 // "From Immich · <date>" — the hybrid section on the journal reader. Shows
@@ -14,18 +13,21 @@ import { attachImmichAction, loadImmichCandidatesAction } from './actions';
 // attached — the calm reader stays pristine and a slow Immich never blocks
 // the server render. Day browsing lives in the edit drawer, not here.
 
-function fmtShortDay(date: string, tz: string): string {
+// entry_date is a bare calendar day and taken_at is wall-clock-as-Z
+// (Immich's localDateTime convention) — both format in UTC so they render
+// verbatim; converting through a timezone would shift already-local values.
+function fmtShortDay(date: string): string {
   return new Date(`${date}T12:00:00Z`).toLocaleDateString('en-US', {
-    timeZone: tz, month: 'short', day: 'numeric',
+    timeZone: 'UTC', month: 'short', day: 'numeric',
   });
 }
 
-function fmtTime(iso: string, tz: string): string {
+function fmtTime(iso: string): string {
   try {
     return new Intl.DateTimeFormat('en-US', {
       hour: 'numeric',
       minute: '2-digit',
-      timeZone: tz,
+      timeZone: 'UTC',
     }).format(new Date(iso));
   } catch {
     return '';
@@ -41,7 +43,6 @@ export function FromImmichSection({
   entryDate: string;
   attachedAssetIds: string[];
 }) {
-  const tz = useAppTimezone();
   const router = useRouter();
   const [candidates, setCandidates] = useState<ImmichCandidate[] | null>(null);
   const [promoting, setPromoting] = useState<string | null>(null);
@@ -83,7 +84,7 @@ export function FromImmichSection({
 
   return (
     <section className="mt-8">
-      <div className="eyebrow mb-2">From Immich · {fmtShortDay(entryDate, tz)}</div>
+      <div className="eyebrow mb-2">From Immich · {fmtShortDay(entryDate)}</div>
       <div className="flex gap-2 overflow-x-auto pb-1">
         {remaining.map((c) => {
           const isPromoting = promoting === c.id;
@@ -107,7 +108,7 @@ export function FromImmichSection({
                 className="h-24 w-24 object-cover"
               />
               <span className="absolute bottom-0 inset-x-0 bg-ink/60 text-bg font-mono text-[9px] px-1 text-left">
-                {isPromoting ? 'attaching…' : fmtTime(c.taken_at, tz)}
+                {isPromoting ? 'attaching…' : fmtTime(c.taken_at)}
               </span>
               <span className="absolute top-0.5 right-0.5 bg-ink/60 text-bg font-mono text-[10px] px-1 opacity-0 group-hover:opacity-100 transition-opacity">
                 + attach

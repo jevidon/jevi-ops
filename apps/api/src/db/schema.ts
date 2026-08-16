@@ -16,9 +16,11 @@ export interface StoredAttachment {
   uploaded_at: string;
   gps?: { lat: number; lon: number } | null;
   location?: string | null;
-  // Set when the file was copied from Immich — dedupe + "attached" badges.
+  // Set when the asset was linked from Immich — dedupe + "attached" badges.
   immich_asset_id?: string | null;
-  // EXIF DateTimeOriginal (ISO), best-effort at upload time.
+  // Capture wall-clock time, best-effort. The Z suffix is convention, NOT
+  // UTC (matches Immich's localDateTime) — display with timeZone 'UTC' so
+  // the clock time renders verbatim.
   taken_at?: string | null;
 }
 
