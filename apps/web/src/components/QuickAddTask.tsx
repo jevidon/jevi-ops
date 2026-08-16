@@ -63,7 +63,9 @@ export function QuickAddTask({
 
   const hasSelect = !!projects?.length;
   return (
-    <form ref={formRef} action={formAction} className="flex-1 min-w-0">
+    // basis-full drops the open form onto its own line inside a wrapping
+    // footer row on narrow screens; ≥sm it rides inline and takes the slack.
+    <form ref={formRef} action={formAction} className="flex-1 basis-full sm:basis-auto min-w-0">
       <div className="flex items-center gap-2">
         {/* Fixed targets ride as hidden fields; the Work variant swaps them
             for the select's choice. */}

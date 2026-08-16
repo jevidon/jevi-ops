@@ -29,9 +29,12 @@ export function FilterInput({
   const inputRef = useRef<HTMLInputElement>(null);
   return (
     <div className={`relative flex items-center ${className}`}>
+      {/* Intrinsic width/height, not size classes — an unstyled-flash or
+          stale-CSS render must degrade to a 14px icon, never a full-width
+          SVG overlaying the page. */}
       <svg
-        viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
-        strokeLinecap="round" className="absolute left-0 h-[14px] w-[14px] text-ink-4 pointer-events-none"
+        viewBox="0 0 24 24" width={14} height={14} fill="none" stroke="currentColor" strokeWidth="1.8"
+        strokeLinecap="round" className="absolute left-0 text-ink-4 pointer-events-none"
         aria-hidden
       >
         <circle cx="11" cy="11" r="7" />

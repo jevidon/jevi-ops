@@ -445,7 +445,7 @@ function DomainSection({
               {domain.content.map((c) => <ContentRow key={c.id} c={c} color={color} />)}
             </div>
           )}
-          <div className="flex items-center gap-4">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
             {showDirect && (
               <Link href={`/domains/${domain.id}`} className="inline-flex items-center gap-1.5 h-[26px] px-[9px] rounded border border-line-strong font-mono text-[9.5px] font-semibold uppercase tracking-[0.07em] text-ink-3 hover:border-ink-3 hover:text-ink transition-colors">
                 Direct tasks {domain.direct.open}
