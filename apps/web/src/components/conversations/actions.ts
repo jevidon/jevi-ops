@@ -86,6 +86,20 @@ export async function createConversationAction(
   return { ok: true };
 }
 
+// Mark a follow-up done (Wave 2 #4a). Keeps followup_by for the record —
+// the timeline badge and the attention rule key off requires_followup, and
+// the API live-clears the conversation_followup attention item.
+export async function completeFollowupAction(formData: FormData): Promise<void> {
+  const id = String(formData.get('id') ?? '');
+  if (!id) return;
+  try {
+    await conversationsApi.update(id, { requires_followup: false });
+  } catch {
+    /* best-effort */
+  }
+  revalidateScopes(String(formData.get('revalidate_path') ?? '') || null);
+}
+
 export async function deleteConversationAction(formData: FormData): Promise<void> {
   const id = String(formData.get('id') ?? '');
   if (!id) return;

@@ -1,7 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { domainsApi, tasksApi, ApiError } from '@/lib/api';
+import { domainsApi, ApiError } from '@/lib/api';
 import {
   CADENCE_RULE_TYPES,
   PRIMARY_CADENCE_RULES,
@@ -10,41 +10,8 @@ import {
 
 export type SaveResult = { ok: true } | { ok: false; error: string };
 
-// ─── Quick-add task ──────────────────────────────────────────────────────
-//
-// Title-only capture straight into this domain (a direct task — no
-// project), mirroring /today's quick add but routed here instead of
-// Inbox. Everything else (due date, priority, project) is the full
-// editor's job: /tasks/new?domain_id=… pre-selects this domain.
-
-export async function quickAddTaskAction(
-  _prev: SaveResult | null,
-  formData: FormData,
-): Promise<SaveResult> {
-  const id = String(formData.get('id') ?? '');
-  if (!id) return { ok: false, error: 'Missing id.' };
-  const title = String(formData.get('title') ?? '').trim();
-  if (!title) return { ok: false, error: 'Title is required.' };
-
-  try {
-    await tasksApi.create({
-      title,
-      domain_id: id,
-      priority: 4,
-      source: 'manual',
-    });
-  } catch (err) {
-    if (err instanceof ApiError) return { ok: false, error: `API ${err.status}` };
-    return { ok: false, error: (err as Error).message };
-  }
-
-  revalidatePath(`/domains/${id}`);
-  // The Work page's per-domain rollups and /today's open-task counts
-  // both read from tasks — keep them honest.
-  revalidatePath('/work');
-  revalidatePath('/today');
-  return { ok: true };
-}
+// Task quick-add moved to the shared action in
+// components/quick-add-task-action.ts (Wave 2 #2).
 
 export async function updateDomainAction(
   _prev: SaveResult | null,

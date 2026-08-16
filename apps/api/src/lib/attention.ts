@@ -5,6 +5,7 @@ import {
   attention_items,
   companies,
   content_items,
+  conversations,
   people,
   person_facts,
   projects,
@@ -465,6 +466,61 @@ async function ruleCompanySilent(db: Db, _ctx: Ctx): Promise<CandidateItem[]> {
   return out;
 }
 
+// Conversation follow-ups (Wave 2 #4a). The log-conversation form has
+// written requires_followup + followup_by since the CRM port (0042) — this
+// rule finally consumes them: fire the day the follow-up comes due, score
+// ramping as it slips. Per the person_fact precedent, source_type/source_id
+// point at the NAVIGABLE parent (company > person > project > task — the
+// pages that render the conversation timeline), while the dedup_key carries
+// the conversation's own id as the occurrence identity. Week bucket: a
+// dismiss quiets the rest of the week, then it re-raises. Resolution is
+// marking the follow-up done (requires_followup=false — timeline button or
+// the PATCH route), which live-clears the item and stops regeneration;
+// moving followup_by out lets auto-resolve expire it. Undated
+// requires_followup rows never fire — no date, no nudge.
+async function ruleConversationFollowup(db: Db, ctx: Ctx): Promise<CandidateItem[]> {
+  const rows = await db.query.conversations.findMany({
+    columns: {
+      id: true, subject: true, summary: true, followup_by: true,
+      company_id: true, person_id: true, project_id: true, task_id: true,
+    },
+    with: {
+      company: { columns: { name: true } },
+      person: { columns: { name: true } },
+      project: { columns: { name: true } },
+    },
+    where: and(
+      eq(conversations.requires_followup, true),
+      isNotNull(conversations.followup_by),
+      lte(conversations.followup_by, ctx.todayYmd),
+    ),
+  });
+  const out: CandidateItem[] = [];
+  for (const c of rows) {
+    if (!c.followup_by) continue;
+    const overdue = daysBetween(c.followup_by, ctx.todayYmd);
+    const who = c.company?.name ?? c.person?.name ?? c.project?.name ?? null;
+    const what = c.subject?.trim() || c.summary;
+    // conversations_has_association guarantees at least one of the four.
+    const [source_type, source_id]: [CandidateItem['source_type'], string] =
+      c.company_id ? ['company', c.company_id]
+      : c.person_id ? ['person', c.person_id]
+      : c.project_id ? ['project', c.project_id]
+      : ['task', c.task_id!];
+    out.push({
+      rule_type: 'conversation_followup',
+      source_type,
+      source_id,
+      title: `Follow up${who ? ` with ${who}` : ''}: ${what.length > 80 ? `${what.slice(0, 77)}…` : what}`,
+      detail: overdue <= 0 ? 'Due today' : `Due ${c.followup_by} · ${overdue}d overdue`,
+      suggested_action: 'Open timeline',
+      score: 45 + Math.min(35, Math.max(0, overdue) * 5),
+      dedup_key: `conversation_followup:${c.id}:${isoWeekBucket(ctx.todayYmd)}`,
+    });
+  }
+  return out;
+}
+
 // ─── Rule registry ────────────────────────────────────────────────────────
 
 type RuleFn = (db: Db, ctx: Ctx) => Promise<CandidateItem[]>;
@@ -479,6 +535,7 @@ const RULES: { ruleType: string; fn: RuleFn }[] = [
   { ruleType: 'ideas_aging', fn: ruleIdeasAging },
   { ruleType: 'domain_stale', fn: ruleDomainStale },
   { ruleType: 'company_silent', fn: ruleCompanySilent },
+  { ruleType: 'conversation_followup', fn: ruleConversationFollowup },
 ];
 // rule_types that share rulePersonFact's fate (see registry note above).
 const RULE_ALIASES: Record<string, string[]> = {

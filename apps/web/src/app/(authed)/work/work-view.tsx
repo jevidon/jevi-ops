@@ -8,6 +8,8 @@ import { URGENCY_LABEL, proceduralIllustration } from '@jevi-ops/shared';
 import { Pill } from '@/components/Pill';
 import { Icon } from '@/components/Icon';
 import { FacetRail, FacetGroup, FacetRow, FacetTag, FacetTags, FacetSep } from '@/components/FacetRail';
+import { FilterInput, textMatches } from '@/components/FilterInput';
+import { QuickAddTask } from '@/components/QuickAddTask';
 import { domainColor } from '@/lib/domain-colors';
 import { flipHolderAction } from './actions';
 import { FocusControl, type FocusOption } from './focus-control';
@@ -73,6 +75,8 @@ export function WorkView({
   const [kinds, setKinds] = useState<Set<Kind>>(new Set(['projects', 'content', 'tasks']));
   const [showParked, setShowParked] = useState(false);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  // Live text filter (Wave 2 #3) — narrows sections/cards/rows as you type.
+  const [q, setQ] = useState('');
 
   const toggle = <T,>(set: React.Dispatch<React.SetStateAction<Set<T>>>, v: T) =>
     set((s) => {
@@ -97,6 +101,16 @@ export function WorkView({
       content = content.filter((c) => ssel.has(c.urgency));
     }
 
+    // Text narrow: a domain-name hit keeps the whole (facet-filtered)
+    // section; otherwise cards/rows must match by name/title/client and the
+    // section drops when nothing survives (direct-task counts aren't
+    // searchable text, so they don't hold a section open).
+    if (q.trim() && !textMatches(q, d.name)) {
+      projects = projects.filter((p) => textMatches(q, p.name, p.client));
+      content = content.filter((c) => textMatches(q, c.title));
+      if (!projects.length && !content.length) return null;
+    }
+
     // Domain drops out when nothing survives AND it has no other reason to show.
     const directHot =
       kinds.has('tasks') && (d.direct.overdue > 0 || d.direct.waitingAging > 0);
@@ -114,7 +128,18 @@ export function WorkView({
     if (dsel.size) list = list.filter((d) => dsel.has(d.id));
     return list.map(applyFacets).filter((d): d is WorkDomain => d !== null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [payload.domains, dsel, ssel, kinds, attention]);
+  }, [payload.domains, dsel, ssel, kinds, attention, q]);
+
+  // Quick-add target options per domain — from the UNFILTERED payload, so a
+  // Status/attention facet that hides a project card doesn't also hide it as
+  // an add-into target.
+  const quickAddProjects = useMemo(() => {
+    const m = new Map<string, { id: string; name: string }[]>();
+    for (const d of [...payload.domains, ...payload.parked]) {
+      m.set(d.id, d.projects.map((p) => ({ id: p.id, name: p.name })));
+    }
+    return m;
+  }, [payload]);
 
   // Focus candidates — active projects + my-move content, from the same payload.
   const focusOptions = useMemo<FocusOption[]>(() => {
@@ -133,19 +158,20 @@ export function WorkView({
   }, [payload.domains]);
 
   const attentionCount = payload.domains.filter(domainNeedsAttention).length;
-  const activeFilters = dsel.size + ssel.size + (attention ? 1 : 0) + (3 - kinds.size);
+  const activeFilters = dsel.size + ssel.size + (attention ? 1 : 0) + (3 - kinds.size) + (q.trim() ? 1 : 0);
   const resetFilters = () => {
     setAttention(false);
     setDsel(new Set());
     setSsel(new Set());
     setKinds(new Set(['projects', 'content', 'tasks']));
+    setQ('');
   };
 
   // The celebratory reward state means "the whole board is genuinely clear" —
-  // only when Needs-attention is the ONLY active facet. A Status- or
-  // Show-emptied view falls through to the neutral "nothing matches" message.
+  // only when Needs-attention is the ONLY active facet. A Status-, Show-, or
+  // text-emptied view falls through to the neutral "nothing matches" message.
   const nothingFlagged =
-    attention && dsel.size === 0 && ssel.size === 0 && kinds.size === 3 && visibleDomains.length === 0;
+    attention && dsel.size === 0 && ssel.size === 0 && kinds.size === 3 && !q.trim() && visibleDomains.length === 0;
 
   return (
     <div className="lg:flex">
@@ -240,6 +266,11 @@ export function WorkView({
           </div>
         </div>
 
+        {/* Live filter — type to narrow the whole board. */}
+        <div className="mb-4">
+          <FilterInput value={q} onChange={setQ} placeholder="Filter domains, projects, content…" className="max-w-[420px]" />
+        </div>
+
         {/* Tomorrow's focus */}
         <div className="border-y border-line mb-3">
           <FocusControl current={tomorrowFocus} options={focusOptions} date={tomorrowDate} />
@@ -255,7 +286,7 @@ export function WorkView({
           </div>
         ) : (
           visibleDomains.map((d) => (
-            <DomainSection key={d.id} domain={d} kinds={kinds} artSvg={art[d.id]} collapsed={collapsed.has(d.id)} onToggle={() => toggle(setCollapsed, d.id)} />
+            <DomainSection key={d.id} domain={d} kinds={kinds} artSvg={art[d.id]} collapsed={collapsed.has(d.id)} onToggle={() => toggle(setCollapsed, d.id)} quickAddProjects={quickAddProjects.get(d.id) ?? []} />
           ))
         )}
 
@@ -277,7 +308,7 @@ export function WorkView({
                   .map(applyFacets)
                   .filter((d): d is WorkDomain => d !== null)
                   .map((d) => (
-                    <DomainSection key={d.id} domain={d} kinds={kinds} artSvg={art[d.id]} collapsed={collapsed.has(d.id)} onToggle={() => toggle(setCollapsed, d.id)} />
+                    <DomainSection key={d.id} domain={d} kinds={kinds} artSvg={art[d.id]} collapsed={collapsed.has(d.id)} onToggle={() => toggle(setCollapsed, d.id)} quickAddProjects={quickAddProjects.get(d.id) ?? []} />
                   ))}
               </div>
             )}
@@ -338,7 +369,7 @@ function FittedArt({ name, svg, tone }: { name: string; svg?: string | null; ton
 }
 
 function DomainSection({
-  domain, kinds, artSvg, collapsed, onToggle,
+  domain, kinds, artSvg, collapsed, onToggle, quickAddProjects,
 }: {
   domain: WorkDomain;
   kinds: Set<Kind>;
@@ -346,6 +377,8 @@ function DomainSection({
   artSvg?: string;
   collapsed: boolean;
   onToggle: () => void;
+  // Unfiltered add-into targets for the quick-add select.
+  quickAddProjects: { id: string; name: string }[];
 }) {
   const r = domain.rollup;
   const color = domainColor(domain.name);
@@ -423,6 +456,14 @@ function DomainSection({
             <Link href={`/projects/new?domain_id=${domain.id}`} className="font-mono text-[9px] uppercase tracking-[0.09em] text-ink-3 hover:text-accent transition-colors">
               + Project in {domain.name}
             </Link>
+            {/* Quick task capture (Wave 2 #2) — title straight into this
+                domain or one of its projects, no page hop. */}
+            <QuickAddTask
+              domainId={domain.id}
+              projects={quickAddProjects}
+              placeholder={`Add a task in ${domain.name}…`}
+              collapsible
+            />
           </div>
           {empty && <p className="mt-0.5 font-sans text-[13px] italic text-ink-3">Nothing open.</p>}
         </div>

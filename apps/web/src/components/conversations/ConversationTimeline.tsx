@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import type { Conversation } from '@/lib/api';
-import { deleteConversationAction } from './actions';
+import { completeFollowupAction, deleteConversationAction } from './actions';
 
 // Chronological conversation list — the heart of the CRM view. Reused on
 // company / person / project detail. Presentational + a per-row delete form.
@@ -78,6 +78,21 @@ export function ConversationTimeline({
                   <span className="text-accent">
                     · follow up{c.followup_by ? ` by ${c.followup_by}` : ''}
                   </span>
+                )}
+                {c.requires_followup && (
+                  /* One tap settles it: requires_followup → false, which
+                     also clears the attention nudge server-side. */
+                  <form action={completeFollowupAction} className="inline-block">
+                    <input type="hidden" name="id" value={c.id} />
+                    <input type="hidden" name="revalidate_path" value={revalidatePath} />
+                    <button
+                      type="submit"
+                      className="font-mono text-[10px] uppercase tracking-wider text-ink-3 hover:text-ink border border-line-strong rounded px-1.5 transition-colors"
+                      aria-label="Mark follow-up done"
+                    >
+                      ✓ done
+                    </button>
+                  </form>
                 )}
               </div>
               <form action={deleteConversationAction} className="shrink-0">

@@ -6,6 +6,7 @@ import type { Task } from '@jevi-ops/shared';
 import { isRecurrencePattern } from '@jevi-ops/shared';
 import { Icon } from '@/components/Icon';
 import { FacetRail, FacetGroup, FacetRow, FacetTag, FacetTags, FacetSep } from '@/components/FacetRail';
+import { FilterInput, textMatches } from '@/components/FilterInput';
 import { domainColor } from '@/lib/domain-colors';
 import { isToday } from '@/lib/today';
 import { toggleTaskDoneAction } from '../today/actions';
@@ -68,6 +69,8 @@ export function TasksView({
   const [dsel, setDsel] = useState<Set<string>>(new Set());
   const [psel, setPsel] = useState<Set<number>>(new Set());
   const [showDone, setShowDone] = useState(false);
+  // Live text filter (Wave 2 #3) — narrows rows as you type.
+  const [q, setQ] = useState('');
 
   const toggle = <T,>(set: React.Dispatch<React.SetStateAction<Set<T>>>, v: T) =>
     set((s) => {
@@ -126,7 +129,8 @@ export function TasksView({
   const isTodayOrOver = (t: Task) =>
     t.status === 'open' && !!t.due_date && t.due_date <= today;
 
-  // Apply the facets (View + Domain + Priority) to the active list.
+  // Apply the facets (View + Domain + Priority) and the text narrow to the
+  // active list. Text matches title, project/domain name, and waiting-on.
   const visible = useMemo(
     () =>
       active.filter((t) => {
@@ -134,10 +138,11 @@ export function TasksView({
         if (view === 'upcoming' && !isUpcoming(t)) return false;
         if (dsel.size && (!t.domain_id || !dsel.has(t.domain_id))) return false;
         if (psel.size && !psel.has(t.priority)) return false;
+        if (q.trim() && !textMatches(q, t.title, t.project?.name, t.domain?.name, t.waiting_on)) return false;
         return true;
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [active, view, dsel, psel, today],
+    [active, view, dsel, psel, today, q],
   );
 
   const groupOf = (t: Task): GroupName =>
@@ -174,8 +179,8 @@ export function TasksView({
     overdue: active.filter((t) => t.status === 'open' && t.due_date && t.due_date < today).length,
     waiting: active.filter((t) => t.status === 'waiting').length,
   };
-  const activeFilters = dsel.size + psel.size + (view !== 'all' ? 1 : 0);
-  const reset = () => { setView('all'); setDsel(new Set()); setPsel(new Set()); };
+  const activeFilters = dsel.size + psel.size + (view !== 'all' ? 1 : 0) + (q.trim() ? 1 : 0);
+  const reset = () => { setView('all'); setDsel(new Set()); setPsel(new Set()); setQ(''); };
   // Project count keys off the SAME name basis byProject groups by, so the rail
   // count always equals the number of rendered project groups.
   const projectKey = (t: Task) => t.project?.name ?? `${t.domain?.name ?? 'Domain'} · direct`;
@@ -261,6 +266,11 @@ export function TasksView({
               <Icon name="capture" size={14} /> Add task
             </Link>
           </div>
+        </div>
+
+        {/* Live filter — type to narrow every group at once. */}
+        <div className="mb-5">
+          <FilterInput value={q} onChange={setQ} placeholder="Filter tasks, projects, waiting-on…" className="max-w-[420px]" />
         </div>
 
         {view === 'project' ? (
