@@ -146,21 +146,23 @@ export function IconRail({
         {/* Brand */}
         <div className="flex items-center gap-3 h-[60px] px-[19px] shrink-0 border-b border-line">
           <span
-            className="grid place-items-center shrink-0 w-[26px] h-[26px] rounded border border-line-strong bg-bg text-accent font-serif text-[18px] leading-none"
+            className="grid place-items-center shrink-0 w-[26px] h-[26px] rounded-md bg-accent"
             aria-hidden
           >
-            {/* Optical centering: the serif J's line-box sits high, so nudge
-                the glyph down a hair rather than rely on geometric centering. */}
-            <span className="block translate-y-[0.5px]">J</span>
+            {/* Almanac eight-point star — same geometry as the favicon set
+                (outer R 13.2 / inner r 5.2 in a 32 box). */}
+            <svg viewBox="0 0 32 32" className="w-[19px] h-[19px] fill-bg">
+              <polygon points="16,2.8 17.99,11.2 25.33,6.67 20.8,14.01 29.2,16 20.8,17.99 25.33,25.33 17.99,20.8 16,29.2 14.01,20.8 6.67,25.33 11.2,17.99 2.8,16 11.2,14.01 6.67,6.67 14.01,11.2" />
+            </svg>
           </span>
           <span
             className={`whitespace-nowrap transition-opacity duration-100 ${open ? 'opacity-100' : 'opacity-0'}`}
           >
             <span className="block font-serif font-medium text-[15px] leading-[1.1] tracking-[-0.01em] text-ink">
-              Operations
+              Almanac
             </span>
             <span className="block font-mono text-[9px] leading-[1.4] tracking-[0.1em] uppercase text-ink-3">
-              jevi-ops
+              a jevi operation
             </span>
           </span>
         </div>

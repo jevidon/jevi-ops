@@ -2,10 +2,10 @@ import type { Metadata, Viewport } from 'next';
 import '../styles/globals.css';
 
 export const metadata: Metadata = {
-  title: 'Jevi · Ops',
-  description: 'Personal Operations Dashboard',
+  title: 'Almanac',
+  description: 'Home, work, and life operations — a Jevi operation',
   manifest: '/manifest.webmanifest',
-  applicationName: 'Jevi Ops',
+  applicationName: 'Almanac',
   // Icons split by purpose:
   //   - icon (any): browser tab + bookmark
   //   - apple-touch-icon: iOS Add to Home Screen
@@ -29,7 +29,7 @@ export const metadata: Metadata = {
     // The CSS env(safe-area-inset-top) padding still applies so content
     // isn't clipped by the notch.
     statusBarStyle: 'black-translucent',
-    title: 'Jevi Ops',
+    title: 'Almanac',
   },
   formatDetection: {
     telephone: false,

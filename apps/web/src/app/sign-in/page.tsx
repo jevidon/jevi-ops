@@ -15,10 +15,10 @@ export default async function SignInPage({
   return (
     <div className="min-h-screen flex items-center justify-center px-5 py-12">
       <div className="w-full max-w-sm">
-        <div className="eyebrow mb-2 text-center">Personal Ops</div>
-        <h1 className="font-serif text-[28px] leading-tight font-medium text-ink text-center mb-8">
-          Sign in
+        <h1 className="font-serif text-[32px] leading-tight font-medium text-ink text-center">
+          almanac<span className="text-accent">.</span>
         </h1>
+        <div className="eyebrow mt-2 mb-8 text-center">A Jevi operation</div>
         <SignInForm next={next ?? '/today'} />
       </div>
     </div>

@@ -1,7 +1,4 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
-      <rect width="512" height="512" fill="#B8442B"/>
-      <text x="50%" y="379" text-anchor="middle"
-            font-family="Newsreader, Georgia, 'Times New Roman', serif"
-            font-size="379" font-weight="500"
-            fill="#F6F2EA">J</text>
-    </svg>
+  <rect width="512" height="512" fill="#B8442B"/>
+  <polygon fill="#F6F2EA" points="256.00,66.56 284.56,187.05 389.95,122.05 324.95,227.44 445.44,256.00 324.95,284.56 389.95,389.95 284.56,324.95 256.00,445.44 227.44,324.95 122.05,389.95 187.05,284.56 66.56,256.00 187.05,227.44 122.05,122.05 227.44,187.05"/>
+</svg>
