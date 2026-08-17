@@ -176,7 +176,7 @@ export default async function TodayPage() {
                 </>
               )}
             </div>
-            <h1 className="font-serif text-[40px] font-medium leading-[1.02] tracking-[-0.022em] text-ink">The Briefing</h1>
+            <h1 className="font-serif text-[40px] font-medium leading-[1.02] tracking-[-0.022em] text-ink">The Almanac</h1>
           </div>
           <div className="flex items-center gap-2 pb-1 flex-wrap">
             {overdueCount > 0 && <Pill state="over">{overdueCount} overdue</Pill>}
