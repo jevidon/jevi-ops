@@ -1,6 +1,8 @@
 import { BottomTabBar } from '@/components/BottomTabBar';
 import { IconRail } from '@/components/IconRail';
 import { Topbar } from '@/components/Topbar';
+import { CrumbsProvider } from '@/components/crumbs/crumbs';
+import { MobileCrumbs } from '@/components/crumbs/MobileCrumbs';
 import { MicFAB } from '@/components/MicFAB';
 import { TextCaptureFAB } from '@/components/TextCaptureFAB';
 import { NotificationBell } from '@/components/NotificationBell';
@@ -51,6 +53,7 @@ export default async function AuthedLayout({ children }: { children: React.React
 
   return (
     <TimezoneProvider timezone={timezone}>
+      <CrumbsProvider>
       <div className="flex-1 flex">
         <IconRail
           email={user.email ?? undefined}
@@ -63,6 +66,10 @@ export default async function AuthedLayout({ children }: { children: React.React
         <div className="flex-1 flex flex-col min-w-0">
           {/* v2 topbar (desktop only) — breadcrumb + search + Capture. */}
           <Topbar />
+
+          {/* Mobile crumb line — renders only on detail pages (trail depth
+              >= 2); in-flow so Work's sticky headers keep their offsets. */}
+          <MobileCrumbs />
 
           {/* Inner wrapper: FLUID up to the desktop gate — no mobile max-width
               cap, so a wider-than-typical viewport (e.g. a foldable's cover
@@ -96,6 +103,7 @@ export default async function AuthedLayout({ children }: { children: React.React
           <TextCapturePalette />
         </div>
       </div>
+      </CrumbsProvider>
     </TimezoneProvider>
   );
 }
