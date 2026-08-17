@@ -14,7 +14,6 @@ import { CadenceEditor } from './cadence-editor';
 import { MarkShipped } from './mark-shipped';
 import { IllustrationControls } from './illustration-controls';
 import { ProjectQuickCreate } from './quick-create';
-import { QuickAddTask } from '@/components/QuickAddTask';
 import { DomainIllustration } from '../domain-illustration';
 import { ProjectCard, ContentRow, FittedArt } from '../../work/cards';
 import { PRIMARY_CADENCE_RULES, type CadenceRuleType } from './cadence-rules';
@@ -72,9 +71,10 @@ const CADENCE_RULE_SHORT: Record<string, string> = {
 // /domains/[id] — domain detail (Detail Pages v2 adoption, Aug 2026). Same
 // anatomy as the project page: header band (surface bg, actions at right,
 // config behind the Edit drawer) → computed stat strip → two-column read
-// layout. The main column opens with the Work page's domain-section view —
-// project cards + content rows off the same server-computed /work payload —
-// then direct + project-grouped tasks.
+// layout. The main column is the Work page's domain-section view — project
+// cards + content rows off the same server-computed /work payload. No raw
+// task list: task-level work is reached through the project cards (or /tasks);
+// only Inbox renders its tasks, because triage IS that page.
 //
 // System domains (Inbox) render a streamlined triage-oriented view: no
 // edit drawer (the API rejects identity changes on system domains anyway),
@@ -312,29 +312,12 @@ export default async function DomainDetailPage({
               </DetailSection>
             )}
 
-            <DetailSection
-              label="Tasks"
-              count={taskCount}
-              className={isInbox ? 'mt-0' : ''}
-              action={
-                !isInbox ? (
-                  <Link
-                    href={`/tasks/new?domain_id=${domain.id}&from=/domains/${domain.id}`}
-                    className="font-mono text-[10px] uppercase tracking-wider text-accent hover:text-ink transition-colors shrink-0"
-                  >
-                    Full editor →
-                  </Link>
-                ) : undefined
-              }
-            >
-              {/* Title-only quick capture straight into this domain; due
-                  dates, priority, and project routing live in the full
-                  editor linked above. */}
-              {!isInbox && (
-                <div className="mb-4">
-                  <QuickAddTask domainId={domain.id} placeholder="Add a task to this domain…" />
-                </div>
-              )}
+            {/* Task lists render only for Inbox — triage IS the page there.
+                Regular domains stopped carrying the raw task list (Aug 2026):
+                project-bound work is reached through the cards above, and the
+                full ledger lives on /tasks. */}
+            {isInbox && (
+            <DetailSection label="Tasks" count={taskCount}>
               {openTasks.length === 0 ? (
                 <p className="font-sans text-[13px] text-ink-3 italic py-1">No open tasks here.</p>
               ) : (
@@ -384,6 +367,7 @@ export default async function DomainDetailPage({
                 </div>
               )}
             </DetailSection>
+            )}
           </>
         }
         rail={
