@@ -29,7 +29,7 @@ export async function setTaskStatusAction(formData: FormData): Promise<void> {
   }
   revalidatePath(`/tasks/${taskId}`);
   revalidatePath('/tasks');
-  revalidatePath('/today');
+  revalidatePath('/');
   revalidatePath('/attention');
   revalidatePath('/work');
 }
@@ -138,7 +138,7 @@ export async function updateTaskAction(
     }
     return { ok: false, error: (err as Error).message };
   }
-  revalidatePath('/today');
+  revalidatePath('/');
   revalidatePath('/tasks');
   revalidatePath('/projects');
   revalidatePath('/content');
@@ -179,7 +179,7 @@ export async function createTaskFullAction(
     }
     return { ok: false, error: (err as Error).message };
   }
-  revalidatePath('/today');
+  revalidatePath('/');
   revalidatePath('/tasks');
   revalidatePath('/work');
   revalidatePath('/projects');
@@ -202,12 +202,12 @@ export async function deleteTaskAction(formData: FormData): Promise<void> {
   } catch {
     /* best-effort */
   }
-  revalidatePath('/today');
+  revalidatePath('/');
   revalidatePath('/tasks');
   revalidatePath('/projects');
   revalidatePath('/content');
   revalidatePath('/attention');
-  redirect('/today');
+  redirect('/');
 }
 
 // ─── Subtasks (fork) ─────────────────────────────────────────────────────
@@ -257,7 +257,7 @@ export async function createSubtaskAction(
   }
   revalidatePath(`/tasks/${parsed.data.parentId}`);
   revalidatePath('/tasks');
-  revalidatePath('/today');
+  revalidatePath('/');
   revalidatePath('/work');
   return { ok: true, id: createdId };
 }

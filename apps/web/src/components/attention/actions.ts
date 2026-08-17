@@ -7,7 +7,7 @@ import { attentionApi } from '@/lib/api';
 // Today card and the full feed so the item moves/disappears immediately.
 
 function revalidate() {
-  revalidatePath('/today');
+  revalidatePath('/');
   revalidatePath('/attention');
 }
 

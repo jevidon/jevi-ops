@@ -17,7 +17,7 @@ export async function signInAction(_prev: { error?: string } | null, formData: F
   const parsed = SignInSchema.safeParse({
     email: formData.get('email'),
     password: formData.get('password'),
-    next: formData.get('next') ?? '/today',
+    next: formData.get('next') ?? '/',
   });
   if (!parsed.success) {
     return { error: 'Email and password are required.' };
@@ -53,7 +53,7 @@ export async function signInAction(_prev: { error?: string } | null, formData: F
   store.set(SESSION_COOKIE, body.token, sessionCookieOptions());
 
   revalidatePath('/', 'layout');
-  const target = parsed.data.next && parsed.data.next.startsWith('/') ? parsed.data.next : '/today';
+  const target = parsed.data.next && parsed.data.next.startsWith('/') ? parsed.data.next : '/';
   redirect(target);
 }
 

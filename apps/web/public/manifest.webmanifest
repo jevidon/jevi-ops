@@ -2,7 +2,7 @@
   "name": "Almanac",
   "short_name": "Almanac",
   "description": "Home, work, and life operations — a Jevi operation",
-  "start_url": "/today",
+  "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait",

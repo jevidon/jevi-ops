@@ -25,7 +25,7 @@ export async function createTaskAction(_prev: { error?: string } | null, formDat
   } catch (err) {
     return { error: err instanceof ApiError ? `API ${err.status}` : (err as Error).message };
   }
-  revalidatePath('/today');
+  revalidatePath('/');
   return {};
 }
 
@@ -40,7 +40,7 @@ export async function toggleTaskDoneAction(formData: FormData) {
   } catch {
     // Best-effort; UI will reload on next request and reflect reality.
   }
-  revalidatePath('/today');
+  revalidatePath('/');
   revalidatePath('/attention');
   revalidatePath('/work');
 }
@@ -57,7 +57,7 @@ export async function toggleTop3Action(formData: FormData) {
   } catch {
     // ignore — revalidate will resync
   }
-  revalidatePath('/today');
+  revalidatePath('/');
 }
 
 // Log a check-in with a silent client straight from Today (Phase 5). Creates a
@@ -79,7 +79,7 @@ export async function logCheckInAction(formData: FormData) {
   } catch {
     /* best-effort — the list reloads on next render */
   }
-  revalidatePath('/today');
+  revalidatePath('/');
   revalidatePath('/attention');
   revalidatePath('/companies');
 }
@@ -92,7 +92,7 @@ export async function dismissObservationAction(formData: FormData) {
   } catch {
     /* best-effort */
   }
-  revalidatePath('/today');
+  revalidatePath('/');
   revalidatePath('/observations');
 }
 
@@ -146,11 +146,11 @@ export async function skipResurfacingAction(formData: FormData) {
     // suspenders against a stale cookie surviving forever.
     maxAge: 60 * 60 * 36,
   });
-  revalidatePath('/today');
+  revalidatePath('/');
 }
 
 export async function resetResurfacingAction() {
   const jar = await cookies();
   jar.delete(RESURFACING_COOKIE);
-  revalidatePath('/today');
+  revalidatePath('/');
 }

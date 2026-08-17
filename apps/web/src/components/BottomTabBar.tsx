@@ -7,30 +7,30 @@ import { signOutAction } from '@/app/sign-in/actions';
 import { Icon, type IconName } from './Icon';
 import { BottomSheet } from './BottomSheet';
 
-// Mobile primary nav: five tab slots + a "More" slot. The five mirror the
-// design brief (Today · Work · Content · People · Library). Everything else the
-// desktop IconRail exposes — Tasks, Companies, Routines, Health, Search, Ask,
-// Attention, Notifications, Settings, sign-out — lives behind "More", which
-// opens a bottom sheet instead of cramming the bar. That keeps every route the
-// desktop can reach reachable on mobile without a seventh icon.
+// Mobile primary nav, five positions: Work · Library · [Almanac logo] ·
+// Search · More. The logo (center, no label) is the home link — the Briefing
+// lives at `/`. Everything else the desktop IconRail exposes — Content,
+// People, Tasks, Companies, Routines, Health, Ask, Attention, Notifications,
+// Settings, sign-out — lives behind "More", which opens a bottom sheet
+// instead of cramming the bar.
 //
-// The keyboard shortcuts (⌘K search, ⌘J capture) still work but have no mobile
-// chrome, hence Search/Capture also appearing in the More sheet.
+// The keyboard shortcuts (⌘K search, ⌘J capture) still work but have no
+// mobile chrome, hence Capture also appearing in the More sheet flows.
 
 type TabIcon = (props: { className?: string }) => React.ReactElement;
 
-const TABS: Array<{ href: string; label: string; Icon: TabIcon }> = [
-  { href: '/today', label: 'Today', Icon: TodayIcon },
+const LEFT_TABS: Array<{ href: string; label: string; Icon: TabIcon }> = [
   // Work (Addendum 08) replaces the Domains + Projects tabs.
   { href: '/work', label: 'Work', Icon: ProjectsIcon },
-  { href: '/content', label: 'Content', Icon: ContentIcon },
-  { href: '/people', label: 'People', Icon: PeopleIcon },
   { href: '/library', label: 'Library', Icon: LibraryIcon },
 ];
+const RIGHT_TABS: Array<{ href: string; label: string; Icon: TabIcon }> = [
+  { href: '/search', label: 'Search', Icon: SearchIcon },
+];
 
-// /inbox stays a Today doorway (keeps Today highlighted). /tasks is NO LONGER
-// here — it's reached via More now, so it highlights More, not Today.
-const TODAY_SUBVIEWS = ['/inbox'];
+// /inbox stays a home doorway (keeps the logo highlighted). /tasks is reached
+// via More, so it highlights More.
+const HOME_SUBVIEWS = ['/inbox'];
 
 interface MoreItem {
   href: string;
@@ -57,24 +57,23 @@ export function BottomTabBar({
   const pathname = usePathname();
   const [moreOpen, setMoreOpen] = useState(false);
 
-  const isTabActive = (href: string) => {
-    const exact = pathname === href || pathname.startsWith(href + '/');
-    const asToday =
-      href === '/today' &&
-      TODAY_SUBVIEWS.some((p) => pathname === p || pathname.startsWith(p + '/'));
-    return exact || asToday;
-  };
+  const isTabActive = (href: string) => pathname === href || pathname.startsWith(href + '/');
+  const homeActive =
+    pathname === '/' ||
+    HOME_SUBVIEWS.some((p) => pathname === p || pathname.startsWith(p + '/'));
 
-  // "More" owns every route that isn't one of the five tabs (or a Today
-  // doorway), so it highlights on Tasks, Companies, Settings, Ask, etc.
-  const moreActive = !TABS.some((t) => isTabActive(t.href));
+  // "More" owns every route that isn't a tab or a home doorway, so it
+  // highlights on Content, People, Tasks, Companies, Settings, Ask, etc.
+  const moreActive =
+    !homeActive && ![...LEFT_TABS, ...RIGHT_TABS].some((t) => isTabActive(t.href));
 
   const moreItems: MoreItem[] = ([
+    { href: '/content', label: 'Content', icon: 'content' },
+    { href: '/people', label: 'People', icon: 'people' },
     { href: '/tasks', label: 'Tasks', icon: 'tasks' },
     { href: '/companies', label: 'Companies', icon: 'companies' },
     { href: '/routines', label: 'Routines', icon: 'routines', flag: 'routines' },
     { href: '/health', label: 'Health', icon: 'health', flag: 'health' },
-    { href: '/search', label: 'Search', icon: 'search' },
     { href: '/chat', label: 'Ask', icon: 'ask' },
     {
       href: '/attention', label: 'Attention', icon: 'flag',
@@ -101,30 +100,39 @@ export function BottomTabBar({
         className="fixed bottom-0 inset-x-0 z-40 bg-surface border-t border-line lg:hidden"
         style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
       >
-        <ul className="flex justify-around items-stretch h-[60px]">
-          {TABS.map(({ href, label, Icon }) => {
-            const active = isTabActive(href);
-            return (
-              <li key={href} className="flex-1">
-                <Link
-                  href={href}
-                  aria-current={active ? 'page' : undefined}
-                  className={`flex h-full flex-col items-center justify-center gap-0.5 transition-colors ${
-                    active ? 'text-ink' : 'text-ink-3'
-                  }`}
-                >
-                  <Icon className="h-[22px] w-[22px]" />
-                  <span
-                    className={`font-sans text-[11px] leading-none ${
-                      active ? 'font-semibold' : 'font-medium'
-                    }`}
-                  >
-                    {label}
-                  </span>
-                </Link>
-              </li>
-            );
-          })}
+        {/* Variant B (tab-bar study): row capped + centered so the five
+            targets sit in thumb range instead of spanning the screen. */}
+        <ul className="mx-auto max-w-[352px] flex justify-around items-stretch h-[58px]">
+          {LEFT_TABS.map((tab) => (
+            <TabItem key={tab.href} {...tab} active={isTabActive(tab.href)} />
+          ))}
+
+          {/* Center: the Almanac mark, no label — the home link. */}
+          <li className="flex-1">
+            <Link
+              href="/"
+              aria-label="Home"
+              aria-current={homeActive ? 'page' : undefined}
+              className="flex h-full flex-col items-center justify-center"
+            >
+              {/* Docked float: the mark rises out of the bar, ringed in the
+                  linen canvas so it reads as sitting ON the page. Content
+                  scrolls under the overhang — deliberate. */}
+              <span
+                className={`grid place-items-center w-[54px] h-[54px] -mt-[18px] rounded-[15px] bg-accent border-[3px] border-bg shadow-[0_4px_14px_-6px_rgba(18,16,14,0.4)] transition-opacity ${
+                  homeActive ? 'opacity-100' : 'opacity-80'
+                }`}
+              >
+                <svg viewBox="0 0 32 32" className="w-[36px] h-[36px] fill-bg" aria-hidden>
+                  <polygon points="16,2.8 17.99,11.2 25.33,6.67 20.8,14.01 29.2,16 20.8,17.99 25.33,25.33 17.99,20.8 16,29.2 14.01,20.8 6.67,25.33 11.2,17.99 2.8,16 11.2,14.01 6.67,6.67 14.01,11.2" />
+                </svg>
+              </span>
+            </Link>
+          </li>
+
+          {RIGHT_TABS.map((tab) => (
+            <TabItem key={tab.href} {...tab} active={isTabActive(tab.href)} />
+          ))}
           <li className="flex-1">
             <button
               type="button"
@@ -206,6 +214,39 @@ export function BottomTabBar({
   );
 }
 
+function TabItem({
+  href,
+  label,
+  Icon,
+  active,
+}: {
+  href: string;
+  label: string;
+  Icon: TabIcon;
+  active: boolean;
+}) {
+  return (
+    <li className="flex-1">
+      <Link
+        href={href}
+        aria-current={active ? 'page' : undefined}
+        className={`flex h-full flex-col items-center justify-center gap-0.5 transition-colors ${
+          active ? 'text-ink' : 'text-ink-3'
+        }`}
+      >
+        <Icon className="h-[22px] w-[22px]" />
+        <span
+          className={`font-sans text-[11px] leading-none ${
+            active ? 'font-semibold' : 'font-medium'
+          }`}
+        >
+          {label}
+        </span>
+      </Link>
+    </li>
+  );
+}
+
 function MoreIcon({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"
@@ -222,12 +263,12 @@ function MoreIcon({ className }: { className?: string }) {
 // 1.5. Active state inherits text color from the parent <Link> via
 // currentColor on both stroke and fill — no per-icon active variant.
 
-function TodayIcon({ className }: { className?: string }) {
+function SearchIcon({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"
       strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden>
-      <circle cx="12" cy="12" r="9" />
-      <path d="M12 7v5l3 2" />
+      <circle cx="11" cy="11" r="6.5" />
+      <path d="M15.8 15.8 21 21" />
     </svg>
   );
 }

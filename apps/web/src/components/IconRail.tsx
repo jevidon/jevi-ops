@@ -27,8 +27,9 @@ interface NavItem {
   flag?: 'health' | 'routines';
 }
 
+// No Today/home item — the brand block above the nav is the home link
+// (the Briefing lives at `/` now).
 const NAV: NavItem[] = [
-  { href: '/today', label: 'Today', icon: 'today' },
   { href: '/work', label: 'Work', icon: 'work' },
   { href: '/tasks', label: 'Tasks', icon: 'tasks' },
   { href: '/content', label: 'Content', icon: 'content' },
@@ -38,10 +39,6 @@ const NAV: NavItem[] = [
   { href: '/routines', label: 'Routines', icon: 'routines', flag: 'routines' },
   { href: '/health', label: 'Health', icon: 'health', flag: 'health' },
 ];
-
-// Routes still highlighted under Today. /tasks is NO LONGER here — it has its
-// own rail tab now. /inbox stays a Today doorway.
-const TODAY_SUBVIEWS = ['/inbox'];
 
 // Synthesize a Cmd/Ctrl+J so the global TextCapturePalette opens (same trick
 // the old rail used — cheaper than exposing a shared open()).
@@ -110,13 +107,7 @@ export function IconRail({
       (t.flag !== 'health' || healthEnabled) && (t.flag !== 'routines' || routinesEnabled),
   );
 
-  const isActive = (href: string) => {
-    const exact = pathname === href || pathname.startsWith(href + '/');
-    const asToday =
-      href === '/today' &&
-      TODAY_SUBVIEWS.some((p) => pathname === p || pathname.startsWith(p + '/'));
-    return exact || asToday;
-  };
+  const isActive = (href: string) => pathname === href || pathname.startsWith(href + '/');
 
   return (
     // The slot reserves layout width; the rail itself is FIXED to the viewport
@@ -143,8 +134,11 @@ export function IconRail({
           boxShadow: open && !pinned ? '18px 0 40px -18px rgba(18,16,14,0.22)' : 'none',
         }}
       >
-        {/* Brand */}
-        <div className="flex items-center gap-3 h-[60px] px-[19px] shrink-0 border-b border-line">
+        {/* Brand — doubles as the home link (the Briefing at `/`). */}
+        <Link
+          href="/"
+          className="flex items-center gap-3 h-[60px] px-[19px] shrink-0 border-b border-line group/brand"
+        >
           <span
             className="grid place-items-center shrink-0 w-[26px] h-[26px] rounded-md bg-accent"
             aria-hidden
@@ -158,14 +152,14 @@ export function IconRail({
           <span
             className={`whitespace-nowrap transition-opacity duration-100 ${open ? 'opacity-100' : 'opacity-0'}`}
           >
-            <span className="block font-serif font-medium text-[15px] leading-[1.1] tracking-[-0.01em] text-ink">
+            <span className="block font-serif font-medium text-[15px] leading-[1.1] tracking-[-0.01em] text-ink group-hover/brand:text-accent transition-colors">
               Almanac
             </span>
             <span className="block font-mono text-[9px] leading-[1.4] tracking-[0.1em] uppercase text-ink-3">
               a jevi operation
             </span>
           </span>
-        </div>
+        </Link>
 
         {/* Primary nav */}
         <div className="flex-1 overflow-y-auto overflow-x-hidden py-[10px]">

@@ -71,7 +71,7 @@ export async function submitVoiceTranscript(
   } catch (err) {
     return shapeError(err);
   }
-  revalidatePath('/today');
+  revalidatePath('/');
   revalidatePath('/domains');
   return shapeResponse(res);
 }
@@ -89,7 +89,7 @@ export async function submitVoiceAudio(formData: FormData): Promise<VoiceResult>
   } catch (err) {
     return shapeError(err);
   }
-  revalidatePath('/today');
+  revalidatePath('/');
   revalidatePath('/domains');
   return shapeResponse(res);
 }

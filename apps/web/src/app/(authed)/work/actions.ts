@@ -36,7 +36,7 @@ export async function setFocusAction(
     /* best-effort; revalidate resyncs */
   }
   revalidatePath('/work');
-  revalidatePath('/today');
+  revalidatePath('/');
 }
 
 export async function clearFocusAction(date: string): Promise<void> {
@@ -46,5 +46,5 @@ export async function clearFocusAction(date: string): Promise<void> {
     /* best-effort */
   }
   revalidatePath('/work');
-  revalidatePath('/today');
+  revalidatePath('/');
 }
