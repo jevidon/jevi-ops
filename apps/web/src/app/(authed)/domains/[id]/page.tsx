@@ -275,7 +275,7 @@ export default async function DomainDetailPage({
             <span className="eyebrow">Open tasks · {openTasks.length}</span>
             {!isInbox && (
               <Link
-                href={`/tasks/new?domain_id=${domain.id}`}
+                href={`/tasks/new?domain_id=${domain.id}&from=/domains/${domain.id}`}
                 className="font-mono text-[10px] uppercase tracking-wider text-accent hover:text-ink transition-colors shrink-0"
               >
                 Full editor →

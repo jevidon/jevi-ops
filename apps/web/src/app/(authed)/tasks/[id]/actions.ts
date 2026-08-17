@@ -164,6 +164,10 @@ export async function createTaskFullAction(
     const first = parsed.error.errors[0];
     return { ok: false, error: first?.message ?? 'Invalid form' };
   }
+  // Return-to-origin: same-origin paths only. Stricter than sign-in's guard —
+  // a bare startsWith('/') admits protocol-relative //evil.com.
+  const rawReturn = String(formData.get('returnTo') ?? '');
+  const returnTo = rawReturn.startsWith('/') && !rawReturn.startsWith('//') ? rawReturn : null;
   let createdId: string;
   try {
     const created = await tasksApi.create(toApiPayload(parsed.data));
@@ -177,10 +181,17 @@ export async function createTaskFullAction(
   }
   revalidatePath('/today');
   revalidatePath('/tasks');
+  revalidatePath('/work');
   revalidatePath('/projects');
   revalidatePath('/content');
   if (parsed.data.content_item_id) revalidatePath(`/content/${parsed.data.content_item_id}`);
-  redirect(`/tasks/${createdId}`);
+  // The origin page must show the new task the moment we land on it.
+  if (returnTo) revalidatePath(returnTo.split('?')[0] ?? returnTo);
+  redirect(
+    returnTo
+      ? `${returnTo}${returnTo.includes('?') ? '&' : '?'}created=${createdId}`
+      : `/tasks/${createdId}`,
+  );
 }
 
 export async function deleteTaskAction(formData: FormData): Promise<void> {

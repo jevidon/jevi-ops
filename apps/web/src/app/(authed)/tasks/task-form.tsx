@@ -60,12 +60,16 @@ export function TaskForm({
   projects,
   contentItems,
   projectMilestones = {},
+  returnTo,
 }: {
   initial: InitialValues;
   domains: DomainOption[];
   projects: ProjectOption[];
   contentItems: ContentItemOption[];
   projectMilestones?: ProjectMilestones;
+  // Create mode only: origin path to land back on after a successful create
+  // (threaded from /tasks/new?from=…; the action validates it server-side).
+  returnTo?: string;
 }) {
   const isEdit = Boolean(initial.id);
   const action = isEdit ? updateTaskAction : createTaskFullAction;
@@ -95,6 +99,7 @@ export function TaskForm({
     <>
       <form action={formAction} className="flex flex-col gap-5">
         {initial.id && <input type="hidden" name="taskId" value={initial.id} />}
+        {!isEdit && returnTo && <input type="hidden" name="returnTo" value={returnTo} />}
 
         <Field label="Title (required)">
           <input

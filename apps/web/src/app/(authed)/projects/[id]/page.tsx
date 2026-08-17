@@ -154,7 +154,7 @@ export default async function ProjectDetailPage({
         state={<Pill state={state.s}>{state.label}</Pill>}
         actions={
           <>
-            <ActionButton href={`/tasks/new?project_id=${project.id}`}>＋ Task</ActionButton>
+            <ActionButton href={`/tasks/new?project_id=${project.id}&from=/projects/${project.id}`}>＋ Task</ActionButton>
             <ActionButton href="#log-work">＋ Log work</ActionButton>
             <ActionButton href="#conversations">＋ Conversation</ActionButton>
             <EditDrawer title={`Edit ${isArea ? 'area' : 'project'}`}>
