@@ -15,32 +15,18 @@ import { FocusControl, type FocusOption } from './focus-control';
 import { ProjectCard, ContentRow, FittedArt } from './cards';
 
 // The Work page (Addendum 08 + v2 redesign, Jul 2026). One computed map: a left
-// facet rail (View / Domain / Status / Show) filters domain sections, each a
-// sticky colour-chip header over project cards + content rows + direct tasks.
+// facet rail (Domain / Status / Show) filters domain sections, each a sticky
+// colour-chip header over project cards + content rows + direct tasks. (The
+// View group's needs-attention toggle was retired Aug 2026 — the Attention
+// page owns that lens.)
 //
 // Everything is server-derived — the urgency pills come straight off the
 // payload's `urgency` fields (buildWork), never re-computed here, so a domain
 // pill can't disagree with a card inside it. State here is UI-only (filters,
-// collapse). Preserved from Addendum 08: Tomorrow's Focus, the holder flip, and
-// the needs-attention semantics.
+// collapse). Preserved from Addendum 08: Tomorrow's Focus and the holder flip.
 
 const STATUS_ORDER: Urgency[] = ['over', 'due', 'ok', 'quiet'];
 type Kind = 'projects' | 'content' | 'tasks';
-
-// Addendum 08 §5 needs-attention predicates — richer than a plain over/due.
-const projectNeedsAttention = (p: WorkProjectCard) =>
-  p.flagged || p.overdue > 0 || (p.waitDays != null && p.waitDays >= 7);
-const contentNeedsAttention = (c: WorkContentRow) =>
-  c.flagged || (c.holder === 'editor' && c.days != null && c.days >= 7) || c.myMoveDue;
-// A domain "needs attention" (badge + filter share this so they can't disagree).
-// Note: waiting-aging and flagged signals don't lift urgency to over/due, so
-// checking the pill state alone would undercount — check the real predicates.
-const domainNeedsAttention = (d: WorkDomain) =>
-  d.rollup.attention > 0 ||
-  d.projects.some(projectNeedsAttention) ||
-  d.content.some(contentNeedsAttention) ||
-  d.direct.overdue > 0 ||
-  d.direct.waitingAging > 0;
 
 export function WorkView({
   payload,
@@ -55,7 +41,6 @@ export function WorkView({
   // muted spot art in section headers. Absent entries render no art.
   art?: Record<string, string>;
 }) {
-  const [attention, setAttention] = useState(false);
   const [dsel, setDsel] = useState<Set<string>>(new Set());
   const [ssel, setSsel] = useState<Set<Urgency>>(new Set());
   const [kinds, setKinds] = useState<Set<Kind>>(new Set(['projects', 'content', 'tasks']));
@@ -71,17 +56,12 @@ export function WorkView({
       return n;
     });
 
-  // Apply the active facets to a domain, returning a filtered copy or null if it
-  // drops out. Preserves the Addendum 08 needs-attention semantics for the View
-  // toggle; Status is the new four-state multi-select.
+  // Apply the active facets to a domain, returning a filtered copy or null if
+  // it drops out. Status is the four-state multi-select.
   const applyFacets = (d: WorkDomain): WorkDomain | null => {
     let projects = kinds.has('projects') ? d.projects : [];
     let content = kinds.has('content') ? d.content : [];
 
-    if (attention) {
-      projects = projects.filter(projectNeedsAttention);
-      content = content.filter(contentNeedsAttention);
-    }
     if (ssel.size) {
       projects = projects.filter((p) => ssel.has(p.urgency));
       content = content.filter((c) => ssel.has(c.urgency));
@@ -98,11 +78,6 @@ export function WorkView({
     }
 
     // Domain drops out when nothing survives AND it has no other reason to show.
-    const directHot =
-      kinds.has('tasks') && (d.direct.overdue > 0 || d.direct.waitingAging > 0);
-    if (attention && d.rollup.attention === 0 && !projects.length && !content.length && !directHot) {
-      return null;
-    }
     if (ssel.size && !ssel.has(d.urgency) && !projects.length && !content.length) {
       return null;
     }
@@ -114,7 +89,7 @@ export function WorkView({
     if (dsel.size) list = list.filter((d) => dsel.has(d.id));
     return list.map(applyFacets).filter((d): d is WorkDomain => d !== null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [payload.domains, dsel, ssel, kinds, attention, q]);
+  }, [payload.domains, dsel, ssel, kinds, q]);
 
   // Quick-add target options per domain — from the UNFILTERED payload, so a
   // Status/attention facet that hides a project card doesn't also hide it as
@@ -143,47 +118,26 @@ export function WorkView({
     return out;
   }, [payload.domains]);
 
-  const attentionCount = payload.domains.filter(domainNeedsAttention).length;
-  const activeFilters = dsel.size + ssel.size + (attention ? 1 : 0) + (3 - kinds.size) + (q.trim() ? 1 : 0);
+  const activeFilters = dsel.size + ssel.size + (3 - kinds.size) + (q.trim() ? 1 : 0);
   const resetFilters = () => {
-    setAttention(false);
     setDsel(new Set());
     setSsel(new Set());
     setKinds(new Set(['projects', 'content', 'tasks']));
     setQ('');
   };
 
-  // The celebratory reward state means "the whole board is genuinely clear" —
-  // only when Needs-attention is the ONLY active facet. A Status-, Show-, or
-  // text-emptied view falls through to the neutral "nothing matches" message.
-  const nothingFlagged =
-    attention && dsel.size === 0 && ssel.size === 0 && kinds.size === 3 && !q.trim() && visibleDomains.length === 0;
-
   return (
     <div className="lg:flex">
       {/* ─── Facet rail ─────────────────────────────────────────────── */}
       <FacetRail activeCount={activeFilters} onReset={resetFilters}>
+        {/* The Reset affordance rides on the first group now that the View
+            group is gone (Aug 2026) — it clears every facet, not just Domain. */}
         <FacetGroup
-          label="View"
+          label="Domain"
           action={
             activeFilters > 0 ? (
               <button type="button" onClick={resetFilters} className="font-mono text-[9px] uppercase tracking-[0.09em] text-ink-3 hover:text-accent transition-colors">
                 Reset
-              </button>
-            ) : undefined
-          }
-        >
-          <FacetRow on={!attention} onClick={() => setAttention(false)} name="All work" count={payload.domains.length} />
-          <FacetRow on={attention} onClick={() => setAttention(true)} name="Needs attention" count={attentionCount} />
-        </FacetGroup>
-        <FacetSep />
-
-        <FacetGroup
-          label="Domain"
-          action={
-            dsel.size ? (
-              <button type="button" onClick={() => setDsel(new Set())} className="font-mono text-[9px] uppercase tracking-[0.09em] text-ink-3 hover:text-accent transition-colors">
-                Clear
               </button>
             ) : undefined
           }
@@ -233,7 +187,6 @@ export function WorkView({
         {/* Masthead */}
         <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-4 mb-5">
           <div>
-            <div className="eyebrow mb-2">Manager&rsquo;s map · everything computed</div>
             <h1 className="font-serif text-[40px] font-medium leading-[1.02] tracking-[-0.022em] text-ink">Work</h1>
           </div>
           <div className="flex items-center gap-2 shrink-0">
@@ -263,9 +216,7 @@ export function WorkView({
         </div>
 
         {/* Domain sections */}
-        {nothingFlagged ? (
-          <WorkEmpty />
-        ) : visibleDomains.length === 0 ? (
+        {visibleDomains.length === 0 ? (
           <div className="pt-16 text-center">
             <div className="font-serif text-[25px] font-medium tracking-[-0.015em] text-ink">Nothing matches this view.</div>
             <p className="mt-1.5 font-sans text-[14px] text-ink-3">Loosen a filter on the left, or reset them all.</p>
@@ -412,14 +363,5 @@ function DomainSection({
         </div>
       )}
     </section>
-  );
-}
-
-function WorkEmpty() {
-  return (
-    <div className="pt-16 text-center">
-      <div className="font-serif text-[25px] font-medium tracking-[-0.015em] text-ink">Nothing needs attention.</div>
-      <p className="mt-1.5 font-sans text-[14px] text-ink-2">Everything is on pace. Rare — worth noticing.</p>
-    </div>
   );
 }

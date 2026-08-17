@@ -118,7 +118,10 @@ export function IconRail({
   // real character, not a nav command).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const el = e.target as HTMLElement | null;
+      // instanceof, not a cast: synthetic events dispatched on window (the
+      // Capture button replays ⌘J that way) arrive with target = window,
+      // which has no tagName/closest.
+      const el = e.target instanceof HTMLElement ? e.target : null;
       const editable =
         !!el &&
         (/input|textarea|select/i.test(el.tagName) ||
