@@ -17,7 +17,7 @@ import { CrumbTrail, useCrumbTrail } from './crumbs/crumbs';
 // to a capitalised segment with no subtitle.
 const CRUMBS: Record<string, { label: string; sub?: string }> = {
   today: { label: 'Today', sub: 'Briefing' },
-  work: { label: 'Work', sub: "Manager's map" },
+  work: { label: 'Work' },
   tasks: { label: 'Tasks', sub: 'Everything open' },
   content: { label: 'Content', sub: 'Pipeline' },
   people: { label: 'People', sub: 'Relationships' },
