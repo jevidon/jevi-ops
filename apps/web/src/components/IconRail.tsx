@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { signOutAction } from '@/app/sign-in/actions';
@@ -10,7 +10,9 @@ import { Icon, type IconName } from './Icon';
 // 220px DesktopRail. Collapsed it is 64px of icons; it expands to 236px on
 // hover as an OVERLAY (the 64px slot stays, so content doesn't shift), and
 // pinning (the pin button or `[`) widens the SLOT so the rail pushes layout
-// instead of covering it. Pin persists in localStorage.
+// instead of covering it. Pin persists in localStorage. On touch, icon taps
+// navigate directly; tapping empty rail space expands the overlay, which
+// closes on navigation or an outside tap.
 //
 // Carried forward from DesktopRail (do not regress): health/routines flag
 // gating, the Ask/chat link, the account + sign-out footer, the Capture
@@ -65,12 +67,38 @@ export function IconRail({
   routinesEnabled?: boolean;
 }) {
   const pathname = usePathname();
+  const navRef = useRef<HTMLElement>(null);
   const [pinned, setPinned] = useState(false);
   const [hover, setHover] = useState(false);
   // Keyboard focus expands the rail too, so tabbing through nav shows labels
   // (and the account/sign-out row leaves its collapsed, non-tabbable state).
   const [focused, setFocused] = useState(false);
-  const open = pinned || hover || focused;
+  // Touch is its own channel: hover is mouse-only (an emulated mouseenter on
+  // tap would mutate the rail and make iOS swallow the click, forcing a second
+  // tap to actually navigate), so on touch an icon tap navigates directly and
+  // a tap on empty rail space is what expands it.
+  const [touchOpen, setTouchOpen] = useState(false);
+  const open = pinned || hover || focused || touchOpen;
+
+  // Arriving at a new page drops the touch-expand and the clicked link's
+  // focus — either would hold the unpinned rail open indefinitely (touch has
+  // no mouseleave; a focused link never blurs on its own). Hover is left
+  // alone: while the cursor sits on the rail it stays open, and mousing off
+  // collapses it as usual.
+  useEffect(() => {
+    setTouchOpen(false);
+    setFocused(false);
+  }, [pathname]);
+
+  // A tap anywhere outside the touch-expanded rail dismisses it.
+  useEffect(() => {
+    if (!touchOpen) return;
+    const onDown = (e: PointerEvent) => {
+      if (!navRef.current?.contains(e.target as Node)) setTouchOpen(false);
+    };
+    document.addEventListener('pointerdown', onDown);
+    return () => document.removeEventListener('pointerdown', onDown);
+  }, [touchOpen]);
 
   // Restore pin from localStorage on mount (avoids an SSR/first-paint mismatch
   // by starting unpinned and correcting client-side).
@@ -118,9 +146,20 @@ export function IconRail({
       style={{ width: pinned ? RAIL_OPEN : RAIL }}
     >
       <nav
+        ref={navRef}
         aria-label="Primary"
-        onMouseEnter={() => setHover(true)}
-        onMouseLeave={() => setHover(false)}
+        onPointerEnter={(e) => {
+          if (e.pointerType !== 'touch') setHover(true);
+        }}
+        onPointerLeave={(e) => {
+          if (e.pointerType !== 'touch') setHover(false);
+        }}
+        onPointerUp={(e) => {
+          // Touch, empty space only (icon taps navigate on their own): toggle
+          // the expanded state. Pinned rail is already held open.
+          if (e.pointerType !== 'touch' || pinned) return;
+          if (!(e.target as HTMLElement).closest('a, button')) setTouchOpen((v) => !v);
+        }}
         onFocusCapture={() => setFocused(true)}
         onBlur={(e) => {
           if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFocused(false);
