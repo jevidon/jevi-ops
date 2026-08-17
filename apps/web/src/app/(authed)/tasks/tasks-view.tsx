@@ -259,7 +259,7 @@ export function TasksView({
               Maintenance ↻
             </Link>
             <Link
-              href="/tasks/new"
+              href="/tasks/new?from=/tasks"
               className="inline-flex items-center gap-1.5 h-[34px] px-3 rounded bg-ink border border-ink font-mono text-[10px] uppercase tracking-[0.09em] text-bg hover:bg-ink-2 transition-colors"
             >
               <Icon name="capture" size={14} /> Add task

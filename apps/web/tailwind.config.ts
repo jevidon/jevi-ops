@@ -37,6 +37,17 @@ const config: Config = {
       screens: {
         lg: '800px',
       },
+      // Toast entrance — used with motion-safe: so reduced-motion users get
+      // an instant appearance instead of the slide.
+      keyframes: {
+        'toast-in': {
+          from: { opacity: '0', transform: 'translateY(-6px)' },
+          to: { opacity: '1', transform: 'translateY(0)' },
+        },
+      },
+      animation: {
+        'toast-in': 'toast-in 160ms ease-out',
+      },
       colors: {
         // ─── Surfaces (re-warmed to linen, Addendum 10 §4) ────────────
         bg: '#F6F2EA',           // canvas — warm linen (was #FFFFFF)

@@ -164,6 +164,10 @@ export async function createTaskFullAction(
     const first = parsed.error.errors[0];
     return { ok: false, error: first?.message ?? 'Invalid form' };
   }
+  // Return-to-origin: same-origin paths only. Stricter than sign-in's guard —
+  // a bare startsWith('/') admits protocol-relative //evil.com.
+  const rawReturn = String(formData.get('returnTo') ?? '');
+  const returnTo = rawReturn.startsWith('/') && !rawReturn.startsWith('//') ? rawReturn : null;
   let createdId: string;
   try {
     const created = await tasksApi.create(toApiPayload(parsed.data));
@@ -177,10 +181,17 @@ export async function createTaskFullAction(
   }
   revalidatePath('/today');
   revalidatePath('/tasks');
+  revalidatePath('/work');
   revalidatePath('/projects');
   revalidatePath('/content');
   if (parsed.data.content_item_id) revalidatePath(`/content/${parsed.data.content_item_id}`);
-  redirect(`/tasks/${createdId}`);
+  // The origin page must show the new task the moment we land on it.
+  if (returnTo) revalidatePath(returnTo.split('?')[0] ?? returnTo);
+  redirect(
+    returnTo
+      ? `${returnTo}${returnTo.includes('?') ? '&' : '?'}created=${createdId}`
+      : `/tasks/${createdId}`,
+  );
 }
 
 export async function deleteTaskAction(formData: FormData): Promise<void> {
@@ -213,16 +224,22 @@ const SubtaskFormSchema = z.object({
   domainId: z.string().uuid().optional(),
 });
 
-export async function createSubtaskAction(formData: FormData): Promise<void> {
+export type SubtaskResult = { ok: true; id: string } | { ok: false; error: string };
+
+export async function createSubtaskAction(
+  _prev: SubtaskResult | null,
+  formData: FormData,
+): Promise<SubtaskResult> {
   const parsed = SubtaskFormSchema.safeParse({
     parentId: formData.get('parentId'),
     title: formData.get('title'),
     projectId: formData.get('projectId') || undefined,
     domainId: formData.get('domainId') || undefined,
   });
-  if (!parsed.success) return;
+  if (!parsed.success) return { ok: false, error: 'Title is required.' };
+  let createdId: string;
   try {
-    await tasksApi.create({
+    const created = await tasksApi.create({
       title: parsed.data.title,
       parent_task_id: parsed.data.parentId,
       project_id: parsed.data.projectId ?? null,
@@ -230,11 +247,17 @@ export async function createSubtaskAction(formData: FormData): Promise<void> {
       priority: 4,
       source: 'manual',
     });
-  } catch {
-    /* best-effort; the page re-renders and reflects reality */
+    createdId = created.id;
+  } catch (err) {
+    if (err instanceof ApiError) {
+      const body = err.body as { error?: string } | null;
+      return { ok: false, error: body?.error ?? `API ${err.status}` };
+    }
+    return { ok: false, error: (err as Error).message };
   }
   revalidatePath(`/tasks/${parsed.data.parentId}`);
   revalidatePath('/tasks');
   revalidatePath('/today');
   revalidatePath('/work');
+  return { ok: true, id: createdId };
 }

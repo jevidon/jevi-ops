@@ -3,6 +3,7 @@
 import { useActionState, useEffect, useRef, useState } from 'react';
 import { useFormStatus } from 'react-dom';
 import { quickAddTaskAction, type QuickAddResult } from './quick-add-task-action';
+import { useToast } from './toast/ToastProvider';
 
 // Quick task add (Wave 2 #2) — the one shared "type a title and continue"
 // control, lifted from the domain detail page's TaskQuickAdd. Three mounts:
@@ -41,13 +42,17 @@ export function QuickAddTask({
   const formRef = useRef<HTMLFormElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const [target, setTarget] = useState('');
+  const toast = useToast();
 
   useEffect(() => {
     if (state?.ok) {
       formRef.current?.reset();
       inputRef.current?.focus();
+      // The row resets for the next capture; the toast carries the handle to
+      // the task that was just created.
+      toast({ message: 'Task added.', action: { label: 'View task', href: `/tasks/${state.id}` } });
     }
-  }, [state]);
+  }, [state, toast]);
 
   if (!open) {
     return (

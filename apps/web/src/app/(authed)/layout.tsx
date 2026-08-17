@@ -1,8 +1,11 @@
 import { BottomTabBar } from '@/components/BottomTabBar';
 import { IconRail } from '@/components/IconRail';
 import { Topbar } from '@/components/Topbar';
+import { Suspense } from 'react';
 import { CrumbsProvider } from '@/components/crumbs/crumbs';
 import { MobileCrumbs } from '@/components/crumbs/MobileCrumbs';
+import { ToastProvider } from '@/components/toast/ToastProvider';
+import { CreatedTaskToast } from '@/components/toast/CreatedTaskToast';
 import { MicFAB } from '@/components/MicFAB';
 import { TextCaptureFAB } from '@/components/TextCaptureFAB';
 import { NotificationBell } from '@/components/NotificationBell';
@@ -54,6 +57,7 @@ export default async function AuthedLayout({ children }: { children: React.React
   return (
     <TimezoneProvider timezone={timezone}>
       <CrumbsProvider>
+      <ToastProvider>
       <div className="flex-1 flex">
         <IconRail
           email={user.email ?? undefined}
@@ -101,8 +105,15 @@ export default async function AuthedLayout({ children }: { children: React.React
           />
           <SearchHotkey />
           <TextCapturePalette />
+          {/* Fires the "Task created" toast after a return-to-origin
+              redirect (?created=<id>); Suspense keeps useSearchParams from
+              deopting the authed tree to client rendering. */}
+          <Suspense>
+            <CreatedTaskToast />
+          </Suspense>
         </div>
       </div>
+      </ToastProvider>
       </CrumbsProvider>
     </TimezoneProvider>
   );

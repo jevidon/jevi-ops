@@ -11,9 +11,9 @@ import { TaskForm } from '../task-form';
 export default async function NewTaskPage({
   searchParams,
 }: {
-  searchParams: Promise<{ project_id?: string; domain_id?: string; content_item_id?: string }>;
+  searchParams: Promise<{ project_id?: string; domain_id?: string; content_item_id?: string; from?: string }>;
 }) {
-  const { project_id: preProject, domain_id: preDomain, content_item_id: preContent } = await searchParams;
+  const { project_id: preProject, domain_id: preDomain, content_item_id: preContent, from } = await searchParams;
 
   let projects: { id: string; name: string; domain_id: string | null }[] = [];
   let domains: { id: string; name: string; is_system?: boolean }[] = [];
@@ -102,6 +102,7 @@ export default async function NewTaskPage({
           projects={projects}
           contentItems={contentItems}
           projectMilestones={projectMilestones}
+          returnTo={from}
         />
       </div>
     </div>

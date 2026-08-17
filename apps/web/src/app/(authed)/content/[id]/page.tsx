@@ -138,7 +138,7 @@ export default async function ContentDetailPage({ params }: { params: Promise<{ 
         actions={
           <>
             {primary}
-            <ActionButton href={`/tasks/new?content_item_id=${item.id}`}>＋ Task</ActionButton>
+            <ActionButton href={`/tasks/new?content_item_id=${item.id}&from=/content/${item.id}`}>＋ Task</ActionButton>
             <EditDrawer title="Edit content">
               <ContentForm
                 domains={domains}
@@ -183,7 +183,7 @@ export default async function ContentDetailPage({ params }: { params: Promise<{ 
             <DetailSection
               label="Linked tasks"
               count={linkedTasks.length > 0 ? `${openTasks} open` : undefined}
-              action={<Link href={`/tasks/new?content_item_id=${item.id}`} className="font-mono text-[10px] uppercase tracking-wider text-ink-3 hover:text-accent transition-colors">＋ Add task</Link>}
+              action={<Link href={`/tasks/new?content_item_id=${item.id}&from=/content/${item.id}`} className="font-mono text-[10px] uppercase tracking-wider text-ink-3 hover:text-accent transition-colors">＋ Add task</Link>}
             >
               {linkedTasks.length === 0 ? (
                 <p className="font-sans text-[13px] text-ink-3 italic py-1">No tasks linked to this content.</p>

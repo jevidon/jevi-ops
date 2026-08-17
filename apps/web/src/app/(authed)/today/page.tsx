@@ -531,7 +531,7 @@ function CaptureChips() {
     { label: 'Journal', href: '/library/journal/new' },
     { label: 'Quote', href: '/library/quotes/new' },
     { label: 'Note', href: '/library/notes/new' },
-    { label: 'Task', href: '/tasks/new' },
+    { label: 'Task', href: '/tasks/new?from=/today' },
   ];
   return (
     <section className="px-5 lg:px-0 mt-9">

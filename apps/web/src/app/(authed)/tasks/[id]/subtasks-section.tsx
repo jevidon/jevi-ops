@@ -1,6 +1,6 @@
 import type { Task } from '@jevi-ops/shared';
 import { TaskItem } from '@/components/TaskItem';
-import { createSubtaskAction } from './actions';
+import { SubtaskQuickAdd } from './subtask-quick-add';
 
 // Subtasks ledger on a task's detail page. Open children render with
 // live checkboxes (same TaskItem as everywhere else), the quick-add row
@@ -35,24 +35,11 @@ export function SubtasksSection({ parent, subtasks }: { parent: Task; subtasks: 
         )}
       </div>
 
-      <form action={createSubtaskAction} className="flex items-center gap-3 py-2">
-        <span className="h-5 w-5 border border-dashed border-line-strong shrink-0" aria-hidden />
-        <input type="hidden" name="parentId" value={parent.id} />
-        {parent.project_id ? (
-          <input type="hidden" name="projectId" value={parent.project_id} />
-        ) : (
-          <input type="hidden" name="domainId" value={parent.domain_id} />
-        )}
-        <input
-          type="text"
-          name="title"
-          required
-          placeholder="Add subtask…"
-          autoComplete="off"
-          aria-label="Add subtask"
-          className="flex-1 min-w-0 bg-transparent border-b border-line focus:border-ink-2 focus:outline-none py-1 font-sans text-[14px] text-ink placeholder:text-ink-4"
-        />
-      </form>
+      <SubtaskQuickAdd
+        parentId={parent.id}
+        projectId={parent.project_id}
+        domainId={parent.domain_id}
+      />
 
       {done.length > 0 && (
         <details className="group mt-2">
