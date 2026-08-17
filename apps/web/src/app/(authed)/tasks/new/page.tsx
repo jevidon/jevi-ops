@@ -1,5 +1,5 @@
-import Link from 'next/link';
 import { ScreenHeader } from '@/components/ScreenHeader';
+import { SetCrumbs } from '@/components/crumbs/crumbs';
 import { projectsApi, contentApi, domainsApi, ApiError } from '@/lib/api';
 import { INBOX_DOMAIN_ID } from '@jevi-ops/shared';
 import { TaskForm } from '../task-form';
@@ -76,11 +76,7 @@ export default async function NewTaskPage({
 
   return (
     <div>
-      <div className="px-5 lg:px-0 pt-4 pb-1 font-mono text-[10px] uppercase tracking-wider text-ink-3">
-        <Link href="/tasks" className="hover:text-ink-2 transition-colors">
-          ← Tasks
-        </Link>
-      </div>
+      <SetCrumbs trail={[{ label: 'Tasks', href: '/tasks' }, { label: 'New task' }]} />
 
       <ScreenHeader eyebrow="Capture" title="New task" meta="Full editor" />
       <div className="hairline mb-4" />

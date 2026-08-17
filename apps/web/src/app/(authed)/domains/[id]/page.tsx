@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { ScreenHeader } from '@/components/ScreenHeader';
+import { SetCrumbs } from '@/components/crumbs/crumbs';
 import { domainsApi, tasksApi, ApiError } from '@/lib/api';
 import type { Domain, Task } from '@jevi-ops/shared';
 import { EditDomainForm } from './edit-domain-form';
@@ -173,11 +174,11 @@ export default async function DomainDetailPage({
 
   return (
     <div>
-      <div className="px-5 lg:px-0 pt-4 pb-1 font-mono text-[10px] uppercase tracking-wider text-ink-3">
-        <Link href="/work" className="hover:text-ink-2 transition-colors">
-          ← Work
-        </Link>
-      </div>
+      <SetCrumbs
+        trail={isInbox
+          ? [{ label: 'Inbox' }]
+          : [{ label: 'Work', href: '/work' }, { label: domain.name }]}
+      />
 
       <ScreenHeader
         eyebrow={isInbox ? 'Inbox' : (domain.active ? 'Domain' : 'Domain · inactive')}
