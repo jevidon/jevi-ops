@@ -16,6 +16,7 @@ const TASK_EMBEDS = {
   project: { columns: { id: true, name: true, color: true } },
   content_item: { columns: { id: true, title: true, type: true, status: true } },
   domain: { columns: { id: true, name: true, is_system: true } },
+  parent_task: { columns: { id: true, title: true } },
 } as const;
 
 // ─── Domain routing helper (Addendum 03) ───────────────────────────────

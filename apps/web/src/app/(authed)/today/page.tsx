@@ -419,7 +419,7 @@ export default async function TodayPage() {
                     <TaskItem
                       key={t.id}
                       task={t}
-                      parentCrumb={t.parent_task_id ? (allTasks.find((p) => p.id === t.parent_task_id)?.title ?? null) : null}
+                      parentCrumb={t.parent_task?.title ?? null}
                     />
                   ))
                 )}

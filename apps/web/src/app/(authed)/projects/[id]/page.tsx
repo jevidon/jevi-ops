@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
+import { SetCrumbs } from '@/components/crumbs/crumbs';
 import { TaskItem } from '@/components/TaskItem';
 import { Pill } from '@/components/Pill';
 import {
@@ -131,11 +132,19 @@ export default async function ProjectDetailPage({
 
   return (
     <div>
+      {/* Ancestors only — the header band below names the project itself. */}
+      <SetCrumbs
+        trail={project.domain
+          ? [{ label: project.domain.name, href: `/domains/${project.domain.id}` }]
+          : []}
+      />
       <DetailHeader
         crumb={
           <>
+            {/* Type label only — the domain already rides in the header
+                trail (Topbar / MobileCrumbs), so repeating it here is noise.
+                "Project"/"Area" stays: it names what kind of artifact this is. */}
             <Link href="/work" className="hover:text-ink-2 transition-colors">{isArea ? 'Area' : 'Project'}</Link>
-            {project.domain?.name && (<><CrumbDot /><span>{project.domain.name}</span></>)}
             {isRetainer && (<><CrumbDot /><span>Retainer</span></>)}
             {project.status !== 'active' && (<><CrumbDot /><span>{STATUS_LABELS[project.status]}</span></>)}
           </>

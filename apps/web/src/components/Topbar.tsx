@@ -2,6 +2,7 @@
 
 import { useRouter, usePathname } from 'next/navigation';
 import { Icon } from './Icon';
+import { CrumbTrail, useCrumbTrail } from './crumbs/crumbs';
 
 // v2 topbar (design handoff, Jul 2026). 60px, desktop only. Left: a breadcrumb
 // (Tab / subtitle) derived from the route. Right: a search affordance and the
@@ -23,6 +24,11 @@ const CRUMBS: Record<string, { label: string; sub?: string }> = {
   companies: { label: 'Companies', sub: 'CRM' },
   library: { label: 'Library', sub: 'Archive' },
   routines: { label: 'Routines', sub: 'Daily habits' },
+  // Detail routes whose indexes redirect to /work — pages under these register
+  // live trails when they have ancestors; this fallback covers the rest
+  // (domain pages, /projects/new).
+  domains: { label: 'Work', sub: 'Domain' },
+  projects: { label: 'Work', sub: 'Project' },
   attention: { label: 'Attention' },
   notifications: { label: 'Notifications' },
   settings: { label: 'Settings' },
@@ -43,18 +49,27 @@ function dispatchOpenCapture() {
 export function Topbar() {
   const pathname = usePathname();
   const router = useRouter();
+  // Live trail registered by the current page (via <SetCrumbs>), if any.
+  // Pages that don't register fall back to the static first-segment map.
+  const trail = useCrumbTrail();
   const seg = pathname.split('/').filter(Boolean)[0] ?? 'today';
   const crumb = CRUMBS[seg] ?? { label: seg.charAt(0).toUpperCase() + seg.slice(1) };
 
   return (
     <header className="hidden lg:flex sticky top-0 z-30 items-center gap-[18px] h-[60px] shrink-0 px-[26px] border-b border-line bg-bg">
-      <div className="flex items-baseline gap-[9px] font-mono text-[10px] uppercase tracking-[0.1em]">
-        <span className="text-ink">{crumb.label}</span>
-        {crumb.sub && (
-          <>
-            <span className="text-ink-3">/</span>
-            <span className="text-ink-3">{crumb.sub}</span>
-          </>
+      <div className="min-w-0 overflow-hidden">
+        {trail ? (
+          <CrumbTrail trail={trail} />
+        ) : (
+          <div className="flex items-baseline gap-[9px] font-mono text-[10px] uppercase tracking-[0.1em]">
+            <span className="text-ink">{crumb.label}</span>
+            {crumb.sub && (
+              <>
+                <span className="text-ink-3">/</span>
+                <span className="text-ink-3">{crumb.sub}</span>
+              </>
+            )}
+          </div>
         )}
       </div>
 

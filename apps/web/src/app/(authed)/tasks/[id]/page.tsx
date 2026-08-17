@@ -1,6 +1,7 @@
-import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { ScreenHeader } from '@/components/ScreenHeader';
+import { SetCrumbs } from '@/components/crumbs/crumbs';
+import { buildTaskTrail } from '@/components/crumbs/task-trail';
 import { tasksApi, projectsApi, contentApi, domainsApi, ApiError } from '@/lib/api';
 import { getAppTimezone } from '@/lib/app-settings';
 import { todayIsoDate } from '@/lib/today';
@@ -120,11 +121,9 @@ export default async function TaskDetailPage({
 
   return (
     <div>
-      <div className="px-5 lg:px-0 pt-4 pb-1 font-mono text-[10px] uppercase tracking-wider text-ink-3">
-        <Link href="/tasks" className="hover:text-ink-2 transition-colors">
-          ← Tasks
-        </Link>
-      </div>
+      {/* Ancestor context lives in the header trail (Topbar / MobileCrumbs)
+          now — no in-page back link. */}
+      <SetCrumbs trail={buildTaskTrail(task)} />
 
       <ScreenHeader
         eyebrow={meta}

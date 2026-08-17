@@ -173,12 +173,6 @@ export default async function DomainDetailPage({
 
   return (
     <div>
-      <div className="px-5 lg:px-0 pt-4 pb-1 font-mono text-[10px] uppercase tracking-wider text-ink-3">
-        <Link href="/work" className="hover:text-ink-2 transition-colors">
-          ← Work
-        </Link>
-      </div>
-
       <ScreenHeader
         eyebrow={isInbox ? 'Inbox' : (domain.active ? 'Domain' : 'Domain · inactive')}
         title={domain.name}

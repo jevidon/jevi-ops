@@ -1,4 +1,3 @@
-import Link from 'next/link';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { domainsApi, ApiError } from '@/lib/api';
 import { ProjectForm } from '../project-form';
@@ -24,12 +23,9 @@ export default async function NewProjectPage({
 
   return (
     <div>
-      <div className="px-5 lg:px-0 pt-4 pb-1 font-mono text-[10px] uppercase tracking-wider text-ink-3">
-        <Link href="/projects" className="hover:text-ink-2 transition-colors">
-          ← Projects
-        </Link>
-      </div>
-
+      {/* No trail — /work is the only ancestor and Work never rides in
+          trails; the Topbar fallback labels this page. (The old ← Projects
+          link pointed at a route that redirects to /work.) */}
       <ScreenHeader
         eyebrow="Capture"
         title={initialKind === 'area' ? 'New area' : 'New project'}

@@ -87,13 +87,13 @@ export function TasksView({
   // page. Deadline/state groups (Overdue/Today/Upcoming/Waiting) keep
   // dated or waiting subtasks as their own rows — a deadline is a
   // deadline — wearing a "↳ parent" crumb for context.
-  const { childrenByParent, titleById } = useMemo(() => {
+  const childrenByParent = useMemo(() => {
     const kids = new Map<string, Task[]>();
     for (const t of tasks) {
       if (!t.parent_task_id) continue;
       kids.set(t.parent_task_id, [...(kids.get(t.parent_task_id) ?? []), t]);
     }
-    return { childrenByParent: kids, titleById: new Map(tasks.map((t) => [t.id, t.title])) };
+    return kids;
   }, [tasks]);
   const isSubtask = (t: Task) => t.parent_task_id != null;
   const badgeFor = (t: Task): string | null => {
@@ -102,8 +102,7 @@ export function TasksView({
     const done = kids.filter((k) => k.status === 'done').length;
     return `▸ ${done} / ${kids.length}`;
   };
-  const crumbFor = (t: Task): string | null =>
-    t.parent_task_id ? (titleById.get(t.parent_task_id) ?? null) : null;
+  const crumbFor = (t: Task): string | null => t.parent_task?.title ?? null;
   // Completed TODAY only (app tz) — the API returns all done tasks, so without
   // this the "Completed today" section would list every done task in history.
   const completed = useMemo(
