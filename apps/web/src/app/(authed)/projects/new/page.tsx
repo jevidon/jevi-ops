@@ -1,5 +1,4 @@
 import { ScreenHeader } from '@/components/ScreenHeader';
-import { SetCrumbs } from '@/components/crumbs/crumbs';
 import { domainsApi, ApiError } from '@/lib/api';
 import { ProjectForm } from '../project-form';
 
@@ -24,14 +23,9 @@ export default async function NewProjectPage({
 
   return (
     <div>
-      {/* The old ← Projects link pointed at a route that redirects to /work. */}
-      <SetCrumbs
-        trail={[
-          { label: 'Work', href: '/work' },
-          { label: initialKind === 'area' ? 'New area' : 'New project' },
-        ]}
-      />
-
+      {/* No trail — /work is the only ancestor and Work never rides in
+          trails; the Topbar fallback labels this page. (The old ← Projects
+          link pointed at a route that redirects to /work.) */}
       <ScreenHeader
         eyebrow="Capture"
         title={initialKind === 'area' ? 'New area' : 'New project'}

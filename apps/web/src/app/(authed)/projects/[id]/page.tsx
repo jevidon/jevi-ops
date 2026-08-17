@@ -132,14 +132,11 @@ export default async function ProjectDetailPage({
 
   return (
     <div>
+      {/* Ancestors only — the header band below names the project itself. */}
       <SetCrumbs
-        trail={[
-          { label: 'Work', href: '/work' },
-          ...(project.domain
-            ? [{ label: project.domain.name, href: `/domains/${project.domain.id}` }]
-            : []),
-          { label: project.name },
-        ]}
+        trail={project.domain
+          ? [{ label: project.domain.name, href: `/domains/${project.domain.id}` }]
+          : []}
       />
       <DetailHeader
         crumb={

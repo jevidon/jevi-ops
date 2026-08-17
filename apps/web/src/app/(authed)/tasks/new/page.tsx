@@ -76,7 +76,7 @@ export default async function NewTaskPage({
 
   return (
     <div>
-      <SetCrumbs trail={[{ label: 'Tasks', href: '/tasks' }, { label: 'New task' }]} />
+      <SetCrumbs trail={[{ label: 'Tasks', href: '/tasks' }]} />
 
       <ScreenHeader eyebrow="Capture" title="New task" meta="Full editor" />
       <div className="hairline mb-4" />

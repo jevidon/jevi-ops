@@ -24,6 +24,11 @@ const CRUMBS: Record<string, { label: string; sub?: string }> = {
   companies: { label: 'Companies', sub: 'CRM' },
   library: { label: 'Library', sub: 'Archive' },
   routines: { label: 'Routines', sub: 'Daily habits' },
+  // Detail routes whose indexes redirect to /work — pages under these register
+  // live trails when they have ancestors; this fallback covers the rest
+  // (domain pages, /projects/new).
+  domains: { label: 'Work', sub: 'Domain' },
+  projects: { label: 'Work', sub: 'Project' },
   attention: { label: 'Attention' },
   notifications: { label: 'Notifications' },
   settings: { label: 'Settings' },

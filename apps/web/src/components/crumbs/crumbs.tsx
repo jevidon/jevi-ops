@@ -69,40 +69,36 @@ export function SetCrumbs({ trail }: { trail: Crumb[] }) {
   return null;
 }
 
-/** The registered trail, or null if none/stale — consumers fall back on null. */
+/** The registered trail, or null if none/stale/empty — consumers fall back on null. */
 export function useCrumbTrail(): Crumb[] | null {
   const ctx = useContext(CrumbsContext);
   const pathname = usePathname();
   if (!ctx?.reg || ctx.reg.pathname !== pathname) return null;
+  if (ctx.reg.trail.length === 0) return null;
   return ctx.reg.trail;
 }
 
-// Shared renderer: the Topbar's mono-uppercase `/` dialect. Ancestors link,
-// the final segment doesn't. Each label truncates so one long task title
-// can't eat the whole bar.
+// Shared renderer: the Topbar's mono-uppercase `/` dialect. Trails hold only
+// ancestors (never the current item), so every crumb with an href is a link.
+// Each label truncates so one long task title can't eat the whole bar.
 export function CrumbTrail({ trail }: { trail: Crumb[] }) {
   return (
     <div className="flex items-baseline gap-[9px] font-mono text-[10px] uppercase tracking-[0.1em]">
-      {trail.map((c, i) => {
-        const last = i === trail.length - 1;
-        return (
-          <Fragment key={`${c.label}-${i}`}>
-            {i > 0 && <span className="shrink-0 text-ink-3">/</span>}
-            {c.href && !last ? (
-              <Link
-                href={c.href}
-                className="shrink-0 truncate max-w-[220px] text-ink-3 hover:text-ink-2 transition-colors"
-              >
-                {c.label}
-              </Link>
-            ) : (
-              <span className={`shrink-0 truncate max-w-[220px] ${last ? 'text-ink' : 'text-ink-3'}`}>
-                {c.label}
-              </span>
-            )}
-          </Fragment>
-        );
-      })}
+      {trail.map((c, i) => (
+        <Fragment key={`${c.label}-${i}`}>
+          {i > 0 && <span className="shrink-0 text-ink-3">/</span>}
+          {c.href ? (
+            <Link
+              href={c.href}
+              className="shrink-0 truncate max-w-[220px] text-ink-2 hover:text-ink transition-colors"
+            >
+              {c.label}
+            </Link>
+          ) : (
+            <span className="shrink-0 truncate max-w-[220px] text-ink-3">{c.label}</span>
+          )}
+        </Fragment>
+      ))}
     </div>
   );
 }
