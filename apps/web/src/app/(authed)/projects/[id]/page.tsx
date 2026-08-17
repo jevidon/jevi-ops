@@ -141,15 +141,10 @@ export default async function ProjectDetailPage({
       <DetailHeader
         crumb={
           <>
+            {/* Type label only — the domain already rides in the header
+                trail (Topbar / MobileCrumbs), so repeating it here is noise.
+                "Project"/"Area" stays: it names what kind of artifact this is. */}
             <Link href="/work" className="hover:text-ink-2 transition-colors">{isArea ? 'Area' : 'Project'}</Link>
-            {project.domain?.name && (
-              <>
-                <CrumbDot />
-                <Link href={`/domains/${project.domain.id}`} className="hover:text-ink-2 transition-colors">
-                  {project.domain.name}
-                </Link>
-              </>
-            )}
             {isRetainer && (<><CrumbDot /><span>Retainer</span></>)}
             {project.status !== 'active' && (<><CrumbDot /><span>{STATUS_LABELS[project.status]}</span></>)}
           </>
