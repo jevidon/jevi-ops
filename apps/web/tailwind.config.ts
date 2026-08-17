@@ -41,7 +41,7 @@ const config: Config = {
       // an instant appearance instead of the slide.
       keyframes: {
         'toast-in': {
-          from: { opacity: '0', transform: 'translateY(6px)' },
+          from: { opacity: '0', transform: 'translateY(-6px)' },
           to: { opacity: '1', transform: 'translateY(0)' },
         },
       },

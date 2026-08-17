@@ -18,9 +18,8 @@ import Link from 'next/link';
 // for creations whose result lives somewhere else (a task you can jump to),
 // inline text stays right for edits to the form you're looking at.
 //
-// Contract mirrors the SaveResult convention: successes auto-dismiss (5s here,
-// longer than the inline 2.5s because there's an action to click); errors
-// persist until dismissed.
+// Contract mirrors the SaveResult convention: successes auto-dismiss (3s);
+// errors persist until dismissed.
 
 export interface ToastInput {
   message: string;
@@ -40,7 +39,7 @@ export function useToast() {
   return ctx.toast;
 }
 
-const SUCCESS_DISMISS_MS = 5000;
+const SUCCESS_DISMISS_MS = 3000;
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<ToastEntry[]>([]);
@@ -65,11 +64,11 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       {children}
       {mounted &&
         createPortal(
-          // z-50: above the BottomTabBar (z-40); bottom offset clears the tab
-          // bar + iOS home indicator on mobile, corner-anchors on desktop.
+          // Upper right (user preference). z-50: above the sticky Topbar
+          // (z-30) and BottomTabBar (z-40). Mobile clears the iOS status
+          // bar via safe-area; desktop sits just below the 60px Topbar.
           <div
-            className="fixed inset-x-0 z-50 flex flex-col items-center gap-2 px-5 pointer-events-none lg:inset-x-auto lg:right-6 lg:items-end"
-            style={{ bottom: 'calc(60px + env(safe-area-inset-bottom) + 12px)' }}
+            className="fixed right-5 z-50 flex flex-col items-end gap-2 pointer-events-none top-[calc(env(safe-area-inset-top)+12px)] lg:right-6 lg:top-[72px]"
             aria-live="polite"
           >
             {toasts.map((t) => (
