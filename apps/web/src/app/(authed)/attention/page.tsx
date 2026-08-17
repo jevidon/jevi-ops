@@ -48,7 +48,7 @@ export default async function AttentionPage({
   return (
     <div>
       <div className="px-5 lg:px-0 pt-4 pb-1 font-mono text-[10px] uppercase tracking-wider text-ink-3">
-        <Link href="/today" className="hover:text-ink-2 transition-colors">← Today</Link>
+        <Link href="/" className="hover:text-ink-2 transition-colors">← Home</Link>
       </div>
       <ScreenHeader
         eyebrow="Attention"

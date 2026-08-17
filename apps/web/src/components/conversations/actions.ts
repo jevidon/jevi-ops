@@ -24,7 +24,7 @@ function revalidateScopes(fromPath: string | null) {
   if (fromPath) revalidatePath(fromPath);
   revalidatePath('/companies');
   revalidatePath('/people');
-  revalidatePath('/today');
+  revalidatePath('/');
   revalidatePath('/attention');
 }
 

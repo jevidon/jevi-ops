@@ -101,7 +101,7 @@ export async function createProjectAction(
     return { ok: false, error: (err as Error).message };
   }
   revalidatePath('/projects');
-  revalidatePath('/today');
+  revalidatePath('/');
   redirect(`/projects/${created.id}`);
 }
 
@@ -142,7 +142,7 @@ export async function updateProjectAction(
   }
   revalidatePath(`/projects/${id}`);
   revalidatePath('/projects');
-  revalidatePath('/today');
+  revalidatePath('/');
   revalidatePath('/tasks');
   return { ok: true };
 }
@@ -156,7 +156,7 @@ export async function deleteProjectAction(formData: FormData): Promise<void> {
     /* best-effort */
   }
   revalidatePath('/projects');
-  revalidatePath('/today');
+  revalidatePath('/');
   revalidatePath('/tasks');
   redirect('/projects');
 }

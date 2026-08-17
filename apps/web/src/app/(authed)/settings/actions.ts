@@ -15,7 +15,7 @@ export interface SyncResult {
 export async function syncCalendarAction(): Promise<SyncResult> {
   try {
     const res = await calendarApi.pull();
-    revalidatePath('/today');
+    revalidatePath('/');
     revalidatePath('/calendar');
     revalidatePath('/settings');
     const parts = [

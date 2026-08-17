@@ -40,7 +40,7 @@ export async function quickAddTaskAction(
 
   // Every surface that rolls up open-task counts reads from tasks.
   revalidatePath('/work');
-  revalidatePath('/today');
+  revalidatePath('/');
   revalidatePath('/tasks');
   if (domain_id) revalidatePath(`/domains/${domain_id}`);
   if (project_id) revalidatePath(`/projects/${project_id}`);

@@ -10,7 +10,7 @@ export default async function SignInPage({
 }) {
   const user = await getUser();
   const { next } = await searchParams;
-  if (user) redirect(next && next.startsWith('/') ? next : '/today');
+  if (user) redirect(next && next.startsWith('/') ? next : '/');
 
   return (
     <div className="min-h-screen flex items-center justify-center px-5 py-12">
@@ -19,7 +19,7 @@ export default async function SignInPage({
           almanac<span className="text-accent">.</span>
         </h1>
         <div className="eyebrow mt-2 mb-8 text-center">A Jevi operation</div>
-        <SignInForm next={next ?? '/today'} />
+        <SignInForm next={next ?? '/'} />
       </div>
     </div>
   );

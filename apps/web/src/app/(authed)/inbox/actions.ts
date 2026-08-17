@@ -42,7 +42,7 @@ export async function triageTaskAction(
   }
 
   revalidatePath('/inbox');
-  revalidatePath('/today');
+  revalidatePath('/');
   revalidatePath('/tasks');
   return { ok: true };
 }

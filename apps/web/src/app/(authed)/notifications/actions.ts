@@ -13,7 +13,7 @@ export async function markNotificationStatusAction(formData: FormData): Promise<
     /* best-effort */
   }
   revalidatePath('/notifications');
-  revalidatePath('/today');
+  revalidatePath('/');
 }
 
 export async function markAllReadAction(): Promise<void> {
@@ -23,5 +23,5 @@ export async function markAllReadAction(): Promise<void> {
     /* best-effort */
   }
   revalidatePath('/notifications');
-  revalidatePath('/today');
+  revalidatePath('/');
 }

@@ -122,7 +122,7 @@ export async function setCadenceRuleAction(
 
   revalidatePath(`/domains/${id}`);
   revalidatePath('/domains');
-  revalidatePath('/today');
+  revalidatePath('/');
   return { ok: true };
 }
 
@@ -225,6 +225,6 @@ export async function markShippedAction(
 
   revalidatePath(`/domains/${id}`);
   revalidatePath('/domains');
-  revalidatePath('/today');
+  revalidatePath('/');
   return { ok: true, at };
 }

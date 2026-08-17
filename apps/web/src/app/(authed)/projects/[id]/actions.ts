@@ -22,7 +22,7 @@ export async function setProjectColorAction(formData: FormData) {
   }
   revalidatePath(`/projects/${projectId}`);
   revalidatePath('/projects');
-  revalidatePath('/today');
+  revalidatePath('/');
   revalidatePath('/tasks');
   revalidatePath('/calendar');
 }
@@ -55,7 +55,7 @@ export async function setProjectStatusAction(formData: FormData) {
   }
   revalidatePath(`/projects/${projectId}`);
   revalidatePath('/projects');
-  revalidatePath('/today');
+  revalidatePath('/');
   revalidatePath('/tasks');
   revalidatePath('/domains');
 }

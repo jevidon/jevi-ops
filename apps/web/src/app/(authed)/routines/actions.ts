@@ -45,7 +45,7 @@ function shapeError(err: unknown): SaveResult {
 // Touch every surface that surfaces routines (today widget, list,
 // detail). Cheap calls — Next.js dedupes.
 function revalidateAll(id?: string) {
-  revalidatePath('/today');
+  revalidatePath('/');
   revalidatePath('/routines');
   if (id) revalidatePath(`/routines/${id}`);
 }

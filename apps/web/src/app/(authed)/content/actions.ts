@@ -242,5 +242,5 @@ export async function advanceStatusAction(formData: FormData): Promise<void> {
   revalidatePath(`/content/${id}`);
   revalidatePath('/content');
   revalidatePath('/work');
-  revalidatePath('/today');
+  revalidatePath('/');
 }

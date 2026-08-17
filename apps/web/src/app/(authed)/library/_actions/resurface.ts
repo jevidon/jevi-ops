@@ -55,7 +55,7 @@ export async function setResurfaceWeightAction(
   // /today after a weight change isn't strictly necessary, but it keeps the
   // mental model consistent: a weight bump might affect today's pick on
   // next request if the new pool is small enough.
-  revalidatePath('/today');
+  revalidatePath('/');
   revalidatePath('/library');
 
   return { ok: true, weight: weightRaw };
