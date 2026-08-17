@@ -1,14 +1,16 @@
 {
-  "name": "Jevi Ops",
-  "short_name": "Jevi Ops",
-  "description": "Personal Operations Dashboard",
+  "name": "Almanac",
+  "short_name": "Almanac",
+  "description": "Home, work, and life operations — a Jevi operation",
   "start_url": "/today",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#F6F2EA",
   "theme_color": "#F6F2EA",
-  "categories": ["productivity"],
+  "categories": [
+    "productivity"
+  ],
   "shortcuts": [
     {
       "name": "Work",
