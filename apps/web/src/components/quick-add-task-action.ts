@@ -8,7 +8,8 @@ import { tasksApi, ApiError } from '@/lib/api';
 // page sections, domain detail, project detail). The full editor stays the
 // place for dates/priority/notes; this is pure capture.
 
-export type QuickAddResult = { ok: true } | { ok: false; error: string };
+// Success carries the created id so the client can offer a "View task" jump.
+export type QuickAddResult = { ok: true; id: string } | { ok: false; error: string };
 
 export async function quickAddTaskAction(
   _prev: QuickAddResult | null,
@@ -21,15 +22,17 @@ export async function quickAddTaskAction(
   const domain_id = String(formData.get('domain_id') ?? '').trim() || null;
   if (!project_id && !domain_id) return { ok: false, error: 'Missing target.' };
 
+  let createdId: string;
   try {
     // When project_id is set the server derives domain_id from the project,
     // so send exactly one — both at once 400s on a mismatch.
-    await tasksApi.create({
+    const created = await tasksApi.create({
       title,
       ...(project_id ? { project_id } : { domain_id }),
       priority: 4,
       source: 'manual',
     });
+    createdId = created.id;
   } catch (err) {
     if (err instanceof ApiError) return { ok: false, error: `API ${err.status}` };
     return { ok: false, error: (err as Error).message };
@@ -41,5 +44,5 @@ export async function quickAddTaskAction(
   revalidatePath('/tasks');
   if (domain_id) revalidatePath(`/domains/${domain_id}`);
   if (project_id) revalidatePath(`/projects/${project_id}`);
-  return { ok: true };
+  return { ok: true, id: createdId };
 }

@@ -224,16 +224,22 @@ const SubtaskFormSchema = z.object({
   domainId: z.string().uuid().optional(),
 });
 
-export async function createSubtaskAction(formData: FormData): Promise<void> {
+export type SubtaskResult = { ok: true; id: string } | { ok: false; error: string };
+
+export async function createSubtaskAction(
+  _prev: SubtaskResult | null,
+  formData: FormData,
+): Promise<SubtaskResult> {
   const parsed = SubtaskFormSchema.safeParse({
     parentId: formData.get('parentId'),
     title: formData.get('title'),
     projectId: formData.get('projectId') || undefined,
     domainId: formData.get('domainId') || undefined,
   });
-  if (!parsed.success) return;
+  if (!parsed.success) return { ok: false, error: 'Title is required.' };
+  let createdId: string;
   try {
-    await tasksApi.create({
+    const created = await tasksApi.create({
       title: parsed.data.title,
       parent_task_id: parsed.data.parentId,
       project_id: parsed.data.projectId ?? null,
@@ -241,11 +247,17 @@ export async function createSubtaskAction(formData: FormData): Promise<void> {
       priority: 4,
       source: 'manual',
     });
-  } catch {
-    /* best-effort; the page re-renders and reflects reality */
+    createdId = created.id;
+  } catch (err) {
+    if (err instanceof ApiError) {
+      const body = err.body as { error?: string } | null;
+      return { ok: false, error: body?.error ?? `API ${err.status}` };
+    }
+    return { ok: false, error: (err as Error).message };
   }
   revalidatePath(`/tasks/${parsed.data.parentId}`);
   revalidatePath('/tasks');
   revalidatePath('/today');
   revalidatePath('/work');
+  return { ok: true, id: createdId };
 }
