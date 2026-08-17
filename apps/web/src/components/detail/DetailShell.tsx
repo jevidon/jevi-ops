@@ -13,6 +13,7 @@ export function DetailHeader({
   crumb,
   name,
   color,
+  art,
   state,
   actions,
   below,
@@ -21,6 +22,9 @@ export function DetailHeader({
   crumb: React.ReactNode;
   name: string;
   color?: string | null;
+  // Optional spot art (the domain engraving) hanging off the title, same as the
+  // Work page's section headers. Desktop only — mobile keeps the band tight.
+  art?: React.ReactNode;
   state?: React.ReactNode;
   actions?: React.ReactNode;
   below?: React.ReactNode; // e.g. the content pipeline, inside the header band
@@ -35,6 +39,11 @@ export function DetailHeader({
         <h1 className={`font-serif ${titleClass} font-medium leading-[1.0] tracking-[-0.022em] text-ink flex items-center gap-3 flex-wrap min-w-0`}>
           {color && <span className="h-3 w-3 rounded-full shrink-0" style={{ background: color }} aria-hidden />}
           <span className="min-w-0">{name}</span>
+          {art && (
+            <span className="hidden lg:block h-[48px] max-w-[190px] shrink-0 self-end overflow-hidden opacity-80" aria-hidden>
+              {art}
+            </span>
+          )}
           {state}
         </h1>
         {actions && <div className="flex items-center gap-2 flex-wrap pb-1">{actions}</div>}
