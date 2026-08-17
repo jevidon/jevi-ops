@@ -37,6 +37,17 @@ const CRUMBS: Record<string, { label: string; sub?: string }> = {
   health: { label: 'Health' },
 };
 
+// Routes that register a live trail (<SetCrumbs>) after hydration. The trail
+// isn't known during SSR — the layout can't see page data — so on these
+// routes the crumb slot stays EMPTY until the trail lands. Rendering the
+// static fallback there would flash wrong content ("Work / Project" → domain
+// name) on every refresh. Keep in sync with the pages that call SetCrumbs.
+const TRAIL_ROUTES = [
+  /^\/tasks\/new$/,          // registers [Tasks]
+  /^\/tasks\/[0-9a-f-]{8,}$/,    // task detail — full ancestor trail
+  /^\/projects\/[0-9a-f-]{8,}$/, // project detail — domain trail
+];
+
 function dispatchOpenCapture() {
   const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform);
   window.dispatchEvent(
@@ -60,7 +71,7 @@ export function Topbar() {
       <div className="min-w-0 overflow-hidden">
         {trail ? (
           <CrumbTrail trail={trail} />
-        ) : (
+        ) : TRAIL_ROUTES.some((r) => r.test(pathname)) ? null : (
           <div className="flex items-baseline gap-[9px] font-mono text-[10px] uppercase tracking-[0.1em]">
             <span className="text-ink">{crumb.label}</span>
             {crumb.sub && (
