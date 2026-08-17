@@ -54,6 +54,10 @@ export const TaskSchema = z.object({
     type: z.string(),
     status: z.string(),
   }).nullable().optional(),
+  parent_task: z.object({
+    id: z.string().uuid(),
+    title: z.string(),
+  }).nullable().optional(),
 });
 
 export const CreateTaskSchema = z.object({
