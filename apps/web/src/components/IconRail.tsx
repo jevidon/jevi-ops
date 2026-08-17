@@ -80,12 +80,12 @@ export function IconRail({
   const [touchOpen, setTouchOpen] = useState(false);
   const open = pinned || hover || focused || touchOpen;
 
-  // Arriving at a new page collapses the unpinned rail no matter what was
-  // holding it open — hover (the cursor is still over the rail right after a
-  // click), link focus, or a touch-expand. It re-expands on the next
-  // enter-from-outside.
+  // Arriving at a new page drops the touch-expand and the clicked link's
+  // focus — either would hold the unpinned rail open indefinitely (touch has
+  // no mouseleave; a focused link never blurs on its own). Hover is left
+  // alone: while the cursor sits on the rail it stays open, and mousing off
+  // collapses it as usual.
   useEffect(() => {
-    setHover(false);
     setTouchOpen(false);
     setFocused(false);
   }, [pathname]);
