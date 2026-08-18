@@ -186,8 +186,10 @@ export function IconRail({
             aria-hidden
           >
             {/* Almanac eight-point star — same geometry as the favicon set
-                (outer R 13.2 / inner r 5.2 in a 32 box). */}
-            <svg viewBox="0 0 32 32" className="w-[19px] h-[19px] fill-bg">
+                (outer R 13.2 / inner r 5.2 in a 32 box). Brand identity, not
+                a theme surface: the fill is pinned to linen so the mark stays
+                cream-on-terracotta in dark mode too. */}
+            <svg viewBox="0 0 32 32" className="w-[19px] h-[19px] fill-[#F6F2EA]">
               <polygon points="16,2.8 17.99,11.2 25.33,6.67 20.8,14.01 29.2,16 20.8,17.99 25.33,25.33 17.99,20.8 16,29.2 14.01,20.8 6.67,25.33 11.2,17.99 2.8,16 11.2,14.01 6.67,6.67 14.01,11.2" />
             </svg>
           </span>
