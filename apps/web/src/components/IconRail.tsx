@@ -311,7 +311,7 @@ function RailItem({
     </>
   );
 
-  const cls = `group relative flex items-center gap-[14px] w-full h-10 px-[21px] whitespace-nowrap transition-colors hover:bg-[rgba(18,16,14,0.035)] ${
+  const cls = `group relative flex items-center gap-[14px] w-full h-10 px-[21px] whitespace-nowrap transition-colors hover:bg-[color:rgb(var(--ink)_/_0.035)] ${
     active ? 'text-ink font-semibold' : 'text-ink-2 hover:text-ink'
   }`;
 

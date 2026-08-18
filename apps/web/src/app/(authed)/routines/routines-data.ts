@@ -102,10 +102,12 @@ export function buildSummary(routines: RoutineListItem[], todayIso: string): Sum
 }
 
 // Month-block cell fill: recessed grey for a 0% day, else an ink wash that
-// darkens with the day's completion rate (matches the prototype MonthBlock).
+// strengthens with the day's completion rate (matches the prototype
+// MonthBlock). Both values are theme vars: in dark mode the wash flips to
+// cream automatically, so busier days still read as more saturated.
 export function monthCellBg(rate: number): string {
   if (rate === 0) return 'var(--paper-3, #F2F0EA)';
-  return `rgba(18,16,14,${(0.08 + rate * 0.44).toFixed(2)})`;
+  return `rgb(var(--ink) / ${(0.08 + rate * 0.44).toFixed(2)})`;
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];

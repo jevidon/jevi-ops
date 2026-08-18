@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { cookies } from 'next/headers';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import {
   authApi, googleApi, settingsApi, ApiError,
@@ -6,6 +7,7 @@ import {
 } from '@/lib/api';
 import { getAppTimezone, getFeatureFlag } from '@/lib/app-settings';
 import { SettingsSection } from './settings-section';
+import { AppearanceForm, type ThemePref } from './appearance-form';
 import { TimezoneForm } from './timezone-form';
 import { ModulesForm } from './modules-form';
 import { AiSettingsForm } from './ai-settings-form';
@@ -21,6 +23,9 @@ export default async function SettingsPage({
   searchParams: Promise<{ google?: string; reason?: string }>;
 }) {
   const { google: googleParam, reason } = await searchParams;
+  const themeCookie = (await cookies()).get('jops2.theme')?.value;
+  const theme: ThemePref =
+    themeCookie === 'light' || themeCookie === 'dark' ? themeCookie : 'system';
   const tz = await getAppTimezone();
   const healthEnabled = await getFeatureFlag('health_module_enabled');
   const routinesEnabled = await getFeatureFlag('routines_module_enabled');
@@ -80,6 +85,10 @@ export default async function SettingsPage({
           {banner.text}
         </div>
       )}
+
+      <SettingsSection title="Appearance">
+        <AppearanceForm initial={theme} />
+      </SettingsSection>
 
       <SettingsSection title="Timezone">
         <TimezoneForm current={tz} />

@@ -188,7 +188,7 @@ export function BottomTabBar({
                   onClick={() => setMoreOpen(false)}
                   aria-current={active ? 'page' : undefined}
                   className={`flex items-center gap-3 px-3 py-3 rounded-lg transition-colors ${
-                    active ? 'bg-ink text-bg' : 'text-ink hover:bg-[rgba(18,16,14,0.045)]'
+                    active ? 'bg-ink text-bg' : 'text-ink hover:bg-[color:rgb(var(--ink)_/_0.045)]'
                   }`}
                 >
                   <span className="relative shrink-0 w-[22px] grid place-items-center">

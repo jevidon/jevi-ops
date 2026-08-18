@@ -20,14 +20,17 @@ import { flipHolderAction, keepIdeaAction, archiveIdeaAction } from './actions';
 
 // The seven content stages, in pipeline order, with identity colours. `id`
 // stays a plain string so the filter Set is Set<string> (statuses are a subset).
+// Identity hues are mid-tone and hold on both the linen and umber grounds,
+// so they stay literal; the two NEUTRAL stages track the ink ramp so they
+// dim correctly in dark mode.
 const STAGES: { id: string; label: string; color: string }[] = [
-  { id: 'idea', label: 'Idea', color: '#B6AFA4' },
+  { id: 'idea', label: 'Idea', color: 'rgb(var(--ink-4))' },
   { id: 'outline', label: 'Outline', color: '#8A6A2F' },
   { id: 'filming', label: 'Filming', color: '#6B5B95' },
   { id: 'editing', label: 'Editing', color: '#2F5D8A' },
   { id: 'published', label: 'Published', color: '#3B6A52' },
   { id: 'derivatives_pending', label: 'Derivatives', color: '#4A6B70' },
-  { id: 'done', label: 'Done', color: '#B6AFA4' },
+  { id: 'done', label: 'Done', color: 'rgb(var(--ink-4))' },
 ];
 const SHIPPED = new Set<string>(['published', 'done']);
 

@@ -2,16 +2,126 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ───────────────────────────── Themes ─────────────────────────────
+   Every colour token lives here as a CSS variable; tailwind.config.ts
+   points its (unchanged) token names at these. Channel vars are
+   space-separated RGB so Tailwind's `/40`-style alpha modifiers keep
+   working; `*-a` vars carry the design alpha of hairlines and soft
+   pill fills.
+
+   Three theme states, driven by the `jops2.theme` cookie:
+     light  → <html data-theme="light">   → :root block wins
+     dark   → <html data-theme="dark">    → explicit dark block
+     system → no attribute                → prefers-color-scheme media
+
+   The dark palette is "Umber" — the linen inverted: warm brown-black
+   ground, cream ink ramp, rust lifted one step toward ember. Defined
+   twice (explicit choice + system media); KEEP THE TWO BLOCKS IDENTICAL. */
+
 :root {
   color-scheme: light;
+  /* surfaces — linen canvas, paper raised, recessed darker */
+  --bg: 246 242 234;        /* #F6F2EA */
+  --surface: 252 250 245;   /* #FCFAF5 */
+  --surface-2: 239 233 221; /* #EFE9DD */
+  --surface-3: 230 223 208; /* #E6DFD0 */
+  --paper-3: #f2f0ea;       /* routines month-grid 0% cell */
+  /* ink ramp */
+  --ink: 18 16 14;          /* #12100E */
+  --ink-2: 87 82 74;        /* #57524A */
+  --ink-3: 139 132 122;     /* #8B847A */
+  --ink-4: 182 175 164;     /* #B6AFA4 */
+  /* hairline alphas (channels = --ink) */
+  --line-a: 0.09;
+  --line-strong-a: 0.17;
+  --line-strongest-a: 0.34;
+  /* accent — rust */
+  --accent: 184 68 43;      /* #B8442B */
+  --accent-ink: 138 51 32;  /* #8A3320 */
+  --accent-slip: 156 63 38; /* #9C3F26 */
+  --accent-bg-a: 0.08;
+  --accent-soft-a: 0.09;
+  --accent-line-a: 0.3;
+  /* status */
+  --warn: 150 101 15;       /* #96650F */
+  --warn-soft-a: 0.1;
+  --warn-line-a: 0.28;
+  --good: 59 106 82;        /* #3B6A52 */
+  --good-soft-a: 0.1;
+  --good-line-a: 0.26;
+  --prio3: 63 95 134;       /* #3F5F86 */
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  /* surfaces — umber ground, raised lighter, recessed deeper */
+  --bg: 25 21 18;           /* #191512 */
+  --surface: 33 28 23;      /* #211C17 */
+  --surface-2: 18 15 12;    /* #120F0C */
+  --surface-3: 13 11 9;     /* #0D0B09 */
+  --paper-3: #14110e;
+  /* ink ramp — cream */
+  --ink: 240 234 223;       /* #F0EADF */
+  --ink-2: 198 190 175;     /* #C6BEAF */
+  --ink-3: 151 144 127;     /* #97907F */
+  --ink-4: 102 95 82;       /* #665F52 */
+  --line-a: 0.1;
+  --line-strong-a: 0.19;
+  --line-strongest-a: 0.36;
+  /* accent — rust lifted to ember for contrast on the dark ground */
+  --accent: 214 106 79;     /* #D66A4F */
+  --accent-ink: 224 138 110; /* #E08A6E */
+  --accent-slip: 222 124 94; /* #DE7C5E */
+  --accent-bg-a: 0.12;
+  --accent-soft-a: 0.13;
+  --accent-line-a: 0.4;
+  --warn: 201 155 74;       /* #C99B4A */
+  --warn-soft-a: 0.13;
+  --warn-line-a: 0.36;
+  --good: 124 173 144;      /* #7CAD90 */
+  --good-soft-a: 0.13;
+  --good-line-a: 0.34;
+  --prio3: 133 163 198;     /* #85A3C6 */
+}
+
+/* System preference — same Umber payload as [data-theme='dark'] above.
+   `:not([data-theme='light'])` lets an explicit light choice beat a dark OS. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+    --bg: 25 21 18;
+    --surface: 33 28 23;
+    --surface-2: 18 15 12;
+    --surface-3: 13 11 9;
+    --paper-3: #14110e;
+    --ink: 240 234 223;
+    --ink-2: 198 190 175;
+    --ink-3: 151 144 127;
+    --ink-4: 102 95 82;
+    --line-a: 0.1;
+    --line-strong-a: 0.19;
+    --line-strongest-a: 0.36;
+    --accent: 214 106 79;
+    --accent-ink: 224 138 110;
+    --accent-slip: 222 124 94;
+    --accent-bg-a: 0.12;
+    --accent-soft-a: 0.13;
+    --accent-line-a: 0.4;
+    --warn: 201 155 74;
+    --warn-soft-a: 0.13;
+    --warn-line-a: 0.36;
+    --good: 124 173 144;
+    --good-soft-a: 0.13;
+    --good-line-a: 0.34;
+    --prio3: 133 163 198;
+  }
 }
 
 html,
 body {
-  /* Re-warmed to linen (Addendum 10 §4; the white v2 read too cold). Kept in
-     sync with the `bg`/`ink` Tailwind tokens and the viewport theme-color. */
-  background: #f6f2ea;
-  color: #12100e;
+  /* Tracks the `bg`/`ink` tokens and the viewport theme-color. */
+  background: rgb(var(--bg));
+  color: rgb(var(--ink));
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   /* Kill horizontal scroll on mobile: a stray wide child (negative-margin
@@ -24,16 +134,15 @@ body {
 }
 
 ::selection {
-  /* Accent unchanged (#B8442B = rgb 184,68,43). */
-  background: rgba(184, 68, 43, 0.22);
+  background: rgb(var(--accent) / 0.22);
 }
 
 /* Hairline rule used throughout — matches `Rule` in the mockup canvas.
-   Value tracks the `line` token (v2 ink base 18,16,14 @ .09). */
+   Value tracks the `line` token (ink base @ .09 light). */
 .hairline {
   height: 1px;
   width: 100%;
-  background: rgba(18, 16, 14, 0.09);
+  background: rgb(var(--ink) / var(--line-a));
 }
 
 /* Editorial eyebrow label. Colour = ink-3; tracking .1em per v2 type spec. */
@@ -43,15 +152,15 @@ body {
   font-weight: 600;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: #8b847a;
+  color: rgb(var(--ink-3));
 }
 
 /* Stronger hairline — section rules and dividers that need to read at
-   the same weight as adjacent text. Tracks `line-strong` (@ .17). */
+   the same weight as adjacent text. Tracks `line-strong` (@ .17 light). */
 .hairline-strong {
   height: 1px;
   width: 100%;
-  background: rgba(18, 16, 14, 0.17);
+  background: rgb(var(--ink) / var(--line-strong-a));
 }
 
 /* Editorial briefing-line wash. Applied to `.brief-clickable` so the row
@@ -64,10 +173,10 @@ body {
   transition: background 0.12s;
 }
 .brief-clickable:hover {
-  background: rgba(18, 16, 14, 0.035);
+  background: rgb(var(--ink) / 0.035);
 }
 .brief-clickable:active {
-  background: rgba(18, 16, 14, 0.06);
+  background: rgb(var(--ink) / 0.06);
 }
 
 /* Density toggle. `[data-density="compact"]` halves the vertical rhythm
@@ -86,8 +195,8 @@ body {
    accent variant re-inks faints to a washed rust so slipping cards read
    warm without going loud. */
 .domain-ill .f {
-  color: #b8b0a2; /* ink-4 */
+  color: rgb(var(--ink-4));
 }
 .domain-ill-accent .f {
-  color: rgba(156, 63, 38, 0.45); /* accent-slip, washed */
+  color: rgb(var(--accent-slip) / 0.45); /* accent-slip, washed */
 }
