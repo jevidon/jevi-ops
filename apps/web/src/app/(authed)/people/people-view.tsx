@@ -19,7 +19,9 @@ const PERSON_REL: { value: RelationshipType; label: string; color: string }[] = 
   { value: 'friend', label: 'Friend', color: '#A8763E' },
   { value: 'team', label: 'Team', color: '#4A6B70' },
   { value: 'vendor', label: 'Vendor', color: '#8A4B3C' },
-  { value: 'other', label: 'Other', color: '#8B847A' },
+  // Identity hues above are mid-tone and hold on both themes; the neutral
+  // "Other" tracks ink-3 so it dims correctly in dark mode.
+  { value: 'other', label: 'Other', color: 'rgb(var(--ink-3))' },
 ];
 const REL_COLOR: Record<string, string> = Object.fromEntries(PERSON_REL.map((r) => [r.value, r.color]));
 const REL_LABEL: Record<string, string> = Object.fromEntries(PERSON_REL.map((r) => [r.value, r.label]));
@@ -119,7 +121,7 @@ export function PeopleView({ people, today, tz }: { people: Person[]; today: str
             {visible.map(({ p, days, company }) => (
               <Link key={p.id} href={`/people/${p.id}`} className="block rounded border border-line bg-bg px-4 pt-[15px] pb-[13px] hover:border-line-strong transition-colors">
                 <div className="flex items-start gap-3 mb-3">
-                  <span className="grid place-items-center w-[34px] h-[34px] shrink-0 rounded-full font-serif font-medium text-[13px] text-white" style={{ background: p.relationship_type ? REL_COLOR[p.relationship_type] : '#8B847A' }}>
+                  <span className="grid place-items-center w-[34px] h-[34px] shrink-0 rounded-full font-serif font-medium text-[13px] text-white" style={{ background: p.relationship_type ? REL_COLOR[p.relationship_type] : 'rgb(var(--ink-3))' }}>
                     {initials(p.name)}
                   </span>
                   <div className="flex-1 min-w-0">

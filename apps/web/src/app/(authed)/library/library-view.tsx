@@ -422,11 +422,11 @@ function BookCard({ b, sort }: { b: Book; sort: BookSortKey }) {
         <img
           src={b.cover_image_url}
           alt={b.title}
-          className="w-full aspect-[2/3] object-cover rounded-[3px] mb-2.5 border border-[rgba(18,16,14,0.12)]"
+          className="w-full aspect-[2/3] object-cover rounded-[3px] mb-2.5 border border-[color:rgb(var(--ink)_/_0.12)]"
         />
       ) : (
         <div
-          className="w-full aspect-[2/3] rounded-[3px] mb-2.5 border border-[rgba(18,16,14,0.12)] flex items-start p-3.5"
+          className="w-full aspect-[2/3] rounded-[3px] mb-2.5 border border-[color:rgb(var(--ink)_/_0.12)] flex items-start p-3.5"
           style={{ background: tint.bg, color: tint.fg }}
         >
           <span className="font-serif text-[15px] font-medium leading-[1.22] tracking-[-0.01em] line-clamp-5">{b.title}</span>

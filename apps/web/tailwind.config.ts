@@ -19,6 +19,26 @@ import type { Config } from 'tailwindcss';
 //
 // Token names are kept stable across the v1→v2 value swap so the ~1600
 // existing bg-/text-ink/border-line usages re-theme without renames.
+//
+// Dark mode (Aug 2026): every token now points at a CSS variable defined in
+// globals.css (`:root` = light linen, `[data-theme='dark']` / system-dark
+// media = "Umber", the linen inverted). The hex values quoted in comments
+// below are the LIGHT values, kept for grep-ability; the source of truth is
+// globals.css. No `dark:` variants exist anywhere — theming is 100% a var
+// swap — so Tailwind's `darkMode` setting stays unset.
+
+// A token whose alpha is part of the design value (hairlines, soft pill
+// fills). Tailwind hands `opacityValue` a literal ("0.4") for `/40`-style
+// modifiers but `var(--tw-*-opacity)` for the bare utility, so: bare usage
+// falls through to the token's own alpha; a modifier replaces the alpha —
+// exactly what the parsed rgba() literals did before the var conversion
+// (border-line/40 has always meant ink at 0.40, not 0.40 × 0.09).
+const withDesignAlpha =
+  (channels: string, alpha: string): any =>
+  ({ opacityValue }: { opacityValue?: string }) =>
+    opacityValue !== undefined && !opacityValue.startsWith('var(')
+      ? `rgb(var(${channels}) / ${opacityValue})`
+      : `rgb(var(${channels}) / var(${alpha}))`;
 
 const config: Config = {
   content: ['./src/**/*.{ts,tsx}'],
@@ -49,46 +69,46 @@ const config: Config = {
         'toast-in': 'toast-in 160ms ease-out',
       },
       colors: {
-        // ─── Surfaces (re-warmed to linen, Addendum 10 §4) ────────────
-        bg: '#F6F2EA',           // canvas — warm linen (was #FFFFFF)
-        surface: '#FCFAF5',      // rail + lifted-card paper, lighter than linen (--paper-2)
-        'surface-2': '#EFE9DD',  // recessed fills: meters, empty cells, hover chips (darker than linen)
-        'surface-3': '#E6DFD0',  // deepest recessed fill
+        // ─── Surfaces (light: re-warmed linen, Addendum 10 §4) ────────
+        bg: 'rgb(var(--bg) / <alpha-value>)',               // canvas — #F6F2EA light
+        surface: 'rgb(var(--surface) / <alpha-value>)',     // rail + lifted-card paper — #FCFAF5
+        'surface-2': 'rgb(var(--surface-2) / <alpha-value>)', // recessed fills — #EFE9DD
+        'surface-3': 'rgb(var(--surface-3) / <alpha-value>)', // deepest recessed fill — #E6DFD0
         // ─── Ink ──────────────────────────────────────────────────────
         // ink-3 is the floor for TEXT. ink-4 is non-text only (empty
         // checkbox borders, disabled glyphs, hairline outlines).
-        ink: '#12100E',
-        'ink-2': '#57524A',
-        'ink-3': '#8B847A',
-        'ink-4': '#B6AFA4',
-        // ─── Lines ────────────────────────────────────────────────────
-        line: 'rgba(18,16,14,0.09)',
-        'line-strong': 'rgba(18,16,14,0.17)',
-        'line-strongest': 'rgba(18,16,14,0.34)', // new — strongest hairline
-        // ─── Accent (rust, unchanged hue) ─────────────────────────────
+        ink: 'rgb(var(--ink) / <alpha-value>)',       // #12100E light
+        'ink-2': 'rgb(var(--ink-2) / <alpha-value>)', // #57524A
+        'ink-3': 'rgb(var(--ink-3) / <alpha-value>)', // #8B847A
+        'ink-4': 'rgb(var(--ink-4) / <alpha-value>)', // #B6AFA4
+        // ─── Lines (ink-based hairlines; alpha is part of the token) ──
+        line: withDesignAlpha('--ink', '--line-a'),                 // ink @ .09 light
+        'line-strong': withDesignAlpha('--ink', '--line-strong-a'), // ink @ .17
+        'line-strongest': withDesignAlpha('--ink', '--line-strongest-a'), // ink @ .34
+        // ─── Accent (rust; dark lifts it one step toward ember) ───────
         accent: {
-          DEFAULT: '#B8442B',
-          bg: 'rgba(184,68,43,0.08)',   // legacy fill (kept — existing usages)
-          soft: 'rgba(184,68,43,0.09)', // v2 pill fill
-          line: 'rgba(184,68,43,0.30)', // v2 pill border
-          ink: '#8A3320',               // legacy — still referenced a few places
-          slip: '#9C3F26',              // legacy — Briefing day-count numerals
+          DEFAULT: 'rgb(var(--accent) / <alpha-value>)', // #B8442B light
+          bg: withDesignAlpha('--accent', '--accent-bg-a'),     // legacy fill (kept — existing usages)
+          soft: withDesignAlpha('--accent', '--accent-soft-a'), // v2 pill fill
+          line: withDesignAlpha('--accent', '--accent-line-a'), // v2 pill border
+          ink: 'rgb(var(--accent-ink) / <alpha-value>)',   // legacy — still referenced a few places
+          slip: 'rgb(var(--accent-slip) / <alpha-value>)', // legacy — Briefing day-count numerals
         },
-        // ─── Status (v2, new) ─────────────────────────────────────────
+        // ─── Status (v2) ──────────────────────────────────────────────
         // Used only inside pills. Domain identity colours are NOT here —
         // they're a client-side map keyed by domain id (design handoff).
         warn: {
-          DEFAULT: '#96650F',           // due today
-          soft: 'rgba(150,101,15,0.10)',
-          line: 'rgba(150,101,15,0.28)',
+          DEFAULT: 'rgb(var(--warn) / <alpha-value>)', // due today — #96650F light
+          soft: withDesignAlpha('--warn', '--warn-soft-a'),
+          line: withDesignAlpha('--warn', '--warn-line-a'),
         },
         good: {
-          DEFAULT: '#3B6A52',           // on track
-          soft: 'rgba(59,106,82,0.10)',
-          line: 'rgba(59,106,82,0.26)',
+          DEFAULT: 'rgb(var(--good) / <alpha-value>)', // on track — #3B6A52 light
+          soft: withDesignAlpha('--good', '--good-soft-a'),
+          line: withDesignAlpha('--good', '--good-line-a'),
         },
         // Priority-3 ring only (P1=accent, P2=warn, P4=ink-4 reuse existing).
-        prio3: '#3F5F86',
+        prio3: 'rgb(var(--prio3) / <alpha-value>)', // #3F5F86 light
       },
       fontFamily: {
         serif: ['Newsreader', 'ui-serif', 'Georgia', 'serif'],

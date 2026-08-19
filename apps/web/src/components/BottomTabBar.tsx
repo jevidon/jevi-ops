@@ -115,15 +115,17 @@ export function BottomTabBar({
               aria-current={homeActive ? 'page' : undefined}
               className="flex h-full flex-col items-center justify-center"
             >
-              {/* Docked float: the mark rises out of the bar, ringed in the
-                  linen canvas so it reads as sitting ON the page. Content
-                  scrolls under the overhang — deliberate. */}
+              {/* Docked float: the mark rises out of the bar, ringed in linen
+                  so it reads as sitting ON the page. Ring + star are brand
+                  identity, not theme surfaces — pinned to linen so the mark
+                  stays cream-on-terracotta (with the light ring) in dark mode.
+                  Content scrolls under the overhang — deliberate. */}
               <span
-                className={`grid place-items-center w-[54px] h-[54px] -mt-[18px] rounded-[15px] bg-accent border-[3px] border-bg shadow-[0_4px_14px_-6px_rgba(18,16,14,0.4)] transition-opacity ${
+                className={`grid place-items-center w-[54px] h-[54px] -mt-[18px] rounded-[15px] bg-accent border-[3px] border-[#F6F2EA] shadow-[0_4px_14px_-6px_rgba(18,16,14,0.4)] transition-opacity ${
                   homeActive ? 'opacity-100' : 'opacity-80'
                 }`}
               >
-                <svg viewBox="0 0 32 32" className="w-[36px] h-[36px] fill-bg" aria-hidden>
+                <svg viewBox="0 0 32 32" className="w-[36px] h-[36px] fill-[#F6F2EA]" aria-hidden>
                   <polygon points="16,2.8 17.99,11.2 25.33,6.67 20.8,14.01 29.2,16 20.8,17.99 25.33,25.33 17.99,20.8 16,29.2 14.01,20.8 6.67,25.33 11.2,17.99 2.8,16 11.2,14.01 6.67,6.67 14.01,11.2" />
                 </svg>
               </span>
@@ -188,7 +190,7 @@ export function BottomTabBar({
                   onClick={() => setMoreOpen(false)}
                   aria-current={active ? 'page' : undefined}
                   className={`flex items-center gap-3 px-3 py-3 rounded-lg transition-colors ${
-                    active ? 'bg-ink text-bg' : 'text-ink hover:bg-[rgba(18,16,14,0.045)]'
+                    active ? 'bg-ink text-bg' : 'text-ink hover:bg-[color:rgb(var(--ink)_/_0.045)]'
                   }`}
                 >
                   <span className="relative shrink-0 w-[22px] grid place-items-center">

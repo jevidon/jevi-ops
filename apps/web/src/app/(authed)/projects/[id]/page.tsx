@@ -5,7 +5,7 @@ import { TaskItem } from '@/components/TaskItem';
 import { Pill } from '@/components/Pill';
 import {
   DetailHeader, CrumbDot, ActionButton, StatStrip, Stat, WorkCounts,
-  DetailBody, DetailSection, RailBlock,
+  SplitStatBand, LedgerRow, DetailBody, DetailSection, RailBlock,
 } from '@/components/detail/DetailShell';
 import { EditDrawer } from '@/components/detail/EditDrawer';
 import { projectsApi, domainsApi, peopleApi, ApiError, type ProjectDetail } from '@/lib/api';
@@ -181,6 +181,46 @@ export default async function ProjectDetailPage({
         }
       />
 
+      {/* With a description: split band — prose left, compact stat ledger in
+          the narrow right column. Without one: the classic full-width strip
+          (the empty state IS the old design). Same computed values either way. */}
+      {project.description ? (
+        <SplitStatBand text={project.description}>
+          {isRetainer ? (
+            <LedgerRow k="Hours · this month" v={`${hoursThisMonth.toFixed(1)} h`}
+              meta={`${hoursLastMonth.toFixed(1)}h last${quoted != null ? ` · cap ${quoted.toFixed(1)}h` : ''}`} />
+          ) : pct != null ? (
+            <LedgerRow k="Progress" v={`${pct}%`} meta={`${doneWeight}/${totalWeight} weight done`} />
+          ) : (
+            <LedgerRow k="Hours · all-time" v={`${hoursLogged.toFixed(1)} h`}
+              meta={quoted != null ? `of ${quoted.toFixed(1)}h quoted` : 'no quote set'} />
+          )}
+
+          <LedgerRow k="Work" v={`${openTasks.length} open`}
+            meta={
+              <>
+                {overdueCount > 0 && <span className="text-accent">{overdueCount} overdue · </span>}
+                {waitingTasks.length} waiting
+              </>
+            } />
+
+          {isRetainer ? (
+            <LedgerRow k="Retainer cycle" v={cycle ? `Day ${cycle.day} / ${cycle.length}` : '—'}
+              meta={cycle ? 'billing cycle' : 'set anchor day in Edit'} />
+          ) : project.target_date ? (
+            <LedgerRow k="Target date" v={fmtShort(project.target_date, tz)}
+              tone={project.target_date < today ? 'accent' : undefined}
+              meta={project.target_date < today ? `passed ${Math.abs(daysAgoFrom(`${project.target_date}T12:00:00Z`, tz, today))}d`
+                : `${Math.abs(daysAgoFrom(`${project.target_date}T12:00:00Z`, tz, today))}d out`} />
+          ) : (
+            <LedgerRow k="Milestones" v={milestones.length || '—'} meta={milestones.length ? 'defined' : 'none yet'} />
+          )}
+
+          <LedgerRow k="Last activity" tone={activityStale ? 'warn' : undefined}
+            v={lastActivityDays != null ? `${lastActivityDays}d ago` : '—'}
+            meta={lastActivityDays == null ? 'nothing logged' : activityStale ? 'check-in pending' : undefined} />
+        </SplitStatBand>
+      ) : (
       <StatStrip>
         {isRetainer ? (
           <Stat label="Hours · this month" value={hoursThisMonth.toFixed(1)} unit="h"
@@ -211,6 +251,7 @@ export default async function ProjectDetailPage({
           unit={lastActivityDays != null ? (lastActivityDays === 1 ? 'day ago' : 'days ago') : undefined}
           sub={lastActivityDays == null ? 'nothing logged' : activityStale ? 'check-in pending' : undefined} />
       </StatStrip>
+      )}
 
       <DetailBody
         main={

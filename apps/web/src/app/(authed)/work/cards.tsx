@@ -86,7 +86,7 @@ export function ProjectCard({ p, color }: { p: WorkProjectCard; color: string })
       href={`/projects/${p.id}`}
       // flagged (has an active attention item) → accent border; paused → dimmed.
       className={`block rounded overflow-hidden border bg-bg transition-colors ${
-        p.flagged ? 'border-[rgba(184,68,43,0.55)] hover:border-accent' : 'border-line hover:border-line-strong'
+        p.flagged ? 'border-[color:rgb(var(--accent)_/_0.55)] hover:border-accent' : 'border-line hover:border-line-strong'
       } ${p.paused ? 'opacity-60' : ''}`}
     >
       <div className="h-[3px]" style={{ background: color }} />
@@ -107,7 +107,7 @@ export function ProjectCard({ p, color }: { p: WorkProjectCard; color: string })
         {pct != null && (
           <div className="h-1 rounded-full bg-surface-2 overflow-hidden">
             {/* target = ink-2 fill; retainer cycle = lighter ink-4 fill */}
-            <div className="h-full rounded-full" style={{ width: `${pct}%`, background: p.kind === 'target' ? '#57524A' : '#B6AFA4' }} />
+            <div className="h-full rounded-full" style={{ width: `${pct}%`, background: p.kind === 'target' ? 'rgb(var(--ink-2))' : 'rgb(var(--ink-4))' }} />
           </div>
         )}
         <div className="flex items-center justify-between mt-2.5">

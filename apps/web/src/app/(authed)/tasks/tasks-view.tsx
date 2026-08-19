@@ -398,7 +398,7 @@ function TaskRow({ t, today, subtaskBadge, parentCrumb }: {
           )}
           {projectLabel && (
             <span className="inline-flex items-center gap-1.5 text-ink-3">
-              <span className="w-[7px] h-[7px] rounded-[2px] shrink-0" style={{ background: domainName ? domainColor(domainName) : '#B6AFA4' }} aria-hidden />
+              <span className="w-[7px] h-[7px] rounded-[2px] shrink-0" style={{ background: domainName ? domainColor(domainName) : 'rgb(var(--ink-4))' }} aria-hidden />
               {projectLabel}
             </span>
           )}

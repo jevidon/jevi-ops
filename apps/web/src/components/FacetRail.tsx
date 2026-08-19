@@ -144,20 +144,20 @@ export function FacetRow({
   count?: number;
 }) {
   const cls = `group flex items-center gap-[9px] w-full px-2 -mx-2 mb-[3px] py-1.5 rounded text-[13px] text-left transition-colors ${
-    on ? 'bg-ink text-bg' : 'text-ink-2 hover:bg-[rgba(18,16,14,0.045)] hover:text-ink'
+    on ? 'bg-ink text-bg' : 'text-ink-2 hover:bg-[color:rgb(var(--ink)_/_0.045)] hover:text-ink'
   }`;
   const body = (
     <>
       {color && (
         <span
-          className={`w-[9px] h-[9px] rounded-[2.5px] shrink-0 ${on ? 'ring-[1.5px] ring-white/50' : ''}`}
+          className={`w-[9px] h-[9px] rounded-[2.5px] shrink-0 ${on ? 'ring-[1.5px] ring-bg/50' : ''}`}
           style={{ background: color }}
           aria-hidden
         />
       )}
       <span className="flex-1 min-w-0 truncate">{name}</span>
       {count != null && (
-        <span className={`font-mono text-[10.5px] leading-none ${on ? 'text-white/60' : 'text-ink-4'}`}>
+        <span className={`font-mono text-[10.5px] leading-none ${on ? 'text-bg/60' : 'text-ink-4'}`}>
           {count}
         </span>
       )}
@@ -201,7 +201,7 @@ export function FacetTag({
     <>
       {name}
       {count != null && (
-        <span className={`not-italic ${on ? 'text-white/60' : 'text-ink-4'}`}>{count}</span>
+        <span className={`not-italic ${on ? 'text-bg/60' : 'text-ink-4'}`}>{count}</span>
       )}
     </>
   );

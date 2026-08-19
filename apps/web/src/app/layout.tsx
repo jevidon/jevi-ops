@@ -1,5 +1,20 @@
 import type { Metadata, Viewport } from 'next';
+import { cookies } from 'next/headers';
 import '../styles/globals.css';
+
+// Theme preference — cookie-only (`jops2.theme`: light | dark | system).
+// The server stamps <html data-theme> from it before first paint, so there
+// is no flash and no client-side theme script; "system" (or no cookie)
+// stamps nothing and lets the prefers-color-scheme blocks in globals.css
+// decide. The Settings → Appearance form writes the cookie.
+const THEME_COOKIE = 'jops2.theme';
+const CANVAS_LIGHT = '#F6F2EA'; // linen — tracks --bg in globals.css
+const CANVAS_DARK = '#191512'; // umber — tracks --bg in globals.css
+
+async function themePref(): Promise<'light' | 'dark' | null> {
+  const v = (await cookies()).get(THEME_COOKIE)?.value;
+  return v === 'light' || v === 'dark' ? v : null;
+}
 
 export const metadata: Metadata = {
   title: 'Almanac',
@@ -36,9 +51,25 @@ export const metadata: Metadata = {
   },
 };
 
-export const viewport: Viewport = {
-  // Linen canvas (Addendum 10 §4) — the browser/PWA chrome matches the body.
-  themeColor: '#F6F2EA',
+export async function generateViewport(): Promise<Viewport> {
+  const pref = await themePref();
+  return {
+    // Browser/PWA chrome matches the body canvas. An explicit preference
+    // pins one colour; "system" hands the choice to the UA via media.
+    themeColor:
+      pref === 'dark'
+        ? CANVAS_DARK
+        : pref === 'light'
+          ? CANVAS_LIGHT
+          : [
+              { media: '(prefers-color-scheme: light)', color: CANVAS_LIGHT },
+              { media: '(prefers-color-scheme: dark)', color: CANVAS_DARK },
+            ],
+    ...viewportBase,
+  };
+}
+
+const viewportBase: Viewport = {
   width: 'device-width',
   initialScale: 1,
   maximumScale: 1,
@@ -55,9 +86,10 @@ export const viewport: Viewport = {
 // Bare shell: font links + body. The tab bar + mic FAB live inside the
 // (authed) route group's layout — sign-in shouldn't see them.
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const pref = await themePref();
   return (
-    <html lang="en">
+    <html lang="en" data-theme={pref ?? undefined}>
       <head>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />

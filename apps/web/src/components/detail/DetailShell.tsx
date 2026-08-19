@@ -131,6 +131,58 @@ export function Stat({
   );
 }
 
+// ─── Split stat band (Aug 2026) ──────────────────────────────────────────────
+// The stat strip's sibling for pages whose description deserves the read
+// surface: prose left, a compact right-aligned stat ledger in a NARROW right
+// column (fixed 340px, so labels sit close to their values rather than
+// stranded across a half-width row). Callers fall back to StatStrip when
+// there's no description — the empty state is exactly the old strip.
+export function SplitStatBand({
+  label = 'About',
+  text,
+  children,
+}: {
+  label?: string;
+  text: string;
+  children: React.ReactNode; // LedgerRow list
+}) {
+  return (
+    <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_340px] border-b border-line-strong bg-bg">
+      <div className="px-5 lg:px-8 py-5">
+        <div className="font-mono text-[9.5px] uppercase tracking-[0.1em] text-ink-3 mb-2">{label}</div>
+        <p className="font-sans text-[13.5px] text-ink-2 leading-relaxed max-w-[62ch] whitespace-pre-wrap">{text}</p>
+      </div>
+      <div className="border-t border-line lg:border-t-0 lg:border-l lg:border-line-strong px-5 py-2 self-center lg:self-stretch lg:flex lg:flex-col lg:justify-center">
+        <div>{children}</div>
+      </div>
+    </div>
+  );
+}
+
+// One ledger row: mono label · serif value · optional mono meta tail.
+export function LedgerRow({
+  k,
+  v,
+  meta,
+  tone,
+}: {
+  k: string;
+  v: React.ReactNode;
+  meta?: React.ReactNode;
+  tone?: 'accent' | 'warn';
+}) {
+  const toneCls = tone === 'accent' ? 'text-accent' : tone === 'warn' ? 'text-warn' : 'text-ink';
+  return (
+    <div className="flex items-baseline justify-between gap-4 py-[7px] border-b border-line last:border-b-0">
+      <span className="font-mono text-[9.5px] uppercase tracking-[0.08em] text-ink-3 shrink-0">{k}</span>
+      <span className={`font-serif text-[15px] tabular-nums text-right min-w-0 ${toneCls}`}>
+        {v}
+        {meta && <span className="ml-1.5 font-mono text-[10px] tracking-normal text-ink-4">{meta}</span>}
+      </span>
+    </div>
+  );
+}
+
 // The multi-count "Work" tile body (N open · N overdue · N waiting).
 export function WorkCounts({ open, overdue, waiting }: { open: number; overdue: number; waiting: number }) {
   return (
