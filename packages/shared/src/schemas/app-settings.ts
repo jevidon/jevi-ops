@@ -29,6 +29,16 @@ const ClearableUrl = z
   .nullable()
   .refine((v) => v === null || /^https?:\/\//.test(v), 'Must be an http(s) URL.');
 
+// Briefing panel visibility/order (migration 0044): an ordered array of
+// {id, enabled}. Strictly validated on write — malformed config must never
+// wedge the homepage. Null → registry defaults; ids are free-form strings
+// so retiring/shipping panels needs no schema change (the web registry
+// drops unknown ids and appends new ones at read time).
+export const BriefingPanelConfigSchema = z
+  .array(z.object({ id: z.string().min(1).max(64), enabled: z.boolean() }))
+  .max(32);
+export type BriefingPanelConfig = z.infer<typeof BriefingPanelConfigSchema>;
+
 export const AppSettingsSchema = z.object({
   id: z.literal(true),
   timezone: TimezoneSchema,
@@ -46,6 +56,7 @@ export const AppSettingsSchema = z.object({
   health_module_enabled: z.boolean(),
   routines_module_enabled: z.boolean(),
   rule_module_enabled: z.boolean(),
+  briefing_panels: BriefingPanelConfigSchema.nullable(),
   updated_at: z.string().datetime({ offset: true }),
 });
 
@@ -65,6 +76,7 @@ export const UpdateAppSettingsSchema = z.object({
   health_module_enabled: z.boolean().optional(),
   routines_module_enabled: z.boolean().optional(),
   rule_module_enabled: z.boolean().optional(),
+  briefing_panels: BriefingPanelConfigSchema.nullable().optional(),
 });
 
 export type AppSettings = z.infer<typeof AppSettingsSchema>;
