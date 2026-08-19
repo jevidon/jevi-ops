@@ -8,6 +8,7 @@ import {
   SplitStatBand, LedgerRow, DetailBody, DetailSection, RailBlock,
 } from '@/components/detail/DetailShell';
 import { EditDrawer } from '@/components/detail/EditDrawer';
+import { PinButton } from '@/components/PinButton';
 import { projectsApi, domainsApi, peopleApi, ApiError, type ProjectDetail } from '@/lib/api';
 import { isToday, todayIsoDate } from '@/lib/today';
 import { getAppTimezone } from '@/lib/app-settings';
@@ -154,6 +155,7 @@ export default async function ProjectDetailPage({
         state={<Pill state={state.s}>{state.label}</Pill>}
         actions={
           <>
+            <PinButton targetType="project" targetId={project.id} path={`/projects/${project.id}`} />
             <ActionButton href={`/tasks/new?project_id=${project.id}&from=/projects/${project.id}`}>＋ Task</ActionButton>
             <ActionButton href="#log-work">＋ Log work</ActionButton>
             <ActionButton href="#conversations">＋ Conversation</ActionButton>

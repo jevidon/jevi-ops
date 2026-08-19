@@ -7,6 +7,7 @@ import { deleteAnnotationAction, deleteQuoteAction } from './actions';
 import { QuoteForm } from '../quote-form';
 import { BoostButton } from '@/components/BoostButton';
 import { EditDrawer } from '@/components/detail/EditDrawer';
+import { PinButton } from '@/components/PinButton';
 
 // /library/quotes/[id] — an epigraph page (Detail Pages v2, Addendum 10 §10).
 // The quote is set large in the serif; attribution (author · book · page) sits
@@ -146,6 +147,8 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
             <span className="eyebrow">Resurfacing</span>
             <BoostButton kind="quote" id={quote.id} weight={quote.resurface_weight} />
           </div>
+          <div className="flex items-center gap-3">
+          <PinButton targetType="quote" targetId={quote.id} path={`/library/quotes/${quote.id}`} />
           <EditDrawer title="Edit highlight" triggerVariant="quiet">
             <QuoteForm
               books={books}
@@ -180,6 +183,7 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
               </details>
             </div>
           </EditDrawer>
+          </div>
         </div>
       </footer>
     </div>
