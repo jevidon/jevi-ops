@@ -5,13 +5,43 @@
 
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { execSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+
+// Build/runtime provenance for the Settings footer. Captured when the server
+// process starts (dev) or the build runs (prod) — which is exactly the
+// useful semantic: it identifies the code that is actually RUNNING, so a
+// dev server that predates a `git pull` is visible at a glance. Git being
+// absent (e.g. a Docker build from a tarball) degrades to "unknown".
+function gitMeta() {
+  const run = (cmd) => execSync(cmd, { cwd: here, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+  try {
+    return {
+      commit: run('git rev-parse --short HEAD'),
+      branch: run('git rev-parse --abbrev-ref HEAD'),
+      commitDate: run('git log -1 --format=%cs'),
+    };
+  } catch {
+    return { commit: 'unknown', branch: '', commitDate: '' };
+  }
+}
+const { commit, branch, commitDate } = gitMeta();
+const { version } = JSON.parse(readFileSync(path.join(here, 'package.json'), 'utf8'));
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
   transpilePackages: ['@jevi-ops/shared'],
+
+  // Inlined at build/boot — read by the Settings footer (see gitMeta above).
+  env: {
+    APP_VERSION: version,
+    APP_COMMIT: commit,
+    APP_BRANCH: branch,
+    APP_COMMIT_DATE: commitDate,
+  },
 
   // Self-contained server bundle for the Docker image (node server.js).
   // outputFileTracingRoot points at the monorepo root so workspace deps

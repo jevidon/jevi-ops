@@ -178,6 +178,17 @@ export default async function SettingsPage({
           <DisconnectedView />
         )}
       </SettingsSection>
+
+      {/* Build provenance — identifies the code actually RUNNING (captured
+          at server boot in dev, at build time in prod), so a dev server
+          that predates a git pull is visible at a glance. */}
+      <footer className="px-5 lg:px-0 mt-12 pt-4 border-t border-line font-mono text-[10px] uppercase tracking-wider text-ink-3">
+        Almanac v{process.env.APP_VERSION ?? '?'}
+        {' · '}
+        <span className="text-ink-2">{process.env.APP_COMMIT ?? 'unknown'}</span>
+        {process.env.APP_BRANCH ? ` · ${process.env.APP_BRANCH}` : ''}
+        {process.env.APP_COMMIT_DATE ? ` · committed ${process.env.APP_COMMIT_DATE}` : ''}
+      </footer>
     </div>
   );
 }
