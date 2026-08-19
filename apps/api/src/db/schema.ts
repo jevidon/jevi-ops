@@ -860,6 +860,9 @@ export const app_settings = pgTable("app_settings", {
 	health_module_enabled: boolean().default(false).notNull(),
 	routines_module_enabled: boolean().default(true).notNull(),
 	rule_module_enabled: boolean().default(false).notNull(),
+	// Briefing panel visibility/order (migration 0044): ordered {id, enabled}
+	// array. Null → registry defaults (resolved web-side by mergePanelConfig).
+	briefing_panels: jsonb().$type<Array<{ id: string; enabled: boolean }> | null>(),
 	updated_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [
 	check("app_settings_id_check", sql`id`),
@@ -876,6 +879,22 @@ export const daily_focus = pgTable("daily_focus", {
 	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [
 	check("daily_focus_target_type_check", sql`target_type = ANY (ARRAY['project'::text, 'content_item'::text])`),
+]);
+
+// Briefing pins (migration 0044) — user-pinned entities surfaced on the
+// Briefing homepage. Polymorphic pointer spanning ten tables → no FK
+// (daily_focus pattern); stale pins are lazily deleted by GET /api/pins.
+// Durable + manually ordered, unlike the ephemeral tasks.top3_for_date.
+export const pinned_items = pgTable("pinned_items", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	target_type: text().notNull(),
+	target_id: uuid().notNull(),
+	position: integer().notNull(),
+	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	index("idx_pinned_items_position").using("btree", table.position.asc().nullsLast()),
+	unique("pinned_items_target_unique").on(table.target_type, table.target_id),
+	check("pinned_items_target_type_check", sql`target_type = ANY (ARRAY['task'::text, 'project'::text, 'domain'::text, 'person'::text, 'company'::text, 'content_item'::text, 'book'::text, 'note'::text, 'quote'::text, 'routine'::text])`),
 ]);
 
 export const routines = pgTable("routines", {

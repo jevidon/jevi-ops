@@ -707,6 +707,9 @@ create table if not exists app_settings (
   health_module_enabled boolean not null default false,
   routines_module_enabled boolean not null default true,
   rule_module_enabled boolean not null default false,
+  -- Briefing panel visibility/order (migration 0044): ordered array of
+  -- {id, enabled}. Null → registry defaults (web mergePanelConfig).
+  briefing_panels jsonb,
   updated_at timestamptz not null default now()
 );
 
@@ -1180,6 +1183,31 @@ drop trigger if exists trg_conversations_touch on conversations;
 create trigger trg_conversations_touch
   after insert on conversations
   for each row execute function conversations_touch_associations();
+
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- Briefing pins (migration 0044)
+-- ─────────────────────────────────────────────────────────────────────────
+-- User-pinned entities surfaced on the Briefing homepage. Polymorphic
+-- pointer (no FK — spans ten tables, like daily_focus); stale pins are
+-- lazily deleted at read time by GET /api/pins. Durable and manually
+-- ordered, unlike the ephemeral tasks.top3_for_date day-pin.
+-- (The companion app_settings.briefing_panels column is declared inline
+-- in the app_settings block above.)
+
+create table if not exists pinned_items (
+  id          uuid primary key default gen_random_uuid(),
+  target_type text not null,
+  target_id   uuid not null,
+  position    integer not null,
+  created_at  timestamptz not null default now(),
+  constraint pinned_items_target_type_check check (target_type in (
+    'task','project','domain','person','company',
+    'content_item','book','note','quote','routine')),
+  constraint pinned_items_target_unique unique (target_type, target_id)
+);
+
+create index if not exists idx_pinned_items_position on pinned_items (position);
 
 
 -- ─────────────────────────────────────────────────────────────────────────
