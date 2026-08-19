@@ -46,6 +46,7 @@ export const AppSettingsSchema = z.object({
   health_module_enabled: z.boolean(),
   routines_module_enabled: z.boolean(),
   rule_module_enabled: z.boolean(),
+  shopping_module_enabled: z.boolean(),
   updated_at: z.string().datetime({ offset: true }),
 });
 
@@ -65,6 +66,7 @@ export const UpdateAppSettingsSchema = z.object({
   health_module_enabled: z.boolean().optional(),
   routines_module_enabled: z.boolean().optional(),
   rule_module_enabled: z.boolean().optional(),
+  shopping_module_enabled: z.boolean().optional(),
 });
 
 export type AppSettings = z.infer<typeof AppSettingsSchema>;

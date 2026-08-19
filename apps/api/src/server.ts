@@ -33,6 +33,7 @@ import { peopleRoutes } from './routes/people.js';
 import { companyRoutes } from './routes/companies.js';
 import { conversationRoutes } from './routes/conversations.js';
 import { routineRoutes } from './routes/routines.js';
+import { shoppingRoutes } from './routes/shopping.js';
 import { uploadRoutes } from './routes/uploads.js';
 import { briefingRoutes } from './routes/briefing.js';
 import { widgetRoutes } from './routes/widget.js';
@@ -114,6 +115,7 @@ export async function buildServer() {
   await app.register(companyRoutes);
   await app.register(conversationRoutes);
   await app.register(routineRoutes);
+  await app.register(shoppingRoutes);
   await app.register(uploadRoutes);
   await app.register(settingsRoutes);
   await app.register(healthRoutes);

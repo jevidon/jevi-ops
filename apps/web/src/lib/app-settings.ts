@@ -16,15 +16,18 @@ interface WebAppSettings {
   health_module_enabled: boolean;
   routines_module_enabled: boolean;
   rule_module_enabled: boolean;
+  shopping_module_enabled: boolean;
 }
 
 // Feature flags stored as boolean columns on app_settings. Health (Addendum
 // 05) defaults off; Routines (Addendum 06) defaults on; the Daily Rule
-// (Addendum 06) defaults OFF — retired by Addendum 09.
+// (Addendum 06) defaults OFF — retired by Addendum 09; Shopping (migration
+// 0044) defaults on.
 export type FeatureFlag =
   | 'health_module_enabled'
   | 'routines_module_enabled'
-  | 'rule_module_enabled';
+  | 'rule_module_enabled'
+  | 'shopping_module_enabled';
 
 export const getAppSettings = cache(async (): Promise<WebAppSettings> => {
   try {
@@ -36,6 +39,8 @@ export const getAppSettings = cache(async (): Promise<WebAppSettings> => {
       routines_module_enabled: settings.routines_module_enabled ?? true,
       // Default off: the Rule module stays retired unless explicitly re-enabled.
       rule_module_enabled: settings.rule_module_enabled ?? false,
+      // Default on: keep Shopping visible unless explicitly turned off.
+      shopping_module_enabled: settings.shopping_module_enabled ?? true,
     };
   } catch {
     return {
@@ -43,6 +48,7 @@ export const getAppSettings = cache(async (): Promise<WebAppSettings> => {
       health_module_enabled: false,
       routines_module_enabled: true,
       rule_module_enabled: false,
+      shopping_module_enabled: true,
     };
   }
 });

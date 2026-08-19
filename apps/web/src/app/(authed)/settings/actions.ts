@@ -131,6 +131,27 @@ export async function toggleRoutinesModuleAction(formData: FormData): Promise<Sy
   };
 }
 
+// Toggle the Shopping module (migration 0044). Default on; turning it off
+// hides Shopping from the nav and 404s its routes. Lists, items, and the
+// purchase ledger are retained.
+export async function toggleShoppingModuleAction(formData: FormData): Promise<SyncResult> {
+  const enabled = formData.get('enabled') === 'true';
+  try {
+    await settingsApi.updateApp({ shopping_module_enabled: enabled });
+  } catch (err) {
+    if (err instanceof ApiError) {
+      const body = err.body as { error?: string } | null;
+      return { ok: false, message: body?.error ?? `HTTP ${err.status}` };
+    }
+    return { ok: false, message: (err as Error).message };
+  }
+  revalidatePath('/', 'layout');
+  return {
+    ok: true,
+    message: enabled ? 'Shopping module enabled.' : 'Shopping module hidden.',
+  };
+}
+
 // Toggle the Daily Rule module flag. In this fork the Rule surfaces
 // (/shutdown, /recap, /hedge) were never ported, so the flag is inert
 // beyond hiding/showing nothing — kept for schema parity with upstream.

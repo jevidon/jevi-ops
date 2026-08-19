@@ -53,6 +53,7 @@ export default async function AuthedLayout({ children }: { children: React.React
   const timezone = await getAppTimezone();
   const healthEnabled = await getFeatureFlag('health_module_enabled');
   const routinesEnabled = await getFeatureFlag('routines_module_enabled');
+  const shoppingEnabled = await getFeatureFlag('shopping_module_enabled');
 
   return (
     <TimezoneProvider timezone={timezone}>
@@ -65,6 +66,7 @@ export default async function AuthedLayout({ children }: { children: React.React
           attentionActive={attentionActive}
           healthEnabled={healthEnabled}
           routinesEnabled={routinesEnabled}
+          shoppingEnabled={shoppingEnabled}
         />
 
         <div className="flex-1 flex flex-col min-w-0">
@@ -102,6 +104,7 @@ export default async function AuthedLayout({ children }: { children: React.React
             attentionActive={attentionActive}
             healthEnabled={healthEnabled}
             routinesEnabled={routinesEnabled}
+            shoppingEnabled={shoppingEnabled}
           />
           <SearchHotkey />
           <TextCapturePalette />

@@ -222,3 +222,56 @@ export function isCurrentlyDoneRecurring(
   if (Number.isNaN(doneMs)) return false;
   return doneMs >= periodStart(rule, nowMs);
 }
+
+// ─── Interval helpers for recurring shopping items ────────────────────
+//
+// Shopping recurrence is anchored to the PURCHASE INSTANT, not calendar
+// periods. periodStart() would be wrong here: its weekly window is
+// Monday-anchored, so milk bought Sunday night would flag as needed
+// again Monday morning. Instead an item is "due again" once a full
+// interval has elapsed since it was last purchased.
+//
+//   daily / weekdays → +1 day   ('weekdays' is degenerate for shopping;
+//                                kept so the shared vocabulary stays whole)
+//   weekly           → +7 days
+//   biweekly         → +14 days
+//   month-based      → addMonthsClamped (Jan 31 + 1mo = Feb 28/29)
+
+export function nextNeededAtMs(
+  lastPurchasedAtIso: string,
+  rule: RecurrencePattern,
+): number {
+  const last = new Date(Date.parse(lastPurchasedAtIso));
+  switch (rule) {
+    case 'daily':
+    case 'weekdays':
+      return addDays(last, 1).getTime();
+    case 'weekly':
+      return addDays(last, 7).getTime();
+    case 'biweekly':
+      return addDays(last, 14).getTime();
+    case 'monthly':
+      return addMonthsClamped(last, 1).getTime();
+    case 'quarterly':
+      return addMonthsClamped(last, 3).getTime();
+    case 'semiannually':
+      return addMonthsClamped(last, 6).getTime();
+    case 'yearly':
+      return addMonthsClamped(last, 12).getTime();
+  }
+}
+
+// Whether a recurring shopping item should auto-flag as needed: true once
+// a full interval has passed since the last purchase. Never-purchased
+// items (null) return false — a brand-new item shouldn't demand buying
+// before its first purchase establishes the cadence anchor.
+export function isDueAgain(
+  lastPurchasedAtIso: string | null | undefined,
+  rule: RecurrencePattern,
+  nowMs: number = Date.now(),
+): boolean {
+  if (!lastPurchasedAtIso) return false;
+  const lastMs = Date.parse(lastPurchasedAtIso);
+  if (Number.isNaN(lastMs)) return false;
+  return nowMs >= nextNeededAtMs(lastPurchasedAtIso, rule);
+}

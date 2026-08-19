@@ -26,6 +26,7 @@ export interface AppSettings {
   health_module_enabled: boolean;
   routines_module_enabled: boolean;
   rule_module_enabled: boolean;
+  shopping_module_enabled: boolean;
 }
 
 const DEFAULTS: AppSettings = {
@@ -41,6 +42,7 @@ const DEFAULTS: AppSettings = {
   health_module_enabled: false,
   routines_module_enabled: true,
   rule_module_enabled: false,
+  shopping_module_enabled: true,
 };
 
 // In-memory cache. Reset by invalidateAppSettings() when /api/settings/app
@@ -67,6 +69,7 @@ async function load(): Promise<AppSettings> {
       health_module_enabled: row.health_module_enabled ?? false,
       routines_module_enabled: row.routines_module_enabled ?? true,
       rule_module_enabled: row.rule_module_enabled ?? false,
+      shopping_module_enabled: row.shopping_module_enabled ?? true,
     };
   } catch {
     // Pre-migration or transient DB error — keep the app running with
