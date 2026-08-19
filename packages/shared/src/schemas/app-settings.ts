@@ -12,7 +12,9 @@ import { z } from 'zod';
 const TimezoneSchema = z
   .string()
   .min(1)
-  .regex(/^[A-Za-z_]+(?:\/[A-Za-z_+-]+){0,2}$/, 'Must be an IANA timezone string.');
+  // Later segments allow digits for the Etc/GMT+N family, which the
+  // settings picker now lists (it offers every Intl.supportedValuesOf zone).
+  .regex(/^[A-Za-z_]+(?:\/[A-Za-z0-9_+-]+){0,2}$/, 'Must be an IANA timezone string.');
 
 // Nullable-on-write string: empty string or null clears the column back to
 // "use the env fallback".
