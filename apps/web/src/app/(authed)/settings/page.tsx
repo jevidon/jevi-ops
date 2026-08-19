@@ -10,6 +10,9 @@ import { SettingsSection } from './settings-section';
 import { AppearanceForm, type ThemePref } from './appearance-form';
 import { TimezoneForm } from './timezone-form';
 import { ModulesForm } from './modules-form';
+import { BriefingPanelsForm, type PanelRow } from './briefing-panels-form';
+import { mergePanelConfig, panelDef } from '../_briefing/registry';
+import { getAppSettings } from '@/lib/app-settings';
 import { AiSettingsForm } from './ai-settings-form';
 import { ApiTokensPanel } from './api-tokens-panel';
 import { beginGoogleOAuthAction } from './actions';
@@ -30,6 +33,28 @@ export default async function SettingsPage({
   const healthEnabled = await getFeatureFlag('health_module_enabled');
   const routinesEnabled = await getFeatureFlag('routines_module_enabled');
   const ruleEnabled = await getFeatureFlag('rule_module_enabled');
+
+  // Briefing panel rows for the Settings form — resolved through the same
+  // mergePanelConfig the homepage uses, so the two can never disagree. The
+  // registry is server-only (it imports panel server components), hence the
+  // projection to plain PanelRow data here.
+  const webSettings = await getAppSettings();
+  const gateLabel: Record<string, string> = {
+    health_module_enabled: 'Health',
+    routines_module_enabled: 'Routines',
+  };
+  const panelRows: PanelRow[] = mergePanelConfig(webSettings.briefing_panels).flatMap((entry) => {
+    const def = panelDef(entry.id);
+    if (!def) return [];
+    return [{
+      id: def.id,
+      label: def.label,
+      description: def.description,
+      column: def.column,
+      enabled: entry.enabled,
+      gatedBy: def.moduleFlag ? gateLabel[def.moduleFlag] ?? def.moduleFlag : null,
+    }];
+  });
 
   let appSettings: AppSettings = {
     timezone: tz,
@@ -100,6 +125,14 @@ export default async function SettingsPage({
           routinesEnabled={routinesEnabled}
           ruleEnabled={ruleEnabled}
         />
+      </SettingsSection>
+
+      <SettingsSection title="Briefing · panels">
+        <p className="font-sans text-[12px] text-ink-3 leading-relaxed mb-3">
+          Show, hide, and reorder the panels on the home screen. Columns are
+          fixed per panel; order applies within each column.
+        </p>
+        <BriefingPanelsForm rows={panelRows} />
       </SettingsSection>
 
       <SettingsSection title="AI · language model, transcription, photos">
