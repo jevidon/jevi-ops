@@ -1,9 +1,14 @@
 'use client';
 
+import { useRef, useState } from 'react';
 import { Icon } from '../Icon';
-import type { AudioPhase } from '@/lib/use-audio-capture';
+import type { AudioPhase, AudioSupport } from '@/lib/use-audio-capture';
 import type { VoiceResult } from '@/lib/voice-actions';
 import { ResultChip } from './ResultChip';
+
+// Client-side ceiling for uploaded recordings — just under the 25MB server
+// action body limit so oversized files fail fast with a real message.
+const MAX_UPLOAD_BYTES = 24 * 1024 * 1024;
 
 export function formatElapsed(totalSeconds: number): string {
   const m = Math.floor(totalSeconds / 60);
@@ -18,18 +23,36 @@ export function formatElapsed(totalSeconds: number): string {
 export function VoiceControl({
   state,
   elapsed,
+  support,
   onStart,
   onStop,
   onCancel,
+  onUploadFile,
   mobileHint,
 }: {
   state: AudioPhase<VoiceResult>;
   elapsed: number;
+  support: AudioSupport;
   onStart: () => void;
   onStop: () => void;
   onCancel: () => void;
+  onUploadFile: (file: File) => void;
   mobileHint?: boolean;
 }) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [tooBig, setTooBig] = useState(false);
+
+  function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // allow re-picking the same file
+    if (!file) return;
+    if (file.size > MAX_UPLOAD_BYTES) {
+      setTooBig(true);
+      return;
+    }
+    setTooBig(false);
+    onUploadFile(file);
+  }
   if (state.phase === 'recording') {
     return (
       <div className="flex items-center gap-3">
@@ -75,6 +98,44 @@ export function VoiceControl({
         ) : (
           <ResultChip result={{ kind: 'http_error', message: state.message }} />
         )}
+      </div>
+    );
+  }
+
+  // Idle. Where live recording is impossible, be honest about why and offer
+  // the failover: an audio-file upload into the same STT pipeline (record in
+  // Voice Memos → upload works).
+  if (!support.ok) {
+    return (
+      <div className="flex flex-col gap-2">
+        <span className="font-sans text-[12px] text-ink-3 leading-relaxed">
+          {support.reason === 'insecure-context'
+            ? 'Voice needs a secure (HTTPS) connection — this page loaded over plain HTTP. Type it above, or upload a recording:'
+            : "This browser can't record audio. Type it above, or upload a recording:"}
+        </span>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => fileRef.current?.click()}
+            className="inline-flex items-center gap-2 px-3 py-1.5 border border-line rounded text-ink-2 hover:border-ink-3 hover:text-ink font-mono text-[10px] uppercase tracking-wider transition-colors"
+          >
+            <Icon name="mic" size={16} />
+            Upload audio
+          </button>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="audio/*"
+            onChange={onFileChange}
+            className="sr-only"
+            aria-label="Upload an audio recording"
+          />
+          {tooBig && (
+            <span className="font-sans text-[12px] text-accent">
+              That file is over 24MB — trim it first.
+            </span>
+          )}
+        </div>
       </div>
     );
   }

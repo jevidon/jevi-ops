@@ -15,6 +15,29 @@ export type AudioPhase<T> =
   | { phase: 'done'; result: T }
   | { phase: 'error'; message: string };
 
+// Whether LIVE recording is possible here, and if not, why. The big gotcha:
+// navigator.mediaDevices exists only in secure contexts (HTTPS or
+// localhost), so a phone reaching a dev box over plain http://<LAN-IP> has
+// no mic API at all — that's an environment problem, not a browser one,
+// and the copy should say so.
+export type AudioSupport =
+  | { ok: true }
+  | { ok: false; reason: 'insecure-context' | 'no-media-api' };
+
+export function getAudioSupport(): AudioSupport {
+  if (typeof navigator === 'undefined') return { ok: false, reason: 'no-media-api' }; // SSR — callers gate client-side
+  if (
+    typeof navigator.mediaDevices?.getUserMedia === 'function' &&
+    typeof MediaRecorder !== 'undefined'
+  ) {
+    return { ok: true };
+  }
+  if (typeof window !== 'undefined' && window.isSecureContext === false) {
+    return { ok: false, reason: 'insecure-context' };
+  }
+  return { ok: false, reason: 'no-media-api' };
+}
+
 // Browser support is excellent for MediaRecorder + audio/webm;codecs=opus.
 // Safari needs audio/mp4 fallback. We probe at runtime.
 function pickMimeType(): string {
@@ -51,6 +74,10 @@ export function useAudioCapture<T>(opts: {
   start: () => Promise<void>;
   stop: () => void; // stop → blob → submit
   cancel: () => void; // stop + discard, no submit
+  // Feed a pre-recorded file/blob straight into the submitting→done/error
+  // machine — the upload failover for contexts where live recording is
+  // impossible (plain-HTTP origins, old browsers).
+  submitBlob: (blob: Blob, filename: string) => void;
 } {
   const { submit, autoDismissMs = 5000 } = opts;
   const [state, setState] = useState<AudioPhase<T>>({ phase: 'idle' });
@@ -96,8 +123,15 @@ export function useAudioCapture<T>(opts: {
   }, []);
 
   const start = useCallback(async () => {
-    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
-      setState({ phase: 'error', message: 'Audio recording not supported in this browser.' });
+    const support = getAudioSupport();
+    if (!support.ok) {
+      setState({
+        phase: 'error',
+        message:
+          support.reason === 'insecure-context'
+            ? 'Voice capture needs a secure (HTTPS) connection — this page loaded over plain HTTP.'
+            : 'Audio recording not supported in this browser.',
+      });
       return;
     }
 
@@ -189,5 +223,19 @@ export function useAudioCapture<T>(opts: {
     setState({ phase: 'idle' });
   }, [stopTracks]);
 
-  return { state, elapsed, start, stop, cancel };
+  const submitBlob = useCallback((blob: Blob, filename: string) => {
+    if (blob.size === 0) {
+      setState({ phase: 'error', message: 'That file is empty.' });
+      return;
+    }
+    setState({ phase: 'submitting' });
+    const formData = new FormData();
+    formData.append('audio', blob, filename);
+    startTransition(async () => {
+      const result = await submitRef.current(formData);
+      setState({ phase: 'done', result });
+    });
+  }, []);
+
+  return { state, elapsed, start, stop, cancel, submitBlob };
 }

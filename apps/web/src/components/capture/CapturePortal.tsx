@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { BottomSheet } from '../BottomSheet';
 import { submitVoiceAudio, type VoiceResult } from '@/lib/voice-actions';
-import { useAudioCapture } from '@/lib/use-audio-capture';
+import { useAudioCapture, getAudioSupport, type AudioSupport } from '@/lib/use-audio-capture';
 import { CaptureTypeGrid } from './CaptureTypeGrid';
 import { CaptureTextBox } from './CaptureTextBox';
 import { VoiceControl, formatElapsed } from './VoiceControl';
@@ -35,6 +35,14 @@ export function CapturePortal() {
   const { state: audioState, start: audioStart, stop: audioStop, cancel: audioCancel } = audio;
   const recording = audioState.phase === 'recording';
 
+  // Probed once on mount (client-only — SSR can't know the context). Until
+  // then we optimistically render the normal voice row; the buttons re-check
+  // via start() anyway.
+  const [support, setSupport] = useState<AudioSupport>({ ok: true });
+  useEffect(() => {
+    setSupport(getAudioSupport());
+  }, []);
+
   const close = useCallback(() => setOpen(false), []);
 
   // The unified open channel.
@@ -47,6 +55,14 @@ export function CapturePortal() {
       }
       if (mode === 'record') {
         if (audioState.phase === 'submitting') return; // don't stack recordings on an in-flight one
+        // Failover: where live recording is impossible (plain-HTTP origin,
+        // old browser), a long-press opens the sheet instead of dead-ending
+        // in an error chip — the text box and the upload control are the
+        // capture paths there, and the voice row explains why.
+        if (!getAudioSupport().ok) {
+          setOpen(true);
+          return;
+        }
         setOpen(false); // star long-press records with the sheet closed
         void audioStart();
       } else {
@@ -90,9 +106,11 @@ export function CapturePortal() {
       <VoiceControl
         state={audioState}
         elapsed={audio.elapsed}
+        support={support}
         onStart={() => void audioStart()}
         onStop={audioStop}
         onCancel={audioCancel}
+        onUploadFile={(file) => audio.submitBlob(file, file.name || 'voice-upload')}
         mobileHint={mobile}
       />
     </div>
