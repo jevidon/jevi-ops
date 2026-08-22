@@ -4,7 +4,7 @@ import Link from 'next/link';
 // an unread count in its bottom-of-rail footer; on mobile that affordance
 // is below the fold (you'd have to scroll the entire Today page to see
 // it). This bell pins to the top-right of the viewport and links to
-// /notifications. Mirrors the MicFAB/TextCaptureFAB positioning idiom.
+// /notifications. Mirrors the old floating-button positioning idiom.
 //
 // Hidden entirely when unread = 0 so the screen stays calm; the rail
 // (or direct navigation) is still how you reach the page when nothing
