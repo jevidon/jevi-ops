@@ -8,6 +8,7 @@ import type { Task } from '@jevi-ops/shared';
 import type { FeatureFlag } from '@/lib/app-settings';
 
 import { FramePanel } from './panels/frame';
+import { DomainPulsePanel } from './panels/domain-pulse';
 import { SilentClientsPanel } from './panels/silent-clients';
 import { AttentionPanel } from './panels/attention';
 import { ReflectionPanel } from './panels/reflection';
@@ -31,6 +32,7 @@ import { HealthPanel } from './panels/health';
 
 export type PanelId =
   | 'frame'
+  | 'domain-pulse'
   | 'pinned'
   | 'silent-clients'
   | 'attention'
@@ -86,6 +88,14 @@ export const PANEL_REGISTRY: PanelDef[] = [
     column: 'main',
     defaultEnabled: true,
     Panel: FramePanel,
+  },
+  {
+    id: 'domain-pulse',
+    label: 'Domain pulse',
+    description: 'Every domain’s cadence heartbeat and workload — slips first, in accent.',
+    column: 'main',
+    defaultEnabled: true,
+    Panel: DomainPulsePanel,
   },
   {
     id: 'silent-clients',

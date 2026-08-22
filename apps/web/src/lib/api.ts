@@ -1359,6 +1359,15 @@ export interface CadenceRow {
   unit: string;
   next: string;
   routeTo: { href: string; label: string };
+  // Per-domain workload attached by GET /api/briefing/domains (present
+  // there; the field was previously undeclared web-side).
+  stats?: {
+    projects: number;
+    open_tasks: number;
+    overdue: number;
+    due_soon: number;
+    next_due: { date: string; title: string } | null;
+  };
 }
 
 // ─── Agenda (briefing panel) ─────────────────────────────────────────────
