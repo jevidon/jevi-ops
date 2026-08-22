@@ -170,6 +170,7 @@ export default async function TodayPage() {
     top3Count: top3.length,
     rDone,
     rTotal,
+    agendaImageUrl: settings.agenda_image_url,
   };
   const config = mergePanelConfig(settings.briefing_panels);
   const flags = { routines_module_enabled: routinesEnabled, health_module_enabled: healthEnabled };
@@ -229,22 +230,9 @@ export default async function TodayPage() {
         </div>
       )}
 
-      {/* ─── Inbox triage ────────────────────────────────────────── */}
-      {briefing && briefing.inbox_triage_count > 0 && (
-        <Link
-          href="/inbox"
-          className="mt-5 mx-5 lg:mx-0 flex items-baseline justify-between gap-3 border-l-2 border-accent pl-3 py-2 hover:bg-accent/[0.04] transition-colors"
-        >
-          <div>
-            <div className="font-mono text-[10px] uppercase tracking-[0.08em] text-accent">Inbox</div>
-            <div className="font-sans text-[13px] text-ink mt-0.5">
-              {briefing.inbox_triage_count}{' '}
-              {briefing.inbox_triage_count === 1 ? 'task needs' : 'tasks need'} a home.
-            </div>
-          </div>
-          <span className="font-mono text-[10px] uppercase tracking-wider text-accent shrink-0">Triage →</span>
-        </Link>
-      )}
+      {/* Inbox triage lives inside the Doing panel (Agenda layout v2);
+          capture lives in the ✦ portal. The page is masthead + focus +
+          panels, nothing else. */}
 
       {/* ─── Two panel columns ──────────────────────────────────────
           Left ledger (flexible), right ambient rail (fixed 348px, sticky).
@@ -259,32 +247,6 @@ export default async function TodayPage() {
         </div>
       </div>
 
-      <CaptureChips />
     </div>
-  );
-}
-
-function CaptureChips() {
-  const chips = [
-    { label: 'Journal', href: '/library/journal/new' },
-    { label: 'Quote', href: '/library/quotes/new' },
-    { label: 'Note', href: '/library/notes/new' },
-    { label: 'Task', href: '/tasks/new?from=/' },
-  ];
-  return (
-    <section className="px-5 lg:px-0 mt-9">
-      <div className="eyebrow mb-2">Capture</div>
-      <div className="flex items-center gap-2 flex-wrap">
-        {chips.map((c) => (
-          <Link key={c.label} href={c.href} className="font-sans text-[12px] font-medium text-ink-2 hover:text-ink px-3 py-1.5 border border-line rounded whitespace-nowrap transition-colors">
-            {c.label}
-          </Link>
-        ))}
-        <span className="font-mono text-[10px] uppercase tracking-wider text-ink-3 ml-1">
-          <span className="lg:hidden">— or hold the ✦ star.</span>
-          <span className="hidden lg:inline">— or press ⌘J.</span>
-        </span>
-      </div>
-    </section>
   );
 }

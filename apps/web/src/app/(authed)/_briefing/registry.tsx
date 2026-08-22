@@ -7,7 +7,8 @@ import type {
 import type { Task } from '@jevi-ops/shared';
 import type { FeatureFlag } from '@/lib/app-settings';
 
-import { NeedsAMovePanel } from './panels/needs-a-move';
+import { FramePanel } from './panels/frame';
+import { DomainPulsePanel } from './panels/domain-pulse';
 import { SilentClientsPanel } from './panels/silent-clients';
 import { AttentionPanel } from './panels/attention';
 import { ReflectionPanel } from './panels/reflection';
@@ -30,8 +31,9 @@ import { HealthPanel } from './panels/health';
 // render concurrently, and a disabled panel costs zero fetches.
 
 export type PanelId =
+  | 'frame'
+  | 'domain-pulse'
   | 'pinned'
-  | 'needs-a-move'
   | 'silent-clients'
   | 'attention'
   | 'reflection'
@@ -58,6 +60,8 @@ export interface BriefingContext {
   top3Count: number;
   rDone: number;
   rTotal: number;
+  // Frame panel image URL (migration 0045); null hides the panel.
+  agendaImageUrl: string | null;
 }
 
 export interface PanelDef {
@@ -75,21 +79,23 @@ export interface PanelDef {
 
 export const PANEL_REGISTRY: PanelDef[] = [
   // ── Main column (the ledger) ────────────────────────────────────────
+  // (needs-a-move retired in Agenda layout v2 — its slips render as the
+  // accent rows inside Domain pulse; mergePanelConfig drops the stored id.)
   {
-    id: 'pinned',
-    label: 'Pinned',
-    description: 'Anything you’ve pinned — tasks, projects, domains, people, companies, content, books, notes, quotes, routines — in your order.',
+    id: 'frame',
+    label: 'Frame',
+    description: 'The rotating image feed — set its URL above. Hidden while no URL is set.',
     column: 'main',
     defaultEnabled: true,
-    Panel: PinnedPanel,
+    Panel: FramePanel,
   },
   {
-    id: 'needs-a-move',
-    label: 'Needs a move',
-    description: 'Domains past their cadence — the slip cards.',
+    id: 'domain-pulse',
+    label: 'Domain pulse',
+    description: 'Every domain’s cadence heartbeat and workload — slips first, in accent.',
     column: 'main',
     defaultEnabled: true,
-    Panel: NeedsAMovePanel,
+    Panel: DomainPulsePanel,
   },
   {
     id: 'silent-clients',
@@ -124,6 +130,17 @@ export const PANEL_REGISTRY: PanelDef[] = [
     Panel: LatestQuotePanel,
   },
   // ── Right rail (ambient, sticky on desktop) ─────────────────────────
+  {
+    // Moved main → rail in Agenda layout v2; the left column belongs to
+    // the Frame + Domain pulse. Stored order carries over (column comes
+    // from this def, order-within-column from the stored list).
+    id: 'pinned',
+    label: 'Pinned',
+    description: 'Anything you’ve pinned — tasks, projects, domains, people, companies, content, books, notes, quotes, routines — in your order.',
+    column: 'rail',
+    defaultEnabled: true,
+    Panel: PinnedPanel,
+  },
   {
     id: 'agenda',
     // 'Timeline', not 'Agenda' — the home page itself is called Agenda in

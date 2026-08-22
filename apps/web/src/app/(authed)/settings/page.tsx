@@ -11,6 +11,7 @@ import { AppearanceForm, type ThemePref } from './appearance-form';
 import { TimezoneForm } from './timezone-form';
 import { ModulesForm } from './modules-form';
 import { BriefingPanelsForm, type PanelRow } from './briefing-panels-form';
+import { FrameUrlForm } from './frame-url-form';
 import { mergePanelConfig, panelDef } from '../_briefing/registry';
 import { getAppSettings } from '@/lib/app-settings';
 import { AiSettingsForm } from './ai-settings-form';
@@ -128,6 +129,7 @@ export default async function SettingsPage({
       </SettingsSection>
 
       <SettingsSection title="Agenda · panels">
+        <FrameUrlForm current={webSettings.agenda_image_url} />
         <p className="font-sans text-[12px] text-ink-3 leading-relaxed mb-3">
           Show, hide, and reorder the panels on the home screen. Columns are
           fixed per panel; order applies within each column.

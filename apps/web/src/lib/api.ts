@@ -1359,6 +1359,15 @@ export interface CadenceRow {
   unit: string;
   next: string;
   routeTo: { href: string; label: string };
+  // Per-domain workload attached by GET /api/briefing/domains (present
+  // there; the field was previously undeclared web-side).
+  stats?: {
+    projects: number;
+    open_tasks: number;
+    overdue: number;
+    due_soon: number;
+    next_due: { date: string; title: string } | null;
+  };
 }
 
 // ─── Agenda (briefing panel) ─────────────────────────────────────────────
@@ -1465,6 +1474,8 @@ export interface AppSettings {
   // Briefing panel visibility/order (migration 0044). Null → registry
   // defaults; resolved by mergePanelConfig in the panel registry.
   briefing_panels?: Array<{ id: string; enabled: boolean }> | null;
+  // Frame panel image URL (migration 0045); null hides the panel.
+  agenda_image_url?: string | null;
   // Fork: self-hosted AI + Immich configuration.
   llm_provider?: 'openai_compatible' | 'anthropic' | null;
   llm_base_url?: string | null;

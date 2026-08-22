@@ -91,6 +91,27 @@ export async function updateTimezoneAction(formData: FormData): Promise<SyncResu
   return { ok: true, message: `Timezone set to ${tz}.` };
 }
 
+// Frame panel image URL (migration 0045). Empty string clears → null (the
+// shared ClearableUrl transform) which hides the panel.
+export async function updateFrameUrlAction(formData: FormData): Promise<SyncResult> {
+  const url = String(formData.get('agenda_image_url') ?? '').trim();
+  if (url && !/^https?:\/\//.test(url)) {
+    return { ok: false, message: 'Must be an http(s) URL, or blank to hide the panel.' };
+  }
+  try {
+    await settingsApi.updateApp({ agenda_image_url: url || null });
+  } catch (err) {
+    if (err instanceof ApiError) {
+      const body = err.body as { error?: string } | null;
+      return { ok: false, message: body?.error ?? `HTTP ${err.status}` };
+    }
+    return { ok: false, message: (err as Error).message };
+  }
+  revalidatePath('/');
+  revalidatePath('/settings');
+  return { ok: true, message: url ? 'Frame image set.' : 'Frame image cleared — panel hidden.' };
+}
+
 // Toggle the Health module (Addendum 05). Default off; enabling reveals the
 // /health tabs in the nav. Data is retained either way.
 export async function toggleHealthModuleAction(formData: FormData): Promise<SyncResult> {
