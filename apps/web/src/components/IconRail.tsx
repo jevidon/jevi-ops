@@ -32,7 +32,7 @@ interface NavItem {
 // No Today/home item — the brand block above the nav is the home link
 // (the Briefing lives at `/` now).
 const NAV: NavItem[] = [
-  { href: '/work', label: 'Work', icon: 'work' },
+  { href: '/work', label: 'Domains', icon: 'work' },
   { href: '/tasks', label: 'Tasks', icon: 'tasks' },
   { href: '/content', label: 'Content', icon: 'content' },
   { href: '/people', label: 'People', icon: 'people' },
@@ -42,15 +42,10 @@ const NAV: NavItem[] = [
   { href: '/health', label: 'Health', icon: 'health', flag: 'health' },
 ];
 
-// Synthesize a Cmd/Ctrl+J so the global TextCapturePalette opens (same trick
-// the old rail used — cheaper than exposing a shared open()).
+// Open the Capture Portal via its unified channel (always opens; ⌘J
+// keeps toggle semantics on the keyboard path).
 function dispatchOpenCapture() {
-  const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform);
-  window.dispatchEvent(
-    new KeyboardEvent('keydown', {
-      key: 'j', code: 'KeyJ', metaKey: isMac, ctrlKey: !isMac, bubbles: true,
-    }),
-  );
+  window.dispatchEvent(new CustomEvent('text-capture:open', { detail: { mode: 'menu' } }));
 }
 
 export function IconRail({
@@ -168,7 +163,7 @@ export function IconRail({
           if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFocused(false);
         }}
         // z-40: above sticky page content (z-10/20/30), below full-screen modals
-        // like TextCapturePalette (z-50) so the collapsed rail can't paint over
+        // like the CapturePortal modal (z-50) so the collapsed rail can't paint over
         // the ⌘J palette.
         className="fixed inset-y-0 left-0 z-40 flex flex-col overflow-hidden bg-surface border-r border-line transition-[width] duration-200 ease-out"
         style={{
@@ -176,7 +171,7 @@ export function IconRail({
           boxShadow: open && !pinned ? '18px 0 40px -18px rgba(18,16,14,0.22)' : 'none',
         }}
       >
-        {/* Brand — doubles as the home link (the Briefing at `/`). */}
+        {/* Brand — doubles as the home link (the Agenda at `/`). */}
         <Link
           href="/"
           className="flex items-center gap-3 h-[60px] px-[19px] shrink-0 border-b border-line group/brand"

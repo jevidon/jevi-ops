@@ -16,8 +16,8 @@ import { CrumbTrail, useCrumbTrail } from './crumbs/crumbs';
 // First path segment → breadcrumb label + subtitle. Unlisted routes fall back
 // to a capitalised segment with no subtitle.
 const CRUMBS: Record<string, { label: string; sub?: string }> = {
-  today: { label: 'Today', sub: 'Briefing' },
-  work: { label: 'Work' },
+  today: { label: 'Agenda' },
+  work: { label: 'Domains' },
   tasks: { label: 'Tasks', sub: 'Everything open' },
   content: { label: 'Content', sub: 'Pipeline' },
   people: { label: 'People', sub: 'Relationships' },
@@ -27,8 +27,8 @@ const CRUMBS: Record<string, { label: string; sub?: string }> = {
   // Detail routes whose indexes redirect to /work — pages under these register
   // live trails when they have ancestors; this fallback covers the rest
   // (domain pages, /projects/new).
-  domains: { label: 'Work', sub: 'Domain' },
-  projects: { label: 'Work', sub: 'Project' },
+  domains: { label: 'Domains', sub: 'Domain' },
+  projects: { label: 'Domains', sub: 'Project' },
   attention: { label: 'Attention' },
   notifications: { label: 'Notifications' },
   settings: { label: 'Settings' },
@@ -49,12 +49,8 @@ const TRAIL_ROUTES = [
 ];
 
 function dispatchOpenCapture() {
-  const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform);
-  window.dispatchEvent(
-    new KeyboardEvent('keydown', {
-      key: 'j', code: 'KeyJ', metaKey: isMac, ctrlKey: !isMac, bubbles: true,
-    }),
-  );
+  // The Capture Portal's unified open channel (always opens; ⌘J toggles).
+  window.dispatchEvent(new CustomEvent('text-capture:open', { detail: { mode: 'menu' } }));
 }
 
 export function Topbar() {

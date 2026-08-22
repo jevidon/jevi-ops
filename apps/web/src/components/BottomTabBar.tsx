@@ -6,31 +6,26 @@ import { usePathname } from 'next/navigation';
 import { signOutAction } from '@/app/sign-in/actions';
 import { Icon, type IconName } from './Icon';
 import { BottomSheet } from './BottomSheet';
+import { useLongPress } from '@/lib/use-long-press';
 
-// Mobile primary nav, five positions: Work · Library · [Almanac logo] ·
-// Search · More. The logo (center, no label) is the home link — the Briefing
-// lives at `/`. Everything else the desktop IconRail exposes — Content,
+// Mobile primary nav, five positions: Agenda · Domains · [✦ Capture Portal]
+// · Search · More. The center star is the CAPTURE button, not the home link:
+// tap opens the portal sheet (create anything / type / speak), long-press
+// starts audio capture straight away. Home is the labeled Agenda tab (`/`).
+// Library and everything else the desktop IconRail exposes — Content,
 // People, Tasks, Companies, Routines, Health, Ask, Attention, Notifications,
 // Settings, sign-out — lives behind "More", which opens a bottom sheet
 // instead of cramming the bar.
-//
-// The keyboard shortcuts (⌘K search, ⌘J capture) still work but have no
-// mobile chrome, hence Capture also appearing in the More sheet flows.
 
 type TabIcon = (props: { className?: string }) => React.ReactElement;
 
 const LEFT_TABS: Array<{ href: string; label: string; Icon: TabIcon }> = [
-  // Work (Addendum 08) replaces the Domains + Projects tabs.
-  { href: '/work', label: 'Work', Icon: ProjectsIcon },
-  { href: '/library', label: 'Library', Icon: LibraryIcon },
+  { href: '/', label: 'Agenda', Icon: AgendaIcon },
+  { href: '/work', label: 'Domains', Icon: DomainsIcon },
 ];
 const RIGHT_TABS: Array<{ href: string; label: string; Icon: TabIcon }> = [
   { href: '/search', label: 'Search', Icon: SearchIcon },
 ];
-
-// /inbox stays a home doorway (keeps the logo highlighted). /tasks is reached
-// via More, so it highlights More.
-const HOME_SUBVIEWS = ['/inbox'];
 
 interface MoreItem {
   href: string;
@@ -57,17 +52,26 @@ export function BottomTabBar({
   const pathname = usePathname();
   const [moreOpen, setMoreOpen] = useState(false);
 
-  const isTabActive = (href: string) => pathname === href || pathname.startsWith(href + '/');
-  const homeActive =
-    pathname === '/' ||
-    HOME_SUBVIEWS.some((p) => pathname === p || pathname.startsWith(p + '/'));
+  // Agenda (`/`) also owns /inbox — the inbox is a home doorway. Everything
+  // else uses plain prefix matching.
+  const isTabActive = (href: string) =>
+    href === '/'
+      ? pathname === '/' || pathname === '/inbox' || pathname.startsWith('/inbox/')
+      : pathname === href || pathname.startsWith(href + '/');
 
-  // "More" owns every route that isn't a tab or a home doorway, so it
-  // highlights on Content, People, Tasks, Companies, Settings, Ask, etc.
-  const moreActive =
-    !homeActive && ![...LEFT_TABS, ...RIGHT_TABS].some((t) => isTabActive(t.href));
+  // "More" owns every route that isn't a tab, so it highlights on Library,
+  // Content, People, Tasks, Companies, Settings, Ask, etc.
+  const moreActive = ![...LEFT_TABS, ...RIGHT_TABS].some((t) => isTabActive(t.href));
+
+  const longPress = useLongPress({
+    onTap: () =>
+      window.dispatchEvent(new CustomEvent('text-capture:open', { detail: { mode: 'menu' } })),
+    onLongPress: () =>
+      window.dispatchEvent(new CustomEvent('text-capture:open', { detail: { mode: 'record' } })),
+  });
 
   const moreItems: MoreItem[] = ([
+    { href: '/library', label: 'Library', icon: 'library' },
     { href: '/content', label: 'Content', icon: 'content' },
     { href: '/people', label: 'People', icon: 'people' },
     { href: '/tasks', label: 'Tasks', icon: 'tasks' },
@@ -107,29 +111,35 @@ export function BottomTabBar({
             <TabItem key={tab.href} {...tab} active={isTabActive(tab.href)} />
           ))}
 
-          {/* Center: the Almanac mark, no label — the home link. */}
+          {/* Center: the Capture Portal star. Tap → portal sheet; long-press
+              → audio capture starts immediately (the portal's fixed bubble
+              carries recording state; a tap here while recording stops +
+              submits, handled portal-side). Pointer events only — no click
+              handler — so iOS can't ghost-fire a second activation. */}
           <li className="flex-1">
-            <Link
-              href="/"
-              aria-label="Home"
-              aria-current={homeActive ? 'page' : undefined}
-              className="flex h-full flex-col items-center justify-center"
+            <button
+              type="button"
+              aria-label="Capture"
+              aria-haspopup="dialog"
+              {...longPress}
+              className="flex h-full w-full flex-col items-center justify-center select-none"
+              style={{
+                touchAction: 'manipulation',
+                WebkitTouchCallout: 'none',
+                WebkitUserSelect: 'none',
+              }}
             >
               {/* Docked float: the mark rises out of the bar, ringed in linen
                   so it reads as sitting ON the page. Ring + star are brand
                   identity, not theme surfaces — pinned to linen so the mark
                   stays cream-on-terracotta (with the light ring) in dark mode.
                   Content scrolls under the overhang — deliberate. */}
-              <span
-                className={`grid place-items-center w-[54px] h-[54px] -mt-[18px] rounded-[15px] bg-accent border-[3px] border-[#F6F2EA] shadow-[0_4px_14px_-6px_rgba(18,16,14,0.4)] transition-opacity ${
-                  homeActive ? 'opacity-100' : 'opacity-80'
-                }`}
-              >
+              <span className="grid place-items-center w-[54px] h-[54px] -mt-[18px] rounded-[15px] bg-accent border-[3px] border-[#F6F2EA] shadow-[0_4px_14px_-6px_rgba(18,16,14,0.4)] opacity-90 active:scale-95 transition-transform">
                 <svg viewBox="0 0 32 32" className="w-[36px] h-[36px] fill-[#F6F2EA]" aria-hidden>
                   <polygon points="16,2.8 17.99,11.2 25.33,6.67 20.8,14.01 29.2,16 20.8,17.99 25.33,25.33 17.99,20.8 16,29.2 14.01,20.8 6.67,25.33 11.2,17.99 2.8,16 11.2,14.01 6.67,6.67 14.01,11.2" />
                 </svg>
               </span>
-            </Link>
+            </button>
           </li>
 
           {RIGHT_TABS.map((tab) => (
@@ -287,14 +297,14 @@ function DomainsIcon({ className }: { className?: string }) {
   );
 }
 
-function ProjectsIcon({ className }: { className?: string }) {
+function AgendaIcon({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"
       strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden>
-      {/* gantt-ish: three horizontal bars, offset like a project plan */}
-      <rect x="3" y="5" width="13" height="3" rx="0.5" />
-      <rect x="7" y="10.5" width="14" height="3" rx="0.5" />
-      <rect x="5" y="16" width="11" height="3" rx="0.5" />
+      {/* calendar sheet with a filled day dot — the home/Agenda tab */}
+      <rect x="3.5" y="5" width="17" height="15.5" rx="1" />
+      <path d="M3.5 9.5h17M8 3v4M16 3v4" />
+      <circle cx="12" cy="14.75" r="1.4" fill="currentColor" stroke="none" />
     </svg>
   );
 }
@@ -321,15 +331,3 @@ function PeopleIcon({ className }: { className?: string }) {
   );
 }
 
-function LibraryIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"
-      strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden>
-      {/* three book spines on a shelf, leaning slightly so it reads as books
-          rather than columns (which would clash with Content). */}
-      <path d="M4 4.5v15l3 .5V5.5z" />
-      <path d="M10 4.5v15l3 .5V5.5z" />
-      <path d="M16.2 5.8l3 14.7 1.5-.4-3-14.7z" />
-    </svg>
-  );
-}
