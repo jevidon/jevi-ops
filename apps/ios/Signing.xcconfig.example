@@ -1,0 +1,4 @@
+// Copy to Signing.xcconfig (gitignored) and fill in your Apple Developer
+// Team ID — developer.apple.com → Membership. Simulator builds work without
+// it (make build passes CODE_SIGNING_ALLOWED=NO).
+DEVELOPMENT_TEAM = YOUR_TEAM_ID

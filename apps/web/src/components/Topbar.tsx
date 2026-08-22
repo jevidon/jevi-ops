@@ -49,12 +49,8 @@ const TRAIL_ROUTES = [
 ];
 
 function dispatchOpenCapture() {
-  const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform);
-  window.dispatchEvent(
-    new KeyboardEvent('keydown', {
-      key: 'j', code: 'KeyJ', metaKey: isMac, ctrlKey: !isMac, bubbles: true,
-    }),
-  );
+  // The Capture Portal's unified open channel (always opens; ⌘J toggles).
+  window.dispatchEvent(new CustomEvent('text-capture:open', { detail: { mode: 'menu' } }));
 }
 
 export function Topbar() {

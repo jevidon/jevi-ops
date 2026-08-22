@@ -10,7 +10,7 @@ import { MicFAB } from '@/components/MicFAB';
 import { TextCaptureFAB } from '@/components/TextCaptureFAB';
 import { NotificationBell } from '@/components/NotificationBell';
 import { SearchHotkey } from '@/components/SearchHotkey';
-import { TextCapturePalette } from '@/components/TextCapturePalette';
+import { CapturePortal } from '@/components/capture/CapturePortal';
 import { TimezoneProvider } from '@/components/TimezoneProvider';
 import { requireUser } from '@/lib/auth';
 import { notificationsApi, attentionApi, ApiError } from '@/lib/api';
@@ -104,7 +104,7 @@ export default async function AuthedLayout({ children }: { children: React.React
             routinesEnabled={routinesEnabled}
           />
           <SearchHotkey />
-          <TextCapturePalette />
+          <CapturePortal />
           {/* Fires the "Task created" toast after a return-to-origin
               redirect (?created=<id>); Suspense keeps useSearchParams from
               deopting the authed tree to client rendering. */}
