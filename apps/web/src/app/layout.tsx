@@ -25,10 +25,14 @@ export const metadata: Metadata = {
   //   - icon (any): browser tab + bookmark
   //   - apple-touch-icon: iOS Add to Home Screen
   //   - icon-mask.svg: SVG fallback for some Android launchers
-  // The /app/icon.svg route stays for modern browsers; PNG entries below
-  // keep older clients + iOS happy.
+  // NOTE: this explicit list SUPPRESSES the app/icon.svg file-convention
+  // link, so the vector entry below must stay first — without it the tab
+  // icon silently falls back to the PNGs alone (which is how the v1 star
+  // once outlived a mark change). PNGs regenerate from the same SVG via
+  // scripts/generate-icons.mjs.
   icons: {
     icon: [
+      { url: '/icon.svg', type: 'image/svg+xml' },
       { url: '/icon-192.png', sizes: '192x192', type: 'image/png' },
       { url: '/icon-512.png', sizes: '512x512', type: 'image/png' },
       { url: '/favicon-32.png', sizes: '32x32', type: 'image/png' },

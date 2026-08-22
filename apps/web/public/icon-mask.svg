@@ -1,4 +1,15 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <!-- Almanac mark v2 "Record Rose W" ×16 — keep in sync with src/app/icon.svg -->
   <rect width="512" height="512" fill="#B8442B"/>
-  <polygon fill="#F6F2EA" points="256.00,66.56 284.56,187.05 389.95,122.05 324.95,227.44 445.44,256.00 324.95,284.56 389.95,389.95 284.56,324.95 256.00,445.44 227.44,324.95 122.05,389.95 187.05,284.56 66.56,256.00 187.05,227.44 122.05,122.05 227.44,187.05"/>
+  <g fill="#F6F2EA">
+    <circle cx="256" cy="256" r="131.2"/>
+    <g><polygon points="256,16 286.4,73.6 256,105.6"/><path fill-rule="evenodd" d="M256,16 L225.6,73.6 L256,105.6Z M248.8,45.1 L234.4,72.3 L248.8,87.5Z"/></g>
+    <g transform="rotate(90 256 256)"><polygon points="256,16 286.4,73.6 256,105.6"/><path fill-rule="evenodd" d="M256,16 L225.6,73.6 L256,105.6Z M248.8,45.1 L234.4,72.3 L248.8,87.5Z"/></g>
+    <g transform="rotate(180 256 256)"><polygon points="256,16 286.4,73.6 256,105.6"/><path fill-rule="evenodd" d="M256,16 L225.6,73.6 L256,105.6Z M248.8,45.1 L234.4,72.3 L248.8,87.5Z"/></g>
+    <g transform="rotate(270 256 256)"><polygon points="256,16 286.4,73.6 256,105.6"/><path fill-rule="evenodd" d="M256,16 L225.6,73.6 L256,105.6Z M248.8,45.1 L234.4,72.3 L248.8,87.5Z"/></g>
+    <polygon points="256,54.4 238.4,96 273.6,96" transform="rotate(45 256 256)"/>
+    <polygon points="256,54.4 238.4,96 273.6,96" transform="rotate(135 256 256)"/>
+    <polygon points="256,54.4 238.4,96 273.6,96" transform="rotate(225 256 256)"/>
+    <polygon points="256,54.4 238.4,96 273.6,96" transform="rotate(315 256 256)"/>
+  </g>
 </svg>
