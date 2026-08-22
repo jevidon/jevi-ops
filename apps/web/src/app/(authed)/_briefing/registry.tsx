@@ -7,7 +7,6 @@ import type {
 import type { Task } from '@jevi-ops/shared';
 import type { FeatureFlag } from '@/lib/app-settings';
 
-import { NeedsAMovePanel } from './panels/needs-a-move';
 import { SilentClientsPanel } from './panels/silent-clients';
 import { AttentionPanel } from './panels/attention';
 import { ReflectionPanel } from './panels/reflection';
@@ -31,7 +30,6 @@ import { HealthPanel } from './panels/health';
 
 export type PanelId =
   | 'pinned'
-  | 'needs-a-move'
   | 'silent-clients'
   | 'attention'
   | 'reflection'
@@ -75,22 +73,8 @@ export interface PanelDef {
 
 export const PANEL_REGISTRY: PanelDef[] = [
   // ── Main column (the ledger) ────────────────────────────────────────
-  {
-    id: 'pinned',
-    label: 'Pinned',
-    description: 'Anything you’ve pinned — tasks, projects, domains, people, companies, content, books, notes, quotes, routines — in your order.',
-    column: 'main',
-    defaultEnabled: true,
-    Panel: PinnedPanel,
-  },
-  {
-    id: 'needs-a-move',
-    label: 'Needs a move',
-    description: 'Domains past their cadence — the slip cards.',
-    column: 'main',
-    defaultEnabled: true,
-    Panel: NeedsAMovePanel,
-  },
+  // (needs-a-move retired in Agenda layout v2 — its slips render as the
+  // accent rows inside Domain pulse; mergePanelConfig drops the stored id.)
   {
     id: 'silent-clients',
     label: 'Silent clients',
@@ -124,6 +108,17 @@ export const PANEL_REGISTRY: PanelDef[] = [
     Panel: LatestQuotePanel,
   },
   // ── Right rail (ambient, sticky on desktop) ─────────────────────────
+  {
+    // Moved main → rail in Agenda layout v2; the left column belongs to
+    // the Frame + Domain pulse. Stored order carries over (column comes
+    // from this def, order-within-column from the stored list).
+    id: 'pinned',
+    label: 'Pinned',
+    description: 'Anything you’ve pinned — tasks, projects, domains, people, companies, content, books, notes, quotes, routines — in your order.',
+    column: 'rail',
+    defaultEnabled: true,
+    Panel: PinnedPanel,
+  },
   {
     id: 'agenda',
     // 'Timeline', not 'Agenda' — the home page itself is called Agenda in
