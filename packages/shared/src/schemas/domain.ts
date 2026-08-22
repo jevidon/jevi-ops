@@ -49,6 +49,18 @@ export const DomainSchema = z.object({
   updated_at: z.string().datetime({ offset: true }),
 });
 
+// Creation payload for POST /api/domains (the Capture Portal's "Domain"
+// tile). Deliberately minimal — cadence rules, staleness config, and the
+// illustration are post-create concerns on the detail page; the server
+// stamps the defaults (failure_patterns [], active true, is_system false,
+// parked false).
+export const CreateDomainSchema = z.object({
+  name: z.string().trim().min(1),
+  description: z.string().nullable().optional(),
+  expected_cadence: z.string().nullable().optional(),
+});
+export type CreateDomain = z.infer<typeof CreateDomainSchema>;
+
 // Patch shape used by the UI's edit form. failure_patterns is included so
 // the cadence rule editor on the domain detail page can replace the whole
 // array atomically (advanced rule types still get edited via SQL; the

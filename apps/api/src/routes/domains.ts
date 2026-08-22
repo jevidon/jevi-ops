@@ -1,6 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { asc, eq } from 'drizzle-orm';
-import { UpdateDomainSchema } from '@jevi-ops/shared/schemas';
+import { CreateDomainSchema, UpdateDomainSchema } from '@jevi-ops/shared/schemas';
 import { getDb } from '../lib/db.js';
 import { clearAttentionForSource } from '../lib/attention.js';
 import { composeDomainIllustration } from '../lib/illustration.js';
@@ -26,6 +26,30 @@ export const domainRoutes: FastifyPluginAsync = async (app) => {
     });
     if (!row) return reply.code(404).send({ error: 'not_found' });
     return row;
+  });
+
+  // POST /api/domains — create a domain (Capture Portal). Minimal payload;
+  // column defaults supply failure_patterns/active/is_system/parked, and the
+  // engraved illustration is generated later from the detail page — a new
+  // domain renders with the board's fallback art until then.
+  app.post('/api/domains', async (req, reply) => {
+    const parsed = CreateDomainSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: 'invalid_payload',
+        details: parsed.error.flatten().fieldErrors,
+      });
+    }
+    const [row] = await getDb()
+      .insert(stewardship_domains)
+      .values({
+        name: parsed.data.name,
+        description: parsed.data.description ?? null,
+        expected_cadence: parsed.data.expected_cadence ?? null,
+      })
+      .returning();
+    if (!row) throw app.httpErrors.internalServerError('insert_returned_no_row');
+    return reply.code(201).send(row);
   });
 
   app.patch<{ Params: { id: string } }>('/api/domains/:id', async (req, reply) => {

@@ -283,6 +283,15 @@ export const projectsApi = {
   },
 };
 
+// Creation payload (Capture Portal "Domain" tile). Minimal by design —
+// cadence rules, staleness config, and the illustration are post-create
+// concerns on the detail page.
+export interface DomainCreate {
+  name: string;
+  description?: string | null;
+  expected_cadence?: string | null;
+}
+
 export interface DomainUpdate {
   name?: string;
   description?: string | null;
@@ -336,6 +345,7 @@ export const contentApi = {
 export const domainsApi = {
   list: () => api.get<{ domains: Domain[] }>('/api/domains'),
   get: (id: string) => api.get<Domain>(`/api/domains/${id}`),
+  create: (body: DomainCreate) => api.post<Domain>('/api/domains', body),
   update: (id: string, body: DomainUpdate) => api.patch<Domain>(`/api/domains/${id}`, body),
   // Illustration candidate workflow. All composition/sanitizing happens
   // server-side — illustrations are never client-supplied (hence not part
