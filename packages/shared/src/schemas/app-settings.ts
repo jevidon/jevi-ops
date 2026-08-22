@@ -59,6 +59,8 @@ export const AppSettingsSchema = z.object({
   routines_module_enabled: z.boolean(),
   rule_module_enabled: z.boolean(),
   briefing_panels: BriefingPanelConfigSchema.nullable(),
+  // Frame panel image URL (migration 0045); null hides the panel.
+  agenda_image_url: z.string().nullable(),
   updated_at: z.string().datetime({ offset: true }),
 });
 
@@ -79,6 +81,7 @@ export const UpdateAppSettingsSchema = z.object({
   routines_module_enabled: z.boolean().optional(),
   rule_module_enabled: z.boolean().optional(),
   briefing_panels: BriefingPanelConfigSchema.nullable().optional(),
+  agenda_image_url: ClearableUrl.optional(),
 });
 
 export type AppSettings = z.infer<typeof AppSettingsSchema>;

@@ -710,6 +710,8 @@ create table if not exists app_settings (
   -- Briefing panel visibility/order (migration 0044): ordered array of
   -- {id, enabled}. Null → registry defaults (web mergePanelConfig).
   briefing_panels jsonb,
+  -- Frame panel image URL (migration 0045); null hides the panel.
+  agenda_image_url text,
   updated_at timestamptz not null default now()
 );
 

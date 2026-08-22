@@ -1465,6 +1465,8 @@ export interface AppSettings {
   // Briefing panel visibility/order (migration 0044). Null → registry
   // defaults; resolved by mergePanelConfig in the panel registry.
   briefing_panels?: Array<{ id: string; enabled: boolean }> | null;
+  // Frame panel image URL (migration 0045); null hides the panel.
+  agenda_image_url?: string | null;
   // Fork: self-hosted AI + Immich configuration.
   llm_provider?: 'openai_compatible' | 'anthropic' | null;
   llm_base_url?: string | null;
