@@ -32,7 +32,7 @@ interface NavItem {
 // No Today/home item — the brand block above the nav is the home link
 // (the Briefing lives at `/` now).
 const NAV: NavItem[] = [
-  { href: '/work', label: 'Work', icon: 'work' },
+  { href: '/work', label: 'Domains', icon: 'work' },
   { href: '/tasks', label: 'Tasks', icon: 'tasks' },
   { href: '/content', label: 'Content', icon: 'content' },
   { href: '/people', label: 'People', icon: 'people' },
@@ -171,7 +171,7 @@ export function IconRail({
           boxShadow: open && !pinned ? '18px 0 40px -18px rgba(18,16,14,0.22)' : 'none',
         }}
       >
-        {/* Brand — doubles as the home link (the Briefing at `/`). */}
+        {/* Brand — doubles as the home link (the Agenda at `/`). */}
         <Link
           href="/"
           className="flex items-center gap-3 h-[60px] px-[19px] shrink-0 border-b border-line group/brand"

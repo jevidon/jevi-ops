@@ -126,7 +126,10 @@ export const PANEL_REGISTRY: PanelDef[] = [
   // ── Right rail (ambient, sticky on desktop) ─────────────────────────
   {
     id: 'agenda',
-    label: 'Agenda',
+    // 'Timeline', not 'Agenda' — the home page itself is called Agenda in
+    // nav now (Aug 2026), so the panel takes the more specific name. The
+    // id stays 'agenda' (it's persisted in app_settings.briefing_panels).
+    label: 'Timeline',
     description: 'Today’s timeline — calendar events and tasks due today, interleaved by time.',
     column: 'rail',
     defaultEnabled: true,

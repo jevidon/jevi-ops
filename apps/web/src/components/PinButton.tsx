@@ -31,7 +31,7 @@ export async function PinButton({
       <input type="hidden" name="path" value={path} />
       <button
         type="submit"
-        title={pinned ? 'Unpin from the Briefing' : 'Pin to the Briefing'}
+        title={pinned ? 'Unpin from the Agenda' : 'Pin to the Agenda'}
         className={`inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.08em] border rounded px-2.5 py-1.5 transition-colors whitespace-nowrap ${
           pinned
             ? 'border-accent-line text-accent hover:border-accent'

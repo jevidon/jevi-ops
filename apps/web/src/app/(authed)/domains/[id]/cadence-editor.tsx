@@ -66,7 +66,7 @@ export function CadenceEditor({
       </div>
 
       <p className="font-sans text-[12px] text-ink-3 leading-relaxed">
-        Once a domain crosses the threshold, the Briefing&rsquo;s &ldquo;In
+        Once a domain crosses the threshold, the Agenda&rsquo;s &ldquo;In
         brief&rdquo; surfaces it as slipping and the /domains pulse board
         sorts it worst-first. Pick &ldquo;None&rdquo; to drop the rule —
         the domain stays in the list but won&rsquo;t fire.
