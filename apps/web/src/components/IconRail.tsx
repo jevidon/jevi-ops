@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { signOutAction } from '@/app/sign-in/actions';
 import { Icon, type IconName } from './Icon';
+import { AlmanacMark } from './AlmanacMark';
 
 // v2 collapsible icon rail (design handoff, Jul 2026). Replaces the permanent
 // 220px DesktopRail. Collapsed it is 64px of icons; it expands to 236px on
@@ -180,13 +181,10 @@ export function IconRail({
             className="grid place-items-center shrink-0 w-[26px] h-[26px] rounded-md bg-accent"
             aria-hidden
           >
-            {/* Almanac eight-point star — same geometry as the favicon set
-                (outer R 13.2 / inner r 5.2 in a 32 box). Brand identity, not
-                a theme surface: the fill is pinned to linen so the mark stays
-                cream-on-terracotta in dark mode too. */}
-            <svg viewBox="0 0 32 32" className="w-[19px] h-[19px] fill-[#F6F2EA]">
-              <polygon points="16,2.8 17.99,11.2 25.33,6.67 20.8,14.01 29.2,16 20.8,17.99 25.33,25.33 17.99,20.8 16,29.2 14.01,20.8 6.67,25.33 11.2,17.99 2.8,16 11.2,14.01 6.67,6.67 14.01,11.2" />
-            </svg>
+            {/* Almanac mark v2 (Record Rose) — same geometry as the favicon.
+                Brand identity, not a theme surface: pinned linen fill so the
+                mark stays cream-on-terracotta in dark mode too. */}
+            <AlmanacMark className="w-[19px] h-[19px]" />
           </span>
           <span
             className={`whitespace-nowrap transition-opacity duration-100 ${open ? 'opacity-100' : 'opacity-0'}`}

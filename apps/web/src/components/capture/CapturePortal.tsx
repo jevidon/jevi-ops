@@ -45,6 +45,14 @@ export function CapturePortal() {
 
   const close = useCallback(() => setOpen(false), []);
 
+  // Broadcast recorder state so the tab bar's mark can pulse its disc while
+  // listening (the star stays a dumb dispatcher with no shared state).
+  useEffect(() => {
+    window.dispatchEvent(
+      new CustomEvent('capture:recording-change', { detail: { recording } }),
+    );
+  }, [recording]);
+
   // The unified open channel.
   useEffect(() => {
     function onOpen(e: Event) {

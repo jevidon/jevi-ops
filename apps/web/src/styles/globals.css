@@ -200,3 +200,20 @@ body {
 .domain-ill-accent .f {
   color: rgb(var(--accent-slip) / 0.45); /* accent-slip, washed */
 }
+
+/* Capture Portal recording state — the Almanac mark's record disc pulses
+   while the recorder is live (AlmanacMark coreClassName, set by the
+   BottomTabBar from the portal's capture:recording-change events). */
+@keyframes mark-core-pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(0.82); opacity: 0.85; }
+}
+.mark-core-recording {
+  transform-origin: center;
+  transform-box: fill-box;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .mark-core-recording {
+    animation: mark-core-pulse 1.15s ease-in-out infinite;
+  }
+}

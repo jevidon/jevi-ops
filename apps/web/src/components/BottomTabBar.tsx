@@ -1,11 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { signOutAction } from '@/app/sign-in/actions';
 import { Icon, type IconName } from './Icon';
 import { BottomSheet } from './BottomSheet';
+import { AlmanacMark } from './AlmanacMark';
 import { useLongPress } from '@/lib/use-long-press';
 
 // Mobile primary nav, five positions: Agenda · Domains · [✦ Capture Portal]
@@ -51,6 +52,16 @@ export function BottomTabBar({
 } = {}) {
   const pathname = usePathname();
   const [moreOpen, setMoreOpen] = useState(false);
+  // The CapturePortal broadcasts recorder state so the mark's disc can pulse
+  // while listening — the star itself stays a dumb dispatcher.
+  const [capturing, setCapturing] = useState(false);
+  useEffect(() => {
+    function onChange(e: Event) {
+      setCapturing(Boolean((e as CustomEvent<{ recording?: boolean }>).detail?.recording));
+    }
+    window.addEventListener('capture:recording-change', onChange);
+    return () => window.removeEventListener('capture:recording-change', onChange);
+  }, []);
 
   // Agenda (`/`) also owns /inbox — the inbox is a home doorway. Everything
   // else uses plain prefix matching.
@@ -130,14 +141,16 @@ export function BottomTabBar({
               }}
             >
               {/* Docked float: the mark rises out of the bar, ringed in linen
-                  so it reads as sitting ON the page. Ring + star are brand
-                  identity, not theme surfaces — pinned to linen so the mark
-                  stays cream-on-terracotta (with the light ring) in dark mode.
-                  Content scrolls under the overhang — deliberate. */}
+                  so it reads as sitting ON the page. Ring + mark are brand
+                  identity, not theme surfaces — pinned to linen so it stays
+                  cream-on-terracotta (with the light ring) in dark mode.
+                  Content scrolls under the overhang — deliberate. The disc
+                  pulses while the portal is recording. */}
               <span className="grid place-items-center w-[54px] h-[54px] -mt-[18px] rounded-[15px] bg-accent border-[3px] border-[#F6F2EA] shadow-[0_4px_14px_-6px_rgba(18,16,14,0.4)] opacity-90 active:scale-95 transition-transform">
-                <svg viewBox="0 0 32 32" className="w-[36px] h-[36px] fill-[#F6F2EA]" aria-hidden>
-                  <polygon points="16,2.8 17.99,11.2 25.33,6.67 20.8,14.01 29.2,16 20.8,17.99 25.33,25.33 17.99,20.8 16,29.2 14.01,20.8 6.67,25.33 11.2,17.99 2.8,16 11.2,14.01 6.67,6.67 14.01,11.2" />
-                </svg>
+                <AlmanacMark
+                  className="w-[36px] h-[36px]"
+                  coreClassName={capturing ? 'mark-core-recording' : undefined}
+                />
               </span>
             </button>
           </li>
