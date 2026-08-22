@@ -8,7 +8,7 @@ import { Icon, type IconName } from './Icon';
 import { BottomSheet } from './BottomSheet';
 import { useLongPress } from '@/lib/use-long-press';
 
-// Mobile primary nav, five positions: Domains · Agenda · [✦ Capture Portal]
+// Mobile primary nav, five positions: Agenda · Domains · [✦ Capture Portal]
 // · Search · More. The center star is the CAPTURE button, not the home link:
 // tap opens the portal sheet (create anything / type / speak), long-press
 // starts audio capture straight away. Home is the labeled Agenda tab (`/`).
@@ -20,8 +20,8 @@ import { useLongPress } from '@/lib/use-long-press';
 type TabIcon = (props: { className?: string }) => React.ReactElement;
 
 const LEFT_TABS: Array<{ href: string; label: string; Icon: TabIcon }> = [
-  { href: '/work', label: 'Domains', Icon: DomainsIcon },
   { href: '/', label: 'Agenda', Icon: AgendaIcon },
+  { href: '/work', label: 'Domains', Icon: DomainsIcon },
 ];
 const RIGHT_TABS: Array<{ href: string; label: string; Icon: TabIcon }> = [
   { href: '/search', label: 'Search', Icon: SearchIcon },
