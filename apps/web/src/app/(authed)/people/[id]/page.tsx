@@ -5,6 +5,7 @@ import {
   DetailHeader, CrumbDot, ActionButton, StatStrip, Stat, DetailBody, DetailSection, RailBlock,
 } from '@/components/detail/DetailShell';
 import { EditDrawer } from '@/components/detail/EditDrawer';
+import { PinButton } from '@/components/PinButton';
 import {
   peopleApi, companiesApi, ApiError,
   type PersonDetail, type Person, type PersonFact, type PersonFactType, type Conversation,
@@ -118,6 +119,7 @@ export default async function PersonDetailPage({ params }: { params: Promise<{ i
         }
         actions={
           <>
+            <PinButton targetType="person" targetId={person.id} path={`/people/${person.id}`} />
             <ActionButton href="#conversations">＋ Conversation</ActionButton>
             <ActionButton href="#facts">＋ Fact</ActionButton>
             <EditDrawer title="Edit person">

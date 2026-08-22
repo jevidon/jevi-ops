@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { apiPublicUrl } from '@/lib/server-env';
 import { authApi, calendarApi, googleApi, settingsApi, ApiError, type UpdateAppSettingsBody } from '@/lib/api';
+import { BriefingPanelConfigSchema } from '@jevi-ops/shared/schemas';
 import { requireUser } from '@/lib/auth';
 import { signOAuthBridgeToken } from '@/lib/oauth-bridge';
 
@@ -229,4 +230,29 @@ export async function revokeApiTokenAction(id: string): Promise<SyncResult> {
   } catch (err) {
     return { ok: false, message: errMessage(err) };
   }
+}
+
+// ─── Briefing panels (migration 0044) ────────────────────────────────────
+
+// The form posts the FULL next config as hidden JSON (each button computes
+// the complete ordered array client-side — no ambiguity, no single-move
+// races). Validated with the shared schema so malformed config can never
+// reach the homepage.
+export async function updateBriefingPanelsAction(formData: FormData): Promise<SyncResult> {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(String(formData.get('config') ?? ''));
+  } catch {
+    return { ok: false, message: 'Malformed panel config.' };
+  }
+  const parsed = BriefingPanelConfigSchema.safeParse(raw);
+  if (!parsed.success) return { ok: false, message: 'Malformed panel config.' };
+  try {
+    await settingsApi.updateApp({ briefing_panels: parsed.data });
+  } catch (err) {
+    return { ok: false, message: errMessage(err) };
+  }
+  revalidatePath('/');
+  revalidatePath('/settings');
+  return { ok: true, message: 'Briefing layout saved.' };
 }

@@ -26,6 +26,11 @@ export interface AppSettings {
   health_module_enabled: boolean;
   routines_module_enabled: boolean;
   rule_module_enabled: boolean;
+  // Briefing panel visibility/order (migration 0044); null → registry
+  // defaults. This interface is an explicit projection — a new column
+  // MUST be added here and in load() or GET /api/settings/app silently
+  // drops it while PATCH persists it (write-only settings bug).
+  briefing_panels: Array<{ id: string; enabled: boolean }> | null;
 }
 
 const DEFAULTS: AppSettings = {
@@ -41,6 +46,7 @@ const DEFAULTS: AppSettings = {
   health_module_enabled: false,
   routines_module_enabled: true,
   rule_module_enabled: false,
+  briefing_panels: null,
 };
 
 // In-memory cache. Reset by invalidateAppSettings() when /api/settings/app
@@ -67,6 +73,7 @@ async function load(): Promise<AppSettings> {
       health_module_enabled: row.health_module_enabled ?? false,
       routines_module_enabled: row.routines_module_enabled ?? true,
       rule_module_enabled: row.rule_module_enabled ?? false,
+      briefing_panels: row.briefing_panels ?? null,
     };
   } catch {
     // Pre-migration or transient DB error — keep the app running with

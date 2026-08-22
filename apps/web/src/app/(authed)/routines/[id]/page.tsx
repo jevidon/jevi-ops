@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { ScreenHeader } from '@/components/ScreenHeader';
+import { PinButton } from '@/components/PinButton';
 import { routinesApi, ApiError, type RoutineDetail } from '@/lib/api';
 import { recentDaysGrid } from '@jevi-ops/shared';
 import { RoutineForm } from '../routine-form';
@@ -84,11 +85,12 @@ export default async function RoutineDetailPage({
           </div>
           <h1 className="font-serif text-[40px] font-medium leading-[1.02] tracking-[-0.022em] text-ink">{routine.name}</h1>
         </div>
-        {routine.active && (
-          <div className="pb-1">
+        <div className="pb-1 flex items-center gap-2.5">
+          <PinButton targetType="routine" targetId={routine.id} path={`/routines/${routine.id}`} />
+          {routine.active && (
             <Pill state={stats.done_today ? 'ok' : 'due'}>{stats.done_today ? 'Done today' : 'Not done yet today'}</Pill>
-          </div>
-        )}
+          )}
+        </div>
       </div>
       <div className="hairline mt-4" />
 

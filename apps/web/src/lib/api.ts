@@ -1351,9 +1351,55 @@ export interface CadenceRow {
   routeTo: { href: string; label: string };
 }
 
+// ─── Agenda (briefing panel) ─────────────────────────────────────────────
+// Server-merged day timeline: events + tasks due today, app-tz sorted, time
+// labels pre-formatted API-side.
+
+export interface AgendaTask {
+  id: string;
+  title: string;
+  status: string;
+  due_time: string | null;
+  priority: number;
+  project: { id: string; name: string } | null;
+}
+
+export type AgendaEntry =
+  | { kind: 'event'; id: string; title: string; time_label: string; end_label: string | null; location: string | null }
+  | { kind: 'task'; time_label: string; task: AgendaTask };
+
+export interface AgendaPayload {
+  date: string;
+  all_day: Array<{ id: string; title: string }>;
+  timeline: AgendaEntry[];
+  untimed_tasks: AgendaTask[];
+}
+
 export const briefingApi = {
   today: () => api.get<BriefingPayload>('/api/briefing/today'),
   domains: () => api.get<{ domains: CadenceRow[] }>('/api/briefing/domains'),
+  agenda: () => api.get<AgendaPayload>('/api/briefing/agenda'),
+};
+
+// ─── Pins (Briefing panel, migration 0044) ───────────────────────────────
+
+import type { PinTargetType, ResolvedPin } from '@jevi-ops/shared';
+export type { PinTargetType, ResolvedPin } from '@jevi-ops/shared';
+
+export const pinsApi = {
+  list: () => api.get<{ pins: ResolvedPin[] }>('/api/pins'),
+  lookup: (targetType: PinTargetType, targetId: string) =>
+    api.get<{ pin: { id: string } | null }>(
+      `/api/pins/lookup?target_type=${targetType}&target_id=${targetId}`,
+    ),
+  create: (targetType: PinTargetType, targetId: string) =>
+    api.post<{ pin: { id: string } }>('/api/pins', {
+      target_type: targetType,
+      target_id: targetId,
+    }),
+  remove: (targetType: PinTargetType, targetId: string) =>
+    api.delete<void>(`/api/pins?target_type=${targetType}&target_id=${targetId}`),
+  reorder: (ids: string[]) => api.patch<void>('/api/pins/reorder', { ids }),
 };
 
 // ─── Notifications ───────────────────────────────────────────────────────
@@ -1406,6 +1452,9 @@ export interface AppSettings {
   routines_module_enabled: boolean;
   // Daily Rule (Addendum 06), retired by Addendum 09 — defaults false.
   rule_module_enabled: boolean;
+  // Briefing panel visibility/order (migration 0044). Null → registry
+  // defaults; resolved by mergePanelConfig in the panel registry.
+  briefing_panels?: Array<{ id: string; enabled: boolean }> | null;
   // Fork: self-hosted AI + Immich configuration.
   llm_provider?: 'openai_compatible' | 'anthropic' | null;
   llm_base_url?: string | null;

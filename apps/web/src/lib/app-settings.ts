@@ -16,6 +16,10 @@ interface WebAppSettings {
   health_module_enabled: boolean;
   routines_module_enabled: boolean;
   rule_module_enabled: boolean;
+  // Briefing panel visibility/order (migration 0044); null → registry
+  // defaults. Projected here deliberately — this interface drops unknown
+  // fields, so forgetting this line silently loses the config.
+  briefing_panels: Array<{ id: string; enabled: boolean }> | null;
 }
 
 // Feature flags stored as boolean columns on app_settings. Health (Addendum
@@ -36,6 +40,7 @@ export const getAppSettings = cache(async (): Promise<WebAppSettings> => {
       routines_module_enabled: settings.routines_module_enabled ?? true,
       // Default off: the Rule module stays retired unless explicitly re-enabled.
       rule_module_enabled: settings.rule_module_enabled ?? false,
+      briefing_panels: settings.briefing_panels ?? null,
     };
   } catch {
     return {
@@ -43,6 +48,7 @@ export const getAppSettings = cache(async (): Promise<WebAppSettings> => {
       health_module_enabled: false,
       routines_module_enabled: true,
       rule_module_enabled: false,
+      briefing_panels: null,
     };
   }
 });

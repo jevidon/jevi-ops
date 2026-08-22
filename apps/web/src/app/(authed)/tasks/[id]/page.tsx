@@ -7,6 +7,7 @@ import {
   DetailHeader, CrumbDot, StatStrip, Stat, DetailBody, DetailSection, RailBlock,
 } from '@/components/detail/DetailShell';
 import { EditDrawer } from '@/components/detail/EditDrawer';
+import { PinButton } from '@/components/PinButton';
 import { tasksApi, projectsApi, contentApi, domainsApi, ApiError } from '@/lib/api';
 import { getAppTimezone } from '@/lib/app-settings';
 import { todayIsoDate } from '@/lib/today';
@@ -153,7 +154,9 @@ export default async function TaskDetailPage({
         name={task.title}
         state={<Pill state={state.s}>{state.label}</Pill>}
         actions={
-          <EditDrawer title="Edit task">
+          <>
+            <PinButton targetType="task" targetId={task.id} path={`/tasks/${task.id}`} />
+            <EditDrawer title="Edit task">
             <TaskForm
               initial={{
                 id: task.id,
@@ -185,6 +188,7 @@ export default async function TaskDetailPage({
               projectMilestones={projectMilestones}
             />
           </EditDrawer>
+          </>
         }
         below={
           // Status controls — complete / reopen / waiting (Addendum 08),

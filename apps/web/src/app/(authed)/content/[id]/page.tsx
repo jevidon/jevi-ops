@@ -6,6 +6,7 @@ import {
   DetailHeader, CrumbDot, ActionButton, StatStrip, Stat, DetailBody, DetailSection, RailBlock,
 } from '@/components/detail/DetailShell';
 import { EditDrawer } from '@/components/detail/EditDrawer';
+import { PinButton } from '@/components/PinButton';
 import { contentApi, domainsApi, tasksApi, ApiError, type ContentItem, type ContentItemStatus } from '@/lib/api';
 import { contentUrgency, moveVerb, type Urgency } from '@jevi-ops/shared';
 import type { Task } from '@jevi-ops/shared';
@@ -137,6 +138,7 @@ export default async function ContentDetailPage({ params }: { params: Promise<{ 
         state={<Pill state={urg}>{chipLabel}</Pill>}
         actions={
           <>
+            <PinButton targetType="content_item" targetId={item.id} path={`/content/${item.id}`} />
             {primary}
             <ActionButton href={`/tasks/new?content_item_id=${item.id}&from=/content/${item.id}`}>＋ Task</ActionButton>
             <EditDrawer title="Edit content">

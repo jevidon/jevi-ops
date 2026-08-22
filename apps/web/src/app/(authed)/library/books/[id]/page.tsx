@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import { libraryApi, ApiError, type Book, type Quote } from '@/lib/api';
 import { getAppTimezone } from '@/lib/app-settings';
 import { EditDrawer } from '@/components/detail/EditDrawer';
+import { PinButton } from '@/components/PinButton';
 import { BookForm } from '../book-form';
 
 // /library/books/[id] — a book shrine (Detail Pages v2, Addendum 10 §10). Cover
@@ -86,7 +87,8 @@ export default async function BookDetailPage({ params }: { params: Promise<{ id:
             </div>
           )}
 
-          <div className="mt-6">
+          <div className="mt-6 flex items-center gap-3">
+            <PinButton targetType="book" targetId={book.id} path={`/library/books/${book.id}`} />
             <EditDrawer title="Edit book" triggerVariant="quiet">
               <BookForm
                 initial={{

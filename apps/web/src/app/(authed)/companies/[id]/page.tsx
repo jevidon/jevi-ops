@@ -5,6 +5,7 @@ import {
   DetailHeader, CrumbDot, ActionButton, StatStrip, Stat, DetailBody, DetailSection, RailBlock,
 } from '@/components/detail/DetailShell';
 import { EditDrawer } from '@/components/detail/EditDrawer';
+import { PinButton } from '@/components/PinButton';
 import {
   companiesApi, domainsApi, ApiError,
   type CompanyDetail, type CompanyRelationshipType, type CompanyOpenTask, type Conversation,
@@ -138,6 +139,7 @@ export default async function CompanyDetailPage({ params }: { params: Promise<{ 
         state={<Pill state={urg}>{chipLabel}</Pill>}
         actions={
           <>
+            <PinButton targetType="company" targetId={company.id} path={`/companies/${company.id}`} />
             <ActionButton href="#conversations">＋ Conversation</ActionButton>
             <EditDrawer title="Edit company">
               <CompanyForm

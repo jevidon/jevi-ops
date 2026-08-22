@@ -4,6 +4,7 @@ import { libraryApi, ApiError, type Note, type NoteSourceType } from '@/lib/api'
 import { getAppTimezone } from '@/lib/app-settings';
 import { PhotoGallery } from '@/components/PhotoGallery';
 import { EditDrawer } from '@/components/detail/EditDrawer';
+import { PinButton } from '@/components/PinButton';
 import { BoostButton } from '@/components/BoostButton';
 import { EditNoteForm } from './edit-note-form';
 
@@ -106,6 +107,8 @@ export default async function NoteDetailPage({ params }: { params: Promise<{ id:
             <span className="eyebrow">Resurfacing</span>
             <BoostButton kind="note" id={note.id} weight={note.resurface_weight} />
           </div>
+          <div className="flex items-center gap-3">
+          <PinButton targetType="note" targetId={note.id} path={`/library/notes/${note.id}`} />
           <EditDrawer title="Edit note" triggerVariant="quiet">
             <EditNoteForm
               initial={{
@@ -120,6 +123,7 @@ export default async function NoteDetailPage({ params }: { params: Promise<{ id:
               }}
             />
           </EditDrawer>
+          </div>
         </div>
       </footer>
     </div>

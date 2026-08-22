@@ -6,6 +6,7 @@ import {
   DetailBody, DetailSection, RailBlock,
 } from '@/components/detail/DetailShell';
 import { EditDrawer } from '@/components/detail/EditDrawer';
+import { PinButton } from '@/components/PinButton';
 import { domainsApi, tasksApi, workApi, ApiError, type WorkDomain } from '@/lib/api';
 import type { Domain, Task } from '@jevi-ops/shared';
 import { domainColor } from '@/lib/domain-colors';
@@ -223,6 +224,8 @@ export default async function DomainDetailPage({
               : undefined
           ) : (
             <>
+              {/* Inbox is a system domain — pinning it would be noise. */}
+              <PinButton targetType="domain" targetId={domain.id} path={`/domains/${domain.id}`} />
               <ActionButton href={`/projects/new?domain_id=${domain.id}`}>＋ Project</ActionButton>
               <ActionButton href={`/tasks/new?domain_id=${domain.id}&from=/domains/${domain.id}`}>＋ Task</ActionButton>
               <EditDrawer title="Edit domain">

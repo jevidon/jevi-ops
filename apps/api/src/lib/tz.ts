@@ -59,6 +59,17 @@ export function startOfLocalDayIso(localDate: string, tz: string): string {
   return localWallTimeIso(localDate, 0, 0, tz);
 }
 
+// The UTC instants bounding the app-tz calendar day [start, end): local
+// midnight of `localDate` through local midnight of the next day. Use this
+// for any "events today" query — a raw `${date}T00:00:00Z` window is the
+// UTC day, which drops evening events in west-of-UTC zones.
+export function dayWindowUtc(localDate: string, tz: string): { start: string; end: string } {
+  return {
+    start: startOfLocalDayIso(localDate, tz),
+    end: startOfLocalDayIso(addDays(localDate, 1), tz),
+  };
+}
+
 // Local date `n` days after `localDate` (n may be negative). Pure calendar
 // arithmetic: build the UTC-midnight instant of localDate+n and read its date
 // back in UTC (a calendar date is timezone-independent). Formatting the result

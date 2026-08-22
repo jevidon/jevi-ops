@@ -1,8 +1,9 @@
 import type { FastifyPluginAsync } from 'fastify';
-import { and, asc, count, desc, eq, gte, inArray, isNull, lte } from 'drizzle-orm';
+import { and, asc, count, desc, eq, gte, inArray, isNull, lt, lte, or } from 'drizzle-orm';
 import { getAppTz } from '../lib/app-settings.js';
 import { computeDomainCadences, type CadenceRow } from '../lib/cadence.js';
 import { getDb } from '../lib/db.js';
+import { addDays, dayWindowUtc, todayInTz } from '../lib/tz.js';
 import {
   calendar_events,
   projects,
@@ -142,11 +143,23 @@ export const briefingRoutes: FastifyPluginAsync = async (app) => {
       computeDomainCadences(db),
       db.select({ n: count() }).from(tasks)
         .where(and(eq(tasks.domain_id, INBOX_ID), eq(tasks.status, 'open'))),
+      // Timed events use the app-tz day window, not a raw UTC one — a
+      // `${today}T00:00:00Z` window is the UTC day, which dropped evening
+      // events in America/Denver. All-day events are stored AT UTC midnight
+      // of their calendar date, so they match by UTC date instead.
       db.query.calendar_events.findMany({
-        columns: { start_at: true, title: true },
-        where: and(
-          gte(calendar_events.start_at, `${today}T00:00:00Z`),
-          lte(calendar_events.start_at, `${today}T23:59:59Z`),
+        columns: { start_at: true, title: true, all_day: true },
+        where: or(
+          and(
+            eq(calendar_events.all_day, false),
+            gte(calendar_events.start_at, dayWindowUtc(today, tz).start),
+            lt(calendar_events.start_at, dayWindowUtc(today, tz).end),
+          ),
+          and(
+            eq(calendar_events.all_day, true),
+            gte(calendar_events.start_at, `${today}T00:00:00Z`),
+            lt(calendar_events.start_at, `${addDays(today, 1)}T00:00:00Z`),
+          ),
         ),
         orderBy: asc(calendar_events.start_at),
       }),
@@ -174,10 +187,13 @@ export const briefingRoutes: FastifyPluginAsync = async (app) => {
     const inboxCount = inboxCountRows[0]?.n ?? 0;
 
     // ─── Commitments anchor data ──────────────────────────────────────
-    const nextEvent = events[0]
+    // First TIMED event — an all-day event's UTC-midnight instant would
+    // format as a bogus wall-clock time.
+    const firstTimed = events.find((e) => !e.all_day);
+    const nextEvent = firstTimed
       ? {
-          time: new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(events[0].start_at)),
-          title: events[0].title,
+          time: new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(firstTimed.start_at)),
+          title: firstTimed.title,
         }
       : null;
 
@@ -312,6 +328,104 @@ export const briefingRoutes: FastifyPluginAsync = async (app) => {
           projects: 0, open_tasks: 0, overdue: 0, due_soon: 0, next_due: null,
         },
       })),
+    };
+  });
+
+  // GET /api/briefing/agenda — the unified day timeline: calendar events and
+  // tasks due today, merged and sorted server-side in app-tz. Timed items
+  // interleave by wall-clock time (a 14:00 task sits between the 13:00 and
+  // 15:00 meetings); tasks without a due_time collect under "anytime". Time
+  // labels are pre-formatted here (precedent: next_event) so the web renders
+  // strings, not instants.
+  app.get('/api/briefing/agenda', async () => {
+    const db = getDb();
+    const tz = await getAppTz();
+    const today = todayInTz(tz);
+    const window = dayWindowUtc(today, tz);
+
+    const [events, taskRows] = await Promise.all([
+      // Timed events by app-tz window; all-day events (stored AT UTC midnight
+      // of their calendar date) by UTC date — same split as briefing/today.
+      db.query.calendar_events.findMany({
+        columns: { id: true, title: true, start_at: true, end_at: true, all_day: true, location: true },
+        where: or(
+          and(
+            eq(calendar_events.all_day, false),
+            gte(calendar_events.start_at, window.start),
+            lt(calendar_events.start_at, window.end),
+          ),
+          and(
+            eq(calendar_events.all_day, true),
+            gte(calendar_events.start_at, `${today}T00:00:00Z`),
+            lt(calendar_events.start_at, `${addDays(today, 1)}T00:00:00Z`),
+          ),
+        ),
+        orderBy: asc(calendar_events.start_at),
+      }),
+      db
+        .select({
+          id: tasks.id,
+          title: tasks.title,
+          status: tasks.status,
+          due_time: tasks.due_time,
+          priority: tasks.priority,
+          project_id: projects.id,
+          project_name: projects.name,
+        })
+        .from(tasks)
+        .leftJoin(projects, eq(tasks.project_id, projects.id))
+        .where(and(eq(tasks.status, 'open'), eq(tasks.due_date, today))),
+    ]);
+
+    const fmtTime = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false,
+    });
+
+    const toTask = (r: (typeof taskRows)[number]) => ({
+      id: r.id,
+      title: r.title,
+      status: r.status,
+      due_time: r.due_time,
+      priority: r.priority,
+      project: r.project_id && r.project_name ? { id: r.project_id, name: r.project_name } : null,
+    });
+
+    type TimelineEntry =
+      | { kind: 'event'; id: string; title: string; time_label: string; end_label: string | null; location: string | null }
+      | { kind: 'task'; time_label: string; task: ReturnType<typeof toTask> };
+
+    const timeline: TimelineEntry[] = [
+      ...events
+        .filter((e) => !e.all_day)
+        .map((e) => ({
+          kind: 'event' as const,
+          id: e.id,
+          title: e.title,
+          time_label: fmtTime.format(new Date(e.start_at)),
+          end_label: e.end_at ? fmtTime.format(new Date(e.end_at)) : null,
+          location: e.location,
+        })),
+      ...taskRows
+        .filter((r) => r.due_time != null)
+        .map((r) => ({
+          kind: 'task' as const,
+          // time column arrives as HH:MM:SS — HH:MM both labels and sorts.
+          time_label: String(r.due_time).slice(0, 5),
+          task: toTask(r),
+        })),
+      // 24h HH:MM labels string-sort chronologically; events outrank tasks
+      // on a tie so the meeting reads first and the task "belongs" to it.
+    ].sort((a, b) =>
+      a.time_label === b.time_label
+        ? (a.kind === 'event' ? -1 : 0) - (b.kind === 'event' ? -1 : 0)
+        : a.time_label.localeCompare(b.time_label),
+    );
+
+    return {
+      date: today,
+      all_day: events.filter((e) => e.all_day).map((e) => ({ id: e.id, title: e.title })),
+      timeline,
+      untimed_tasks: taskRows.filter((r) => r.due_time == null).map(toTask),
     };
   });
 };
