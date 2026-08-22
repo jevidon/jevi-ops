@@ -7,6 +7,7 @@ import type {
 import type { Task } from '@jevi-ops/shared';
 import type { FeatureFlag } from '@/lib/app-settings';
 
+import { FramePanel } from './panels/frame';
 import { SilentClientsPanel } from './panels/silent-clients';
 import { AttentionPanel } from './panels/attention';
 import { ReflectionPanel } from './panels/reflection';
@@ -29,6 +30,7 @@ import { HealthPanel } from './panels/health';
 // render concurrently, and a disabled panel costs zero fetches.
 
 export type PanelId =
+  | 'frame'
   | 'pinned'
   | 'silent-clients'
   | 'attention'
@@ -56,6 +58,8 @@ export interface BriefingContext {
   top3Count: number;
   rDone: number;
   rTotal: number;
+  // Frame panel image URL (migration 0045); null hides the panel.
+  agendaImageUrl: string | null;
 }
 
 export interface PanelDef {
@@ -75,6 +79,14 @@ export const PANEL_REGISTRY: PanelDef[] = [
   // ── Main column (the ledger) ────────────────────────────────────────
   // (needs-a-move retired in Agenda layout v2 — its slips render as the
   // accent rows inside Domain pulse; mergePanelConfig drops the stored id.)
+  {
+    id: 'frame',
+    label: 'Frame',
+    description: 'The rotating image feed — set its URL above. Hidden while no URL is set.',
+    column: 'main',
+    defaultEnabled: true,
+    Panel: FramePanel,
+  },
   {
     id: 'silent-clients',
     label: 'Silent clients',
