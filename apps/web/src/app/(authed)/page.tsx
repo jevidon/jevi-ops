@@ -280,7 +280,10 @@ function CaptureChips() {
             {c.label}
           </Link>
         ))}
-        <span className="font-mono text-[10px] uppercase tracking-wider text-ink-3 ml-1">— or hold the mic.</span>
+        <span className="font-mono text-[10px] uppercase tracking-wider text-ink-3 ml-1">
+          <span className="lg:hidden">— or hold the ✦ star.</span>
+          <span className="hidden lg:inline">— or press ⌘J.</span>
+        </span>
       </div>
     </section>
   );

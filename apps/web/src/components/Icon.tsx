@@ -10,7 +10,9 @@ export type IconName =
   | 'today' | 'work' | 'tasks' | 'content' | 'people' | 'companies'
   | 'library' | 'routines' | 'health'
   | 'search' | 'capture' | 'bell' | 'flag' | 'gear' | 'ask' | 'pin'
-  | 'chev' | 'arrow' | 'x' | 'check';
+  | 'chev' | 'arrow' | 'x' | 'check'
+  // Capture Portal additions (same 24×24 thin-stroke language).
+  | 'domains' | 'area' | 'note' | 'quote' | 'journal' | 'mic' | 'agenda';
 
 const ICONS: Record<IconName, string> = {
   today: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
@@ -35,6 +37,18 @@ const ICONS: Record<IconName, string> = {
   arrow: '<path d="M5 12h13M13 6.5l5.5 5.5-5.5 5.5"/>',
   x: '<path d="M6 6l12 12M18 6L6 18"/>',
   check: '<path d="M4.5 12.5l4.5 4.5 10-10"/>',
+  // ─── Capture Portal (Aug 2026) ──────────────────────────────────────
+  // 2×2 grid — the Domains board (mirrors the BottomTabBar tab glyph).
+  domains: '<rect x="3.5" y="3.5" width="7" height="7"/><rect x="13.5" y="3.5" width="7" height="7"/><rect x="3.5" y="13.5" width="7" height="7"/><rect x="13.5" y="13.5" width="7" height="7"/>',
+  // Dashed bounds — an area is ongoing context, not a bounded initiative.
+  area: '<rect x="4" y="4" width="16" height="16" rx="2" stroke-dasharray="3 3"/>',
+  note: '<path d="M6 3.5h9l3 3v14H6z"/><path d="M15 3.5v3h3M9 11h6M9 14.5h6"/>',
+  quote: '<path d="M5 13.5c0-3.5 2-6 5-7l.7 1.4c-1.9.8-3 2-3.2 3.6H10v5H5zM14 13.5c0-3.5 2-6 5-7l.7 1.4c-1.9.8-3 2-3.2 3.6H19v5h-5z"/>',
+  // Open book, spine centered.
+  journal: '<path d="M12 5.5C10 4 7.5 3.5 4 3.7v14.8c3.5-.2 6 .3 8 1.8 2-1.5 4.5-2 8-1.8V3.7c-3.5-.2-6 .3-8 1.8z"/><path d="M12 5.5v14.8"/>',
+  mic: '<rect x="9" y="3.5" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0013 0M12 18v3M8.5 21h7"/>',
+  // Calendar sheet with a filled day dot (the Agenda tab).
+  agenda: '<rect x="3.5" y="5" width="17" height="15.5" rx="1"/><path d="M3.5 9.5h17M8 3v4M16 3v4"/><circle cx="12" cy="14.75" r="1.4" fill="currentColor" stroke="none"/>',
 };
 
 export function Icon({

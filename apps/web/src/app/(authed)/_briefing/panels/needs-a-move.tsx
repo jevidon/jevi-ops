@@ -12,7 +12,7 @@ export function NeedsAMovePanel({ ctx }: { ctx: BriefingContext }) {
   return (
     <PanelFrame
       eyebrow={<>Needs a move{briefing.brief_lines.length > 0 ? ` · ${briefing.brief_lines.length}` : ''}</>}
-      action={<PanelLink href="/work">All work →</PanelLink>}
+      action={<PanelLink href="/work">All domains →</PanelLink>}
     >
       {briefing.brief_lines.length === 0 ? (
         <p className="font-serif text-[15px] text-ink-2 italic leading-relaxed">

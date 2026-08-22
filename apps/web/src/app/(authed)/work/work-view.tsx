@@ -187,7 +187,7 @@ export function WorkView({
         {/* Masthead */}
         <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-4 mb-5">
           <div>
-            <h1 className="font-serif text-[40px] font-medium leading-[1.02] tracking-[-0.022em] text-ink">Work</h1>
+            <h1 className="font-serif text-[40px] font-medium leading-[1.02] tracking-[-0.022em] text-ink">Domains</h1>
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <Link

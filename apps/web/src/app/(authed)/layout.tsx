@@ -6,11 +6,9 @@ import { CrumbsProvider } from '@/components/crumbs/crumbs';
 import { MobileCrumbs } from '@/components/crumbs/MobileCrumbs';
 import { ToastProvider } from '@/components/toast/ToastProvider';
 import { CreatedTaskToast } from '@/components/toast/CreatedTaskToast';
-import { MicFAB } from '@/components/MicFAB';
-import { TextCaptureFAB } from '@/components/TextCaptureFAB';
 import { NotificationBell } from '@/components/NotificationBell';
 import { SearchHotkey } from '@/components/SearchHotkey';
-import { TextCapturePalette } from '@/components/TextCapturePalette';
+import { CapturePortal } from '@/components/capture/CapturePortal';
 import { TimezoneProvider } from '@/components/TimezoneProvider';
 import { requireUser } from '@/lib/auth';
 import { notificationsApi, attentionApi, ApiError } from '@/lib/api';
@@ -21,11 +19,11 @@ import { getAppTimezone, getFeatureFlag } from '@/lib/app-settings';
 //
 // Responsive layout:
 //   Mobile (default): single column capped at 480px, BottomTabBar at the
-//     bottom, floating MicFAB.
+//     bottom — its center star is the Capture Portal trigger.
 //   Desktop (lg+):    DesktopRail on the left (220px wide), main content
 //     flows right of the rail with generous padding, no BottomTabBar.
-// The MicFAB renders on both — it's already absolute-positioned to the
-// bottom-right.
+// Capture (create-type grid, free text, voice) lives in the CapturePortal,
+// mounted once below — the old MicFAB / TextCaptureFAB floaters are gone.
 
 export default async function AuthedLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser();
@@ -93,8 +91,6 @@ export default async function AuthedLayout({ children }: { children: React.React
           >
             {children}
           </main>
-          <MicFAB />
-          <TextCaptureFAB />
           <NotificationBell unread={unreadNotifications} />
           <BottomTabBar
             email={user.email ?? undefined}
@@ -104,7 +100,7 @@ export default async function AuthedLayout({ children }: { children: React.React
             routinesEnabled={routinesEnabled}
           />
           <SearchHotkey />
-          <TextCapturePalette />
+          <CapturePortal />
           {/* Fires the "Task created" toast after a return-to-origin
               redirect (?created=<id>); Suspense keeps useSearchParams from
               deopting the authed tree to client rendering. */}

@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleDisplayName</key>
+	<string>Almanac</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundlePackageType</key>
+	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+	<key>UILaunchScreen</key>
+	<dict/>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+	</array>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<!-- Simulator dev against http://127.0.0.1:3000/3001 only; the
+		     tailnet ts.net origin is real HTTPS and needs no exception. -->
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.jevidon.jeviops</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>jeviops</string>
+			</array>
+		</dict>
+	</array>
+	<key>UIApplicationShortcutItems</key>
+	<array>
+		<dict>
+			<key>UIApplicationShortcutItemType</key>
+			<string>com.jevidon.jeviops.new-task</string>
+			<key>UIApplicationShortcutItemTitle</key>
+			<string>New Task</string>
+			<key>UIApplicationShortcutItemIconSymbolName</key>
+			<string>plus.circle</string>
+		</dict>
+		<dict>
+			<key>UIApplicationShortcutItemType</key>
+			<string>com.jevidon.jeviops.today</string>
+			<key>UIApplicationShortcutItemTitle</key>
+			<string>Today</string>
+			<key>UIApplicationShortcutItemIconSymbolName</key>
+			<string>sun.max</string>
+		</dict>
+		<dict>
+			<key>UIApplicationShortcutItemType</key>
+			<string>com.jevidon.jeviops.work</string>
+			<key>UIApplicationShortcutItemTitle</key>
+			<string>Work</string>
+			<key>UIApplicationShortcutItemIconSymbolName</key>
+			<string>rectangle.grid.2x2</string>
+		</dict>
+		<dict>
+			<key>UIApplicationShortcutItemType</key>
+			<string>com.jevidon.jeviops.ask</string>
+			<key>UIApplicationShortcutItemTitle</key>
+			<string>Ask</string>
+			<key>UIApplicationShortcutItemIconSymbolName</key>
+			<string>bubble.left.and.text.bubble.right</string>
+		</dict>
+	</array>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Voice capture records audio to create tasks and notes.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Used when attaching photos from the camera inside the app.</string>
+</dict>
+</plist>
