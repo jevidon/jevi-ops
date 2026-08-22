@@ -37,11 +37,14 @@ export function FrameImage({ src }: { src: string }) {
       {/* eslint-disable-next-line @next/next/no-img-element -- external
           feed on the local network; next/image can't optimize it and would
           proxy through the server, defeating the direct tailnet load. */}
+      {/* Width fits the column, height follows the image's own aspect —
+          never crop the feed (it may be a dashboard render where every
+          region matters, not a photograph). */}
       <img
         src={`${src}${sep}t=${bucket}`}
         alt="Frame"
         onError={() => setFailed(true)}
-        className="block w-full max-h-[420px] object-cover"
+        className="block w-full h-auto"
       />
     </div>
   );
