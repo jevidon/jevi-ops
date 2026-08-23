@@ -712,6 +712,8 @@ create table if not exists app_settings (
   briefing_panels jsonb,
   -- Frame panel image URL (migration 0045); null hides the panel.
   agenda_image_url text,
+  -- Weather panel data-bundle URL (migration 0046); null hides the panel.
+  agenda_data_url text,
   updated_at timestamptz not null default now()
 );
 

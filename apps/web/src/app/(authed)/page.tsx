@@ -173,6 +173,7 @@ export default async function TodayPage() {
     rDone,
     rTotal,
     agendaImageUrl: settings.agenda_image_url,
+    agendaDataUrl: settings.agenda_data_url,
   };
   const config = mergePanelConfig(settings.briefing_panels);
   const flags = { routines_module_enabled: routinesEnabled, health_module_enabled: healthEnabled };

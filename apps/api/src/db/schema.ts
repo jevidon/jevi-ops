@@ -865,6 +865,8 @@ export const app_settings = pgTable("app_settings", {
 	briefing_panels: jsonb().$type<Array<{ id: string; enabled: boolean }> | null>(),
 	// Frame panel image URL (migration 0045); null hides the panel.
 	agenda_image_url: text(),
+	// Weather panel data-bundle URL (migration 0046); null hides the panel.
+	agenda_data_url: text(),
 	updated_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [
 	check("app_settings_id_check", sql`id`),

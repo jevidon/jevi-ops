@@ -129,7 +129,10 @@ export default async function SettingsPage({
       </SettingsSection>
 
       <SettingsSection title="Agenda · panels">
-        <FrameUrlForm current={webSettings.agenda_image_url} />
+        <FrameUrlForm
+          current={webSettings.agenda_image_url}
+          currentData={webSettings.agenda_data_url}
+        />
         <p className="font-sans text-[12px] text-ink-3 leading-relaxed mb-3">
           Show, hide, and reorder the panels on the home screen. Columns are
           fixed per panel; order applies within each column.

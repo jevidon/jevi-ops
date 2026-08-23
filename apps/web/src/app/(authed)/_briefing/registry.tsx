@@ -8,6 +8,7 @@ import type { Task } from '@jevi-ops/shared';
 import type { FeatureFlag } from '@/lib/app-settings';
 
 import { FramePanel } from './panels/frame';
+import { WeatherPanel } from './panels/weather';
 import { DomainPulsePanel } from './panels/domain-pulse';
 import { SilentClientsPanel } from './panels/silent-clients';
 import { AttentionPanel } from './panels/attention';
@@ -32,6 +33,7 @@ import { HealthPanel } from './panels/health';
 
 export type PanelId =
   | 'frame'
+  | 'weather'
   | 'domain-pulse'
   | 'pinned'
   | 'silent-clients'
@@ -62,6 +64,8 @@ export interface BriefingContext {
   rTotal: number;
   // Frame panel image URL (migration 0045); null hides the panel.
   agendaImageUrl: string | null;
+  // Weather panel data-bundle URL (migration 0046); null hides the panel.
+  agendaDataUrl: string | null;
 }
 
 export interface PanelDef {
@@ -88,6 +92,14 @@ export const PANEL_REGISTRY: PanelDef[] = [
     column: 'main',
     defaultEnabled: true,
     Panel: FramePanel,
+  },
+  {
+    id: 'weather',
+    label: 'Weather',
+    description: 'The frame’s weather data rendered natively — current conditions, 24h curve, day forecast.',
+    column: 'main',
+    defaultEnabled: true,
+    Panel: WeatherPanel,
   },
   {
     id: 'domain-pulse',
