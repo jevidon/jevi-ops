@@ -111,11 +111,28 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
     if (Object.keys(parsed.data).length === 0) {
       return reply.code(400).send({ error: 'empty_payload' });
     }
-    const [row] = await getDb()
-      .update(app_settings)
-      .set(parsed.data)
-      .where(eq(app_settings.id, true))
-      .returning();
+    let row;
+    try {
+      [row] = await getDb()
+        .update(app_settings)
+        .set(parsed.data)
+        .where(eq(app_settings.id, true))
+        .returning();
+    } catch (err) {
+      // Postgres 42703 = undefined column: the Drizzle schema knows a column
+      // the database doesn't — i.e. a migration is pending. Every settings
+      // write RETURNs all mapped columns, so this breaks ALL saves at once;
+      // name the cure instead of a generic 500 (this exact failure has been
+      // mis-diagnosed three times).
+      const code = (err as { code?: string; cause?: { code?: string } });
+      if (code?.code === '42703' || code?.cause?.code === '42703') {
+        return reply.code(503).send({
+          error: 'schema_out_of_date',
+          message: 'A database migration is pending — run scripts/db-migrate.sh, then restart the API.',
+        });
+      }
+      throw err;
+    }
     if (!row) throw app.httpErrors.internalServerError('settings_row_missing');
     invalidateAppSettings();
     return row;
