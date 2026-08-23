@@ -18,13 +18,11 @@ export async function WeatherPanel({ ctx }: { ctx: BriefingContext }) {
   const d = bundle?.data;
   if (!d) {
     return (
-      <section className="px-5 lg:px-0">
-        <PanelFrame eyebrow="Weather">
-          <p className="font-mono text-[10px] uppercase tracking-wider text-ink-3 py-1">
-            Weather data unreachable — is the frame online?
-          </p>
-        </PanelFrame>
-      </section>
+      <PanelFrame eyebrow="Weather">
+        <p className="font-mono text-[10px] uppercase tracking-wider text-ink-3 py-1">
+          Weather data unreachable — is the frame online?
+        </p>
+      </PanelFrame>
     );
   }
 
