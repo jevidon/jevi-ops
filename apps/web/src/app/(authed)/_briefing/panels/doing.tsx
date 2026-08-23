@@ -4,10 +4,10 @@ import { PanelFrame, PanelLink } from '../PanelFrame';
 import type { BriefingContext } from '../registry';
 
 // Doing — the actionable task rail: inbox triage (when anything needs a
-// home), then Top 3 for today, overdue, and due today (capped at 10). The
-// ephemeral Top-3 star lives on the rows. The triage row moved in from the
-// page chrome in Agenda layout v2 — it belongs with the task work, not
-// floating above the columns.
+// home), then Top 3 for today and overdue (capped at 10). Due-today tasks
+// are NOT here — the Timeline panel owns everything dated today, so they'd
+// render twice in the same rail. The ephemeral Top-3 star lives on the
+// rows; the triage row moved in from the page chrome in Agenda layout v2.
 
 export function DoingPanel({ ctx }: { ctx: BriefingContext }) {
   const { briefing, railTasks, railOverflow, top3Count } = ctx;
@@ -49,7 +49,8 @@ export function DoingPanel({ ctx }: { ctx: BriefingContext }) {
         )}
         {railTasks.length === 0 ? (
           <p className="font-sans text-[13px] text-ink-3 italic py-2">
-            No tasks overdue or due today. Star one below to pin it as Top 3.
+            Nothing overdue. Star any task to pin it here as Top&nbsp;3;
+            today&rsquo;s dated tasks live on the Timeline.
           </p>
         ) : (
           railTasks.map((t) => (
