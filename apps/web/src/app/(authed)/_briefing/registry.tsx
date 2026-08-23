@@ -155,7 +155,7 @@ export const PANEL_REGISTRY: PanelDef[] = [
   {
     id: 'doing',
     label: 'Doing',
-    description: 'The actionable task rail — Top 3, overdue, due today.',
+    description: 'The actionable task rail — inbox triage, Top 3, overdue. Today’s dated tasks live on the Timeline.',
     column: 'rail',
     defaultEnabled: true,
     Panel: DoingPanel,
