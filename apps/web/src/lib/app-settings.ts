@@ -22,6 +22,8 @@ interface WebAppSettings {
   briefing_panels: Array<{ id: string; enabled: boolean }> | null;
   // Frame panel image URL (migration 0045); null hides the panel.
   agenda_image_url: string | null;
+  // Weather panel data-bundle URL (migration 0046); null hides the panel.
+  agenda_data_url: string | null;
 }
 
 // Feature flags stored as boolean columns on app_settings. Health (Addendum
@@ -44,6 +46,7 @@ export const getAppSettings = cache(async (): Promise<WebAppSettings> => {
       rule_module_enabled: settings.rule_module_enabled ?? false,
       briefing_panels: settings.briefing_panels ?? null,
       agenda_image_url: settings.agenda_image_url ?? null,
+      agenda_data_url: settings.agenda_data_url ?? null,
     };
   } catch {
     return {
@@ -53,6 +56,7 @@ export const getAppSettings = cache(async (): Promise<WebAppSettings> => {
       rule_module_enabled: false,
       briefing_panels: null,
       agenda_image_url: null,
+      agenda_data_url: null,
     };
   }
 });

@@ -126,7 +126,12 @@ export default async function TodayPage() {
     routines = routinesRes.value.routines.filter((r) => r.active && !r.archived_at);
   }
 
-  // Doing-rail tasks: Top-3 for today, then overdue, then due today.
+  // Doing-rail tasks: Top-3 for today, then overdue. Due-today tasks are
+  // deliberately ABSENT — the Timeline panel owns everything dated today
+  // (events + tasks), so listing them here would render them twice in the
+  // same rail (Agenda IA decision, Aug 2026). Top-3 keeps starred tasks
+  // even when due today: a star is explicit user emphasis, and the rare
+  // starred+due-today overlap with the Timeline is intentional.
   const openTasks = allTasks.filter((t) => t.status === 'open');
   const top3 = openTasks
     .filter((t) => t.top3_for_date === today)
@@ -135,11 +140,8 @@ export default async function TodayPage() {
   const overdue = openTasks
     .filter((t) => !top3Ids.has(t.id) && t.due_date && t.due_date < today)
     .sort((a, b) => (a.due_date ?? '').localeCompare(b.due_date ?? ''));
-  const dueToday = openTasks
-    .filter((t) => !top3Ids.has(t.id) && t.due_date === today)
-    .sort((a, b) => b.created_at.localeCompare(a.created_at));
   const RAIL_CAP = 10;
-  const railTasksAll = [...top3, ...overdue, ...dueToday];
+  const railTasksAll = [...top3, ...overdue];
   const railTasks = railTasksAll.slice(0, RAIL_CAP);
   const railOverflow = Math.max(0, railTasksAll.length - RAIL_CAP);
 
@@ -171,6 +173,7 @@ export default async function TodayPage() {
     rDone,
     rTotal,
     agendaImageUrl: settings.agenda_image_url,
+    agendaDataUrl: settings.agenda_data_url,
   };
   const config = mergePanelConfig(settings.briefing_panels);
   const flags = { routines_module_enabled: routinesEnabled, health_module_enabled: healthEnabled };

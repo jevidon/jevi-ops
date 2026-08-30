@@ -61,6 +61,8 @@ export const AppSettingsSchema = z.object({
   briefing_panels: BriefingPanelConfigSchema.nullable(),
   // Frame panel image URL (migration 0045); null hides the panel.
   agenda_image_url: z.string().nullable(),
+  // Weather panel data-bundle URL (migration 0046); null hides the panel.
+  agenda_data_url: z.string().nullable(),
   updated_at: z.string().datetime({ offset: true }),
 });
 
@@ -82,6 +84,7 @@ export const UpdateAppSettingsSchema = z.object({
   rule_module_enabled: z.boolean().optional(),
   briefing_panels: BriefingPanelConfigSchema.nullable().optional(),
   agenda_image_url: ClearableUrl.optional(),
+  agenda_data_url: ClearableUrl.optional(),
 });
 
 export type AppSettings = z.infer<typeof AppSettingsSchema>;

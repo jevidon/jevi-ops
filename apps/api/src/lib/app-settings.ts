@@ -33,6 +33,8 @@ export interface AppSettings {
   briefing_panels: Array<{ id: string; enabled: boolean }> | null;
   // Frame panel image URL (migration 0045); null hides the panel.
   agenda_image_url: string | null;
+  // Weather panel data-bundle URL (migration 0046); null hides the panel.
+  agenda_data_url: string | null;
 }
 
 const DEFAULTS: AppSettings = {
@@ -50,6 +52,7 @@ const DEFAULTS: AppSettings = {
   rule_module_enabled: false,
   briefing_panels: null,
   agenda_image_url: null,
+  agenda_data_url: null,
 };
 
 // In-memory cache. Reset by invalidateAppSettings() when /api/settings/app
@@ -78,6 +81,7 @@ async function load(): Promise<AppSettings> {
       rule_module_enabled: row.rule_module_enabled ?? false,
       briefing_panels: row.briefing_panels ?? null,
       agenda_image_url: row.agenda_image_url ?? null,
+      agenda_data_url: row.agenda_data_url ?? null,
     };
   } catch {
     // Pre-migration or transient DB error — keep the app running with

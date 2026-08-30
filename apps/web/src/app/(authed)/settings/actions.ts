@@ -91,15 +91,22 @@ export async function updateTimezoneAction(formData: FormData): Promise<SyncResu
   return { ok: true, message: `Timezone set to ${tz}.` };
 }
 
-// Frame panel image URL (migration 0045). Empty string clears → null (the
-// shared ClearableUrl transform) which hides the panel.
+// Frame panel image URL (migration 0045) + Weather data-bundle URL (0046).
+// Empty string clears → null (the shared ClearableUrl transform) which
+// hides the respective panel.
 export async function updateFrameUrlAction(formData: FormData): Promise<SyncResult> {
   const url = String(formData.get('agenda_image_url') ?? '').trim();
-  if (url && !/^https?:\/\//.test(url)) {
-    return { ok: false, message: 'Must be an http(s) URL, or blank to hide the panel.' };
+  const dataUrl = String(formData.get('agenda_data_url') ?? '').trim();
+  for (const u of [url, dataUrl]) {
+    if (u && !/^https?:\/\//.test(u)) {
+      return { ok: false, message: 'Must be http(s) URLs, or blank to hide a panel.' };
+    }
   }
   try {
-    await settingsApi.updateApp({ agenda_image_url: url || null });
+    await settingsApi.updateApp({
+      agenda_image_url: url || null,
+      agenda_data_url: dataUrl || null,
+    });
   } catch (err) {
     if (err instanceof ApiError) {
       const body = err.body as { error?: string } | null;
@@ -109,7 +116,7 @@ export async function updateFrameUrlAction(formData: FormData): Promise<SyncResu
   }
   revalidatePath('/');
   revalidatePath('/settings');
-  return { ok: true, message: url ? 'Frame image set.' : 'Frame image cleared — panel hidden.' };
+  return { ok: true, message: 'Frame settings saved.' };
 }
 
 // Toggle the Health module (Addendum 05). Default off; enabling reveals the
