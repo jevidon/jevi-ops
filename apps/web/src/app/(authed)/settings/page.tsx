@@ -62,6 +62,7 @@ export default async function SettingsPage({
     health_module_enabled: healthEnabled,
     routines_module_enabled: routinesEnabled,
     rule_module_enabled: ruleEnabled,
+    maintenance_module_enabled: webSettings.maintenance_module_enabled,
   };
   try {
     appSettings = await settingsApi.getApp();

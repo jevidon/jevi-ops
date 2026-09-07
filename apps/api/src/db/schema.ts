@@ -492,7 +492,7 @@ export const tasks = pgTable("tasks", {
 		}),
 	check("tasks_status_check", sql`status = ANY (ARRAY['open'::text, 'waiting'::text, 'done'::text])`),
 	check("tasks_priority_check", sql`(priority >= 1) AND (priority <= 4)`),
-	check("tasks_source_check", sql`source = ANY (ARRAY['manual'::text, 'voice'::text, 'email'::text, 'observation'::text, 'import'::text])`),
+	check("tasks_source_check", sql`source = ANY (ARRAY['manual'::text, 'voice'::text, 'email'::text, 'observation'::text, 'import'::text, 'maintenance'::text])`),
 ]);
 
 export const calendar_events = pgTable("calendar_events", {
@@ -860,6 +860,8 @@ export const app_settings = pgTable("app_settings", {
 	health_module_enabled: boolean().default(false).notNull(),
 	routines_module_enabled: boolean().default(true).notNull(),
 	rule_module_enabled: boolean().default(false).notNull(),
+	// Maintenance module (migration 0047). Default on — core home-ops.
+	maintenance_module_enabled: boolean().default(true).notNull(),
 	// Briefing panel visibility/order (migration 0044): ordered {id, enabled}
 	// array. Null → registry defaults (resolved web-side by mergePanelConfig).
 	briefing_panels: jsonb().$type<Array<{ id: string; enabled: boolean }> | null>(),
@@ -1179,7 +1181,130 @@ export const attention_items = pgTable("attention_items", {
 	index("idx_attention_snoozed").using("btree", table.status.asc().nullsLast().op("text_ops"), table.snoozed_until.asc().nullsLast().op("date_ops")).where(sql`(status = 'snoozed'::text)`),
 	index("idx_attention_source").using("btree", table.source_type.asc().nullsLast().op("text_ops"), table.source_id.asc().nullsLast().op("uuid_ops")),
 	unique("attention_items_dedup_key_key").on(table.dedup_key),
-	check("attention_items_source_type_check", sql`source_type = ANY (ARRAY['person'::text, 'company'::text, 'domain'::text, 'project'::text, 'conversation'::text, 'task'::text, 'content'::text])`),
+	check("attention_items_source_type_check", sql`source_type = ANY (ARRAY['person'::text, 'company'::text, 'domain'::text, 'project'::text, 'conversation'::text, 'task'::text, 'content'::text, 'maintenance_item'::text, 'asset'::text])`),
 	check("attention_items_urgency_check", sql`urgency = ANY (ARRAY['low'::text, 'normal'::text, 'high'::text])`),
 	check("attention_items_status_check", sql`status = ANY (ARRAY['active'::text, 'dismissed'::text, 'snoozed'::text, 'acted_on'::text, 'expired'::text])`),
+]);
+
+// ─── Maintenance module (migration 0047) ─────────────────────────────────
+// Recurring upkeep as a first-class entity. assets.kind is display-only —
+// no code path may branch on it; all meter behavior gates on meter_unit.
+// next_due_* on items are materialized, recomputed only on completion and
+// cadence edits (never on new readings); completion re-anchors the schedule
+// (unlike task recurrence). Cadence math: packages/shared/src/maintenance.ts.
+
+export const assets = pgTable("assets", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	name: text().notNull(),
+	kind: text().default('other').notNull(),
+	domain_id: uuid(),
+	// Free text ('km','mi','hours'…). Null = date-only asset.
+	meter_unit: text(),
+	// Schemaless per-asset facts (VIN, rego, insurance, warranty…) — the
+	// substrate for the future vehicle-agent build.
+	metadata: jsonb().$type<Record<string, unknown>>().default({}).notNull(),
+	notes: text(),
+	archived_at: timestamp({ withTimezone: true, mode: 'string' }),
+	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	updated_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	foreignKey({
+			columns: [table.domain_id],
+			foreignColumns: [stewardship_domains.id],
+			name: "assets_domain_id_fkey"
+		}).onDelete("set null"),
+	check("assets_kind_check", sql`kind = ANY (ARRAY['vehicle'::text, 'appliance'::text, 'home'::text, 'device'::text, 'equipment'::text, 'other'::text])`),
+]);
+
+export const asset_meter_readings = pgTable("asset_meter_readings", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	asset_id: uuid().notNull(),
+	reading: numeric({ mode: 'number' }).notNull(),
+	recorded_on: date().notNull(),
+	source: text().default('manual').notNull(),
+	notes: text(),
+	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	index("idx_asset_meter_readings_asset").using("btree", table.asset_id.asc().nullsLast().op("uuid_ops"), table.recorded_on.desc().nullsFirst().op("date_ops")),
+	foreignKey({
+			columns: [table.asset_id],
+			foreignColumns: [assets.id],
+			name: "asset_meter_readings_asset_id_fkey"
+		}).onDelete("cascade"),
+	check("asset_meter_readings_reading_check", sql`reading >= (0)::numeric`),
+	check("asset_meter_readings_source_check", sql`source = ANY (ARRAY['manual'::text, 'completion'::text, 'agent'::text, 'import'::text])`),
+]);
+
+export const maintenance_items = pgTable("maintenance_items", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	name: text().notNull(),
+	notes: text(),
+	asset_id: uuid(),
+	domain_id: uuid().notNull(),
+	// One date unit (days XOR months) and/or a meter interval. App-enforced:
+	// interval_meter requires the asset to have a meter_unit (cross-table).
+	interval_days: integer(),
+	interval_months: integer(),
+	interval_meter: numeric({ mode: 'number' }),
+	lead_days: integer().default(14).notNull(),
+	// Null → 10% of interval_meter at read time (effectiveLeadMeter).
+	lead_meter: numeric({ mode: 'number' }),
+	next_due_date: date(),
+	next_due_meter: numeric({ mode: 'number' }),
+	last_completed_on: date(),
+	last_completed_meter: numeric({ mode: 'number' }),
+	// Set by the awareness sweep; cleared when either side completes.
+	generated_task_id: uuid(),
+	active: boolean().default(true).notNull(),
+	metadata: jsonb().$type<Record<string, unknown>>().default({}).notNull(),
+	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	updated_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	index("idx_maintenance_items_due").using("btree", table.active.asc().nullsLast().op("bool_ops"), table.next_due_date.asc().nullsLast().op("date_ops")),
+	index("idx_maintenance_items_asset").using("btree", table.asset_id.asc().nullsLast().op("uuid_ops")).where(sql`(asset_id IS NOT NULL)`),
+	foreignKey({
+			columns: [table.asset_id],
+			foreignColumns: [assets.id],
+			name: "maintenance_items_asset_id_fkey"
+		}).onDelete("set null"),
+	foreignKey({
+			columns: [table.domain_id],
+			foreignColumns: [stewardship_domains.id],
+			name: "maintenance_items_domain_id_fkey"
+		}),
+	foreignKey({
+			columns: [table.generated_task_id],
+			foreignColumns: [tasks.id],
+			name: "maintenance_items_generated_task_id_fkey"
+		}).onDelete("set null"),
+	check("maintenance_items_interval_days_check", sql`interval_days > 0`),
+	check("maintenance_items_interval_months_check", sql`interval_months > 0`),
+	check("maintenance_items_interval_meter_check", sql`interval_meter > (0)::numeric`),
+	check("maintenance_items_lead_days_check", sql`lead_days >= 0`),
+	check("maintenance_items_lead_meter_check", sql`lead_meter >= (0)::numeric`),
+	check("maintenance_items_has_interval", sql`(interval_days IS NOT NULL) OR (interval_months IS NOT NULL) OR (interval_meter IS NOT NULL)`),
+	check("maintenance_items_one_date_unit", sql`(interval_days IS NULL) OR (interval_months IS NULL)`),
+]);
+
+export const maintenance_logs = pgTable("maintenance_logs", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	item_id: uuid().notNull(),
+	completed_on: date().notNull(),
+	meter_at_completion: numeric({ mode: 'number' }),
+	notes: text(),
+	cost: numeric({ mode: 'number' }),
+	source: text().default('manual').notNull(),
+	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	index("idx_maintenance_logs_item").using("btree", table.item_id.asc().nullsLast().op("uuid_ops"), table.completed_on.desc().nullsFirst().op("date_ops")),
+	foreignKey({
+			columns: [table.item_id],
+			foreignColumns: [maintenance_items.id],
+			name: "maintenance_logs_item_id_fkey"
+		}).onDelete("cascade"),
+	// Idempotent complete (routine_completions precedent).
+	unique("maintenance_logs_item_day_unique").on(table.item_id, table.completed_on),
+	check("maintenance_logs_meter_at_completion_check", sql`meter_at_completion >= (0)::numeric`),
+	check("maintenance_logs_cost_check", sql`cost >= (0)::numeric`),
+	check("maintenance_logs_source_check", sql`source = ANY (ARRAY['manual'::text, 'task'::text, 'agent'::text, 'import'::text])`),
 ]);

@@ -42,16 +42,17 @@ export function isRecurrencePattern(s: unknown): s is RecurrencePattern {
 // do the math in UTC to dodge DST shifts; a "due date" is a calendar
 // day, not an instant.
 
-function parseIsoDate(iso: string): Date {
+// Exported for reuse by maintenance.ts (same wire-format contract).
+export function parseIsoDate(iso: string): Date {
   // Anchor at noon UTC so DST never shifts the day.
   return new Date(iso + 'T12:00:00Z');
 }
 
-function formatIsoDate(d: Date): string {
+export function formatIsoDate(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
-function addDays(d: Date, n: number): Date {
+export function addDays(d: Date, n: number): Date {
   const next = new Date(d);
   next.setUTCDate(next.getUTCDate() + n);
   return next;
@@ -60,7 +61,7 @@ function addDays(d: Date, n: number): Date {
 // Adds N months while clamping to the last valid day. E.g.
 // Jan 31 + 1mo = Feb 28 (or 29 in a leap year), not Mar 3 like
 // JS's native overflow.
-function addMonthsClamped(d: Date, n: number): Date {
+export function addMonthsClamped(d: Date, n: number): Date {
   const y = d.getUTCFullYear();
   const m = d.getUTCMonth();
   const day = d.getUTCDate();

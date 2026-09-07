@@ -58,6 +58,8 @@ export const AppSettingsSchema = z.object({
   health_module_enabled: z.boolean(),
   routines_module_enabled: z.boolean(),
   rule_module_enabled: z.boolean(),
+  // Maintenance module (migration 0047). Default on — core home-ops.
+  maintenance_module_enabled: z.boolean(),
   briefing_panels: BriefingPanelConfigSchema.nullable(),
   // Frame panel image URL (migration 0045); null hides the panel.
   agenda_image_url: z.string().nullable(),
@@ -82,6 +84,7 @@ export const UpdateAppSettingsSchema = z.object({
   health_module_enabled: z.boolean().optional(),
   routines_module_enabled: z.boolean().optional(),
   rule_module_enabled: z.boolean().optional(),
+  maintenance_module_enabled: z.boolean().optional(),
   briefing_panels: BriefingPanelConfigSchema.nullable().optional(),
   agenda_image_url: ClearableUrl.optional(),
   agenda_data_url: ClearableUrl.optional(),

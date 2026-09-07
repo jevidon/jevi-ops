@@ -1471,6 +1471,8 @@ export interface AppSettings {
   routines_module_enabled: boolean;
   // Daily Rule (Addendum 06), retired by Addendum 09 — defaults false.
   rule_module_enabled: boolean;
+  // Maintenance module (migration 0047). Default on — core home-ops.
+  maintenance_module_enabled: boolean;
   // Briefing panel visibility/order (migration 0044). Null → registry
   // defaults; resolved by mergePanelConfig in the panel registry.
   briefing_panels?: Array<{ id: string; enabled: boolean }> | null;

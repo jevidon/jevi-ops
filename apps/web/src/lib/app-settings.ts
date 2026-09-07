@@ -16,6 +16,8 @@ interface WebAppSettings {
   health_module_enabled: boolean;
   routines_module_enabled: boolean;
   rule_module_enabled: boolean;
+  // Maintenance module (migration 0047). Default on — core home-ops.
+  maintenance_module_enabled: boolean;
   // Briefing panel visibility/order (migration 0044); null → registry
   // defaults. Projected here deliberately — this interface drops unknown
   // fields, so forgetting this line silently loses the config.
@@ -32,7 +34,8 @@ interface WebAppSettings {
 export type FeatureFlag =
   | 'health_module_enabled'
   | 'routines_module_enabled'
-  | 'rule_module_enabled';
+  | 'rule_module_enabled'
+  | 'maintenance_module_enabled';
 
 export const getAppSettings = cache(async (): Promise<WebAppSettings> => {
   try {
@@ -44,6 +47,8 @@ export const getAppSettings = cache(async (): Promise<WebAppSettings> => {
       routines_module_enabled: settings.routines_module_enabled ?? true,
       // Default off: the Rule module stays retired unless explicitly re-enabled.
       rule_module_enabled: settings.rule_module_enabled ?? false,
+      // Default on: maintenance is core home-ops.
+      maintenance_module_enabled: settings.maintenance_module_enabled ?? true,
       briefing_panels: settings.briefing_panels ?? null,
       agenda_image_url: settings.agenda_image_url ?? null,
       agenda_data_url: settings.agenda_data_url ?? null,
@@ -54,6 +59,7 @@ export const getAppSettings = cache(async (): Promise<WebAppSettings> => {
       health_module_enabled: false,
       routines_module_enabled: true,
       rule_module_enabled: false,
+      maintenance_module_enabled: true,
       briefing_panels: null,
       agenda_image_url: null,
       agenda_data_url: null,

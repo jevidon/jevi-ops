@@ -2,7 +2,7 @@
 // db.query.<table>.findMany({ with: { <key>: ... } }) surfaces them verbatim
 // in JSON responses the web app consumes. Renaming a key changes the API shape.
 import { relations } from "drizzle-orm/relations";
-import { stewardship_domains, projects, people, person_facts, person_interactions, milestones, activity_log, project_checklist_items, content_items, content_checklist_items, tasks, checklist_templates, checklist_instances, books, quotes, quote_annotations, journal_books, journal_entries, notes, observations, routines, routine_completions, health_visits, health_metrics, lab_panels, lab_results, health_documents, companies, conversations, project_contacts } from "./schema.js";
+import { stewardship_domains, projects, people, person_facts, person_interactions, milestones, activity_log, project_checklist_items, content_items, content_checklist_items, tasks, checklist_templates, checklist_instances, books, quotes, quote_annotations, journal_books, journal_entries, notes, observations, routines, routine_completions, health_visits, health_metrics, lab_panels, lab_results, health_documents, companies, conversations, project_contacts, assets, asset_meter_readings, maintenance_items, maintenance_logs } from "./schema.js";
 
 export const projectsRelations = relations(projects, ({one, many}) => ({
 	domain: one(stewardship_domains, {
@@ -290,5 +290,46 @@ export const health_documentsRelations = relations(health_documents, ({one}) => 
 	lab_panel: one(lab_panels, {
 		fields: [health_documents.panel_id],
 		references: [lab_panels.id]
+	}),
+}));
+
+// ─── Maintenance module (0047) ───────────────────────────────────────────
+
+export const assetsRelations = relations(assets, ({one, many}) => ({
+	domain: one(stewardship_domains, {
+		fields: [assets.domain_id],
+		references: [stewardship_domains.id]
+	}),
+	readings: many(asset_meter_readings),
+	maintenance_items: many(maintenance_items),
+}));
+
+export const asset_meter_readingsRelations = relations(asset_meter_readings, ({one}) => ({
+	asset: one(assets, {
+		fields: [asset_meter_readings.asset_id],
+		references: [assets.id]
+	}),
+}));
+
+export const maintenance_itemsRelations = relations(maintenance_items, ({one, many}) => ({
+	asset: one(assets, {
+		fields: [maintenance_items.asset_id],
+		references: [assets.id]
+	}),
+	domain: one(stewardship_domains, {
+		fields: [maintenance_items.domain_id],
+		references: [stewardship_domains.id]
+	}),
+	generated_task: one(tasks, {
+		fields: [maintenance_items.generated_task_id],
+		references: [tasks.id]
+	}),
+	logs: many(maintenance_logs),
+}));
+
+export const maintenance_logsRelations = relations(maintenance_logs, ({one}) => ({
+	item: one(maintenance_items, {
+		fields: [maintenance_logs.item_id],
+		references: [maintenance_items.id]
 	}),
 }));
