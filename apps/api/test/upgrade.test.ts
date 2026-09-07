@@ -14,7 +14,7 @@ import { adminUrl, devUrl } from './db-url.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const DB = 'jeviops_upgrade';
-const MIGRATIONS = ['0048_maintenance_hardening.sql', '0049_asset_area.sql', '0050_docs_ideas.sql'].map((f) =>
+const MIGRATIONS = ['0048_maintenance_hardening.sql', '0049_asset_area.sql', '0050_docs_ideas.sql', '0051_service_visits.sql'].map((f) =>
   resolve(ROOT, 'infrastructure/migrations', f),
 );
 
@@ -118,6 +118,13 @@ describe('0047 → 0048 → 0049', () => {
     const [idea] = await sql`insert into projects (name, domain_id, status) values ('Lift kit', ${domainA}, 'idea') returning status, doc_version`;
     expect(idea!.status).toBe('idea');
     expect(idea!.doc_version).toBe(1);
+
+    // 0051: visits.
+    const [visitCols] = await sql`select count(*)::int as n from information_schema.columns where (table_name, column_name) in (('maintenance_visits', 'reading_id'), ('maintenance_visit_items', 'position'), ('maintenance_logs', 'visit_id'))`;
+    expect(visitCols!.n).toBe(3);
+    const [v] = await sql`insert into maintenance_visits (asset_id, status, planned_on) values (${car!.id}, 'planned', '2026-10-01') returning id`;
+    await sql`insert into maintenance_visit_items (visit_id, item_id) values (${v!.id}, ${seedOnly!.id})`;
+    await expect(sql`insert into maintenance_visits (asset_id, status) values (${car!.id}, 'done')`).rejects.toThrow(); // done needs a date
 
     // The (item, day) unique is gone: two same-day services are allowed.
     await sql`insert into maintenance_logs (item_id, completed_on, source, event_key) values (${withLog!.id}, '2026-03-01', 'manual', 'a'), (${withLog!.id}, '2026-03-01', 'manual', 'b')`;

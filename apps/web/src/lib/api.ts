@@ -1028,6 +1028,8 @@ export interface MaintenanceLog {
   actor?: string | null;
   run_id?: string | null;
   reading_id?: string | null;
+  // The service visit this completion happened at (0051).
+  visit_id?: string | null;
   is_baseline: boolean;
   issued_until?: string | null;
   purchased_to?: number | null;
@@ -1070,6 +1072,105 @@ export interface MaintenanceItemBody {
   active?: boolean;
 }
 
+// ─── Service visits (0051) ───────────────────────────────────────────────
+// One event: several items done on ONE odometer with ONE invoice. planned =
+// a saved work order; done = the record. `total` is the invoice; each
+// line's `cost` is the allocated part — kept distinct.
+
+export type VisitStatus = 'planned' | 'done';
+
+export interface VisitLineInput {
+  item_id: string;
+  skipped?: boolean;
+  cost?: number | null;
+  notes?: string | null;
+  issued_until?: string | null;
+  purchased_to?: number | null;
+  finding?: string | null;
+  next_review_on?: string | null;
+  next_review_meter?: number | null;
+}
+
+export interface VisitItemRef {
+  id: string;
+  name: string;
+  policy: MaintenancePolicy;
+  system: string | null;
+}
+
+export interface Visit {
+  id: string;
+  asset_id: string;
+  status: VisitStatus;
+  planned_on: string | null;
+  visited_on: string | null;
+  meter: number | null;
+  reading_id: string | null;
+  provider: string | null;
+  invoice_number: string | null;
+  currency: string | null;
+  total: number | null;
+  notes: string | null;
+  attachments: Attachment[];
+  event_key?: string | null;
+  actor?: string | null;
+  run_id?: string | null;
+  created_at: string;
+  updated_at: string;
+  // A planned visit's lines (cleared on completion)…
+  lines: Array<{ visit_id: string; item_id: string; notes: string | null; position: number; item: VisitItemRef | null }>;
+  // …and a done visit's completions.
+  logs: Array<MaintenanceLog & { item: VisitItemRef | null }>;
+}
+
+export interface CompleteVisitBody {
+  visited_on?: string;
+  meter?: number | null;
+  allow_decrease?: boolean;
+  provider?: string | null;
+  invoice_number?: string | null;
+  currency?: string | null;
+  total?: number | null;
+  notes?: string | null;
+  attachments?: Attachment[];
+  event_key?: string;
+  lines: VisitLineInput[];
+}
+
+export const visitsApi = {
+  list: (assetId: string) => api.get<{ visits: Visit[] }>(`/api/assets/${assetId}/visits`),
+  get: (id: string) => api.get<{ visit: Visit | null }>(`/api/visits/${id}`),
+  plan: (assetId: string, body: { planned_on?: string | null; provider?: string | null; notes?: string | null; items: Array<{ item_id: string; notes?: string | null }> }) =>
+    api.post<{ visit: Visit }>(`/api/assets/${assetId}/visits`, { status: 'planned', ...body }),
+  log: (assetId: string, body: CompleteVisitBody) =>
+    api.post<{ visit: Visit; lines: Array<{ item_id: string; log_id: string; logged: boolean; historical: boolean }>; logged: boolean }>(
+      `/api/assets/${assetId}/visits`,
+      { status: 'done', ...body },
+    ),
+  complete: (id: string, body: CompleteVisitBody) =>
+    api.post<{ visit: Visit; lines: Array<{ item_id: string; log_id: string; logged: boolean; historical: boolean }>; logged: boolean }>(
+      `/api/visits/${id}/complete`,
+      body,
+    ),
+  update: (
+    id: string,
+    body: Partial<{
+      planned_on: string | null;
+      items: Array<{ item_id: string; notes?: string | null }>;
+      visited_on: string;
+      meter: number | null;
+      allow_decrease: boolean;
+      provider: string | null;
+      invoice_number: string | null;
+      currency: string | null;
+      total: number | null;
+      notes: string | null;
+      attachments: Attachment[];
+    }>,
+  ) => api.patch<{ visit: Visit }>(`/api/visits/${id}`, body),
+  remove: (id: string) => api.delete<{ deleted: boolean; logs_removed: number }>(`/api/visits/${id}`),
+};
+
 export const assetsApi = {
   list: (opts?: { include_archived?: boolean }) =>
     api.get<{ assets: AssetListItem[] }>(
@@ -1085,8 +1186,12 @@ export const assetsApi = {
       readings: MeterReading[];
       items: MaintenanceItem[];
       projects: AssetProjectRow[];
-      // Sum of logged completion costs this app-tz year.
+      // Service visits (0051): planned first, then done newest first.
+      visits: Visit[];
+      // Allocated line costs across all completions this app-tz year…
       cost_ytd: number;
+      // …versus invoice-grounded spend: visit totals + loose completions.
+      spend_ytd: number;
       today: string;
       meter_stale_days: number;
     }>(`/api/assets/${id}`),

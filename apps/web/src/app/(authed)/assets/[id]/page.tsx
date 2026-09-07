@@ -21,7 +21,7 @@ import { dataLabel, dueDateLabel, meterLabel, statusLabel } from '../../maintena
 import type { DomainOption } from '../../maintenance/item-form';
 import { DocPanel } from '@/components/doc/DocPanel';
 import { promoteIdeaAction } from '../../projects/actions';
-import { assignAssetDomainAction } from './actions';
+import { assignAssetDomainAction, deleteVisitAction, planVisitAction } from './actions';
 import { AssetGallery } from './asset-gallery';
 import { isStructuredFact, renderFact } from './facts';
 import { FactsEditor, type FactRow } from './facts-editor';
@@ -64,7 +64,9 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
     if (detailRes.reason instanceof ApiError && detailRes.reason.status === 404) notFound();
     throw detailRes.reason;
   }
-  const { asset, domain, latest_reading: latest, readings, items, projects, cost_ytd, today, meter_stale_days } = detailRes.value;
+  const { asset, domain, latest_reading: latest, readings, items, projects, visits, cost_ytd, spend_ytd, today, meter_stale_days } = detailRes.value;
+  const plannedVisits = visits.filter((v) => v.status === 'planned');
+  const doneVisits = visits.filter((v) => v.status === 'done');
   const domains: DomainOption[] =
     domainsRes.status === 'fulfilled' ? domainsRes.value.domains.map(({ id: did, name }) => ({ id: did, name })) : [];
 
@@ -227,8 +229,8 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
         />
         <Stat
           label={`Spend · ${year}`}
-          value={cost_ytd > 0 ? `$${cost_ytd.toLocaleString('en-US')}` : '—'}
-          sub="logged completions"
+          value={spend_ytd > 0 ? `$${spend_ytd.toLocaleString('en-US')}` : '—'}
+          sub={cost_ytd > 0 && cost_ytd !== spend_ytd ? `invoices + loose work · $${cost_ytd.toLocaleString('en-US')} in lines` : 'invoices + loose work'}
         />
       </StatStrip>
 
@@ -274,12 +276,26 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
                       </li>
                     ))}
                 </ul>
-                {workshop.length >= 2 && (
-                  <p className="mt-3 font-sans text-[12.5px] text-ink-3">
-                    <span className="font-mono text-[9.5px] uppercase tracking-[0.08em] text-ink-3 mr-2">Plan together</span>
-                    {workshop.map((i) => i.name).join(' · ')}
-                    <span className="text-ink-4"> — inside their lead windows; a suggestion, grouped by who does the work.</span>
-                  </p>
+                {workshop.length >= 1 && (
+                  <div className="mt-3 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                    <p className="font-sans text-[12.5px] text-ink-3">
+                      <span className="font-mono text-[9.5px] uppercase tracking-[0.08em] text-ink-3 mr-2">Plan together</span>
+                      {workshop.map((i) => i.name).join(' · ')}
+                      <span className="text-ink-4"> — inside their lead windows; a suggestion, grouped by who does the work.</span>
+                    </p>
+                    {/* The suggestion becomes a saved work order (0051). */}
+                    <ActionForm
+                      action={planVisitAction}
+                      hidden={{ asset_id: asset.id, item_ids: JSON.stringify(workshop.map((i) => i.id)) }}
+                      submit="Plan a visit"
+                      variant="quiet"
+                      pendingLabel="…"
+                      className="flex flex-wrap items-baseline gap-2"
+                    />
+                    <Link href={`/assets/${asset.id}/visits/new?items=${workshop.map((i) => i.id).join(',')}`} className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3 hover:text-accent">
+                      Log it now →
+                    </Link>
+                  </div>
                 )}
                 {renewals.length > 0 && (
                   <p className="mt-1.5 font-sans text-[12.5px] text-ink-3">
@@ -313,6 +329,68 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
               }
             >
               <ServiceSchedule items={items} today={today} unit={unit} readOnly={!assetActive} />
+            </DetailSection>
+
+            {/* Service visits (0051): a planned visit is a saved work order;
+                a done visit is one event — one odometer, one invoice, the
+                lines it covered. */}
+            <DetailSection
+              label="Visits"
+              count={visits.length}
+              action={
+                assetActive ? (
+                  <Link href={`/assets/${asset.id}/visits/new`} className="font-mono text-[10px] uppercase tracking-wider text-accent hover:text-ink transition-colors">
+                    Log a visit →
+                  </Link>
+                ) : undefined
+              }
+            >
+              <div id="visits" />
+              {visits.length === 0 && (
+                <p className="font-sans text-[13px] text-ink-3 italic py-1">
+                  No visits yet. A visit records one trip — several items done on one odometer with one invoice — and keeps the invoice total apart from the line costs.
+                </p>
+              )}
+              {plannedVisits.map((v) => (
+                <div key={v.id} className="py-3 border-b border-line/60">
+                  <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                    <span className="font-mono text-[9.5px] uppercase tracking-[0.08em] text-ink-3">Planned</span>
+                    <span className="font-sans text-[14px] text-ink">{v.planned_on ?? 'undated'}{v.provider ? ` · ${v.provider}` : ''}</span>
+                    <span className="font-mono text-[10px] text-ink-3">{v.lines.length} line{v.lines.length === 1 ? '' : 's'}</span>
+                    <span className="ml-auto flex items-baseline gap-3">
+                      <Link href={`/assets/${asset.id}/visits/${v.id}`} className="font-mono text-[10px] uppercase tracking-[0.08em] text-accent hover:text-ink">Record it →</Link>
+                      <ActionForm action={deleteVisitAction} hidden={{ asset_id: asset.id, visit_id: v.id, status: 'planned' }} submit="remove plan" variant="quiet" pendingLabel="…" />
+                    </span>
+                  </div>
+                  <p className="mt-1 font-sans text-[12.5px] text-ink-2">
+                    {v.lines.map((l) => l.item?.name ?? '?').join(' · ')}
+                  </p>
+                  {v.notes && <p className="mt-0.5 font-sans text-[12px] text-ink-3">{v.notes}</p>}
+                </div>
+              ))}
+              {doneVisits.map((v) => (
+                <div key={v.id} className="py-3 border-b border-line/60">
+                  <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                    <span className="font-mono text-[12px] tabular-nums text-ink">{v.visited_on}</span>
+                    {v.meter != null && unit && <span className="font-mono text-[11px] tabular-nums text-ink-3">{v.meter.toLocaleString('en-US')} {unit}</span>}
+                    {v.provider && <span className="font-sans text-[13px] text-ink-2">{v.provider}</span>}
+                    {v.total != null && (
+                      <span className="font-mono text-[11px] tabular-nums text-ink">
+                        {v.currency ? `${v.currency} ` : '$'}{v.total.toLocaleString('en-US')}
+                        {v.invoice_number ? <span className="text-ink-4"> · #{v.invoice_number}</span> : null}
+                      </span>
+                    )}
+                    {v.attachments.length > 0 && <span className="font-mono text-[9.5px] uppercase tracking-[0.06em] text-ink-4">{v.attachments.length} photo{v.attachments.length === 1 ? '' : 's'}</span>}
+                    <span className="ml-auto">
+                      <ActionForm action={deleteVisitAction} hidden={{ asset_id: asset.id, visit_id: v.id, status: 'done' }} submit="undo visit" variant="quiet" pendingLabel="…" />
+                    </span>
+                  </div>
+                  <p className="mt-1 font-sans text-[12.5px] text-ink-2">
+                    {v.logs.map((l) => `${l.item?.name ?? '?'}${l.cost != null ? ` ($${l.cost.toLocaleString('en-US')})` : ''}`).join(' · ')}
+                  </p>
+                  {v.notes && <p className="mt-0.5 font-sans text-[12px] text-ink-3">{v.notes}</p>}
+                </div>
+              ))}
             </DetailSection>
 
             <DetailSection label="Projects" count={projectCards.length + otherProjects.length}>

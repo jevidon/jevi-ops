@@ -46,8 +46,9 @@ import {
   type LatestReading,
 } from '../lib/meter-readings.js';
 import { todayInTz } from '../lib/tz.js';
+import { listVisits, spendForYear } from '../lib/visits.js';
 import {
-  assets, attention_items, asset_meter_readings, maintenance_items, maintenance_logs, projects, tasks,
+  assets, attention_items, asset_meter_readings, maintenance_items, maintenance_logs, maintenance_visits, projects, tasks,
   type StoredAttachment,
 } from '../db/schema.js';
 
@@ -260,6 +261,7 @@ export const maintenanceRoutes: FastifyPluginAsync = async (app) => {
     // uses — never derived from the paginated history above.
     const latest = (await latestReadingRowByAsset(db, [asset.id])).get(asset.id) ?? null;
     const withState = items.map((i) => withDueState(i, ctx, latest)).sort(dueSort);
+    const [visits, spendYtd] = await Promise.all([listVisits(db, asset.id), spendForYear(db, asset.id, yearStart)]);
     const { domain, ...assetRow } = asset;
     return {
       asset: assetRow,
@@ -268,7 +270,12 @@ export const maintenanceRoutes: FastifyPluginAsync = async (app) => {
       readings,
       items: withState,
       projects: projectRows,
+      // Service visits (0051): planned first, then done newest first.
+      visits,
+      // Allocated line costs across all completions this year…
       cost_ytd: Number(costRow?.total ?? 0),
+      // …versus invoice-grounded spend: visit totals + loose completions.
+      spend_ytd: spendYtd,
       today: ctx.today,
       meter_stale_days: ctx.staleDays,
     };
@@ -592,17 +599,21 @@ export const maintenanceRoutes: FastifyPluginAsync = async (app) => {
     const result = await db.transaction(async (tx) => {
       const row = await voidReading(tx, req.params.id, req.params.rid);
       if (!row) return null;
-      const [log] = await tx.select().from(maintenance_logs).where(eq(maintenance_logs.reading_id, row.id));
+      // Every completion that stood on this reading (one, or a visit's
+      // several) now has an unknown meter.
+      const linked = await tx.select().from(maintenance_logs).where(eq(maintenance_logs.reading_id, row.id));
       let item: ItemRow | null = null;
-      if (log) {
-        item = await lockItem(tx, log.item_id);
+      for (const log of linked) {
+        const locked = await lockItem(tx, log.item_id);
         const before = await latestLog(tx, log.item_id);
         await tx
           .update(maintenance_logs)
           .set({ meter_at_completion: null, reading_id: null })
           .where(eq(maintenance_logs.id, log.id));
-        if (item && before?.id === log.id) item = await rederiveAndReconcile(tx, item, ctx);
+        if (locked && before?.id === log.id) item = await rederiveAndReconcile(tx, locked, ctx);
+        else if (locked) item = locked;
       }
+      await tx.update(maintenance_visits).set({ meter: null, reading_id: null }).where(eq(maintenance_visits.reading_id, row.id));
       return { reading: row, voided: true, item };
     });
     if (!result) return reply.code(404).send({ error: 'not_found' });
@@ -618,18 +629,23 @@ export const maintenanceRoutes: FastifyPluginAsync = async (app) => {
     row: typeof asset_meter_readings.$inferSelect,
     ctx: ScheduleContext,
   ): Promise<ItemRow | null> {
-    const [log] = await tx.select().from(maintenance_logs).where(eq(maintenance_logs.reading_id, row.id));
-    if (!log) return null;
-    const item = await lockItem(tx, log.item_id);
-    if (!item) return null;
-    const before = await latestLog(tx, item.id);
-    await tx
-      .update(maintenance_logs)
-      .set({ meter_at_completion: row.reading, completed_on: row.recorded_on })
-      .where(eq(maintenance_logs.id, log.id));
-    const after = await latestLog(tx, item.id);
-    if (before?.id === log.id || after?.id === log.id) return rederiveAndReconcile(tx, item, ctx);
-    return item;
+    // One completion, or every line of a visit (0051) — all stood on this
+    // reading, all follow the correction; the visit's own copy too.
+    const linked = await tx.select().from(maintenance_logs).where(eq(maintenance_logs.reading_id, row.id));
+    let last: ItemRow | null = null;
+    for (const log of linked) {
+      const item = await lockItem(tx, log.item_id);
+      if (!item) continue;
+      const before = await latestLog(tx, item.id);
+      await tx
+        .update(maintenance_logs)
+        .set({ meter_at_completion: row.reading, completed_on: row.recorded_on })
+        .where(eq(maintenance_logs.id, log.id));
+      const after = await latestLog(tx, item.id);
+      last = before?.id === log.id || after?.id === log.id ? await rederiveAndReconcile(tx, item, ctx) : item;
+    }
+    await tx.update(maintenance_visits).set({ meter: row.reading, visited_on: row.recorded_on }).where(eq(maintenance_visits.reading_id, row.id));
+    return last;
   }
 
   // ─── Maintenance items ───────────────────────────────────────────────
@@ -1009,7 +1025,10 @@ export const maintenanceRoutes: FastifyPluginAsync = async (app) => {
 
       const before = await latestLog(tx, item.id);
       await tx.delete(maintenance_logs).where(eq(maintenance_logs.id, log.id));
-      if (log.reading_id) {
+      // The reading this completion created goes with it — unless it is a
+      // visit's single reading (0051), which the visit and its other lines
+      // still stand on; undo the visit to void that one.
+      if (log.reading_id && !log.visit_id) {
         await tx
           .update(asset_meter_readings)
           .set({ voided_at: new Date().toISOString() })

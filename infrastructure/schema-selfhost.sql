@@ -1389,6 +1389,8 @@ create table if not exists maintenance_logs (
   finding text,
   next_review_on date,
   next_review_meter numeric,
+  -- The service visit this completion happened at (0051); FK added below.
+  visit_id uuid,
   created_at timestamptz not null default now()
 );
 
@@ -1396,6 +1398,59 @@ create index if not exists idx_maintenance_logs_item
   on maintenance_logs(item_id, completed_on desc);
 create unique index if not exists idx_maintenance_logs_event_key
   on maintenance_logs(event_key) where event_key is not null;
+create index if not exists idx_maintenance_logs_visit
+  on maintenance_logs(visit_id) where visit_id is not null;
+
+-- Service visits (0051): one event — several items on one odometer with
+-- one invoice. planned = a saved work order; done = the record. The
+-- visit's `total` is the invoice; each log's `cost` is the allocated line.
+create table if not exists maintenance_visits (
+  id uuid primary key default gen_random_uuid(),
+  asset_id uuid not null references assets(id) on delete cascade,
+  status text not null default 'planned' check (status in ('planned','done')),
+  planned_on date,
+  visited_on date,
+  meter numeric check (meter >= 0),
+  reading_id uuid references asset_meter_readings(id) on delete set null,
+  provider text,
+  invoice_number text,
+  currency text,
+  total numeric check (total >= 0),
+  notes text,
+  attachments jsonb not null default '[]'::jsonb,
+  event_key text,
+  actor text,
+  run_id text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint maintenance_visits_done_has_date check (status <> 'done' or visited_on is not null)
+);
+
+create index if not exists idx_maintenance_visits_asset
+  on maintenance_visits(asset_id, visited_on desc);
+create index if not exists idx_maintenance_visits_asset_status
+  on maintenance_visits(asset_id, status);
+create unique index if not exists idx_maintenance_visits_event_key
+  on maintenance_visits(event_key) where event_key is not null;
+
+drop trigger if exists trg_maintenance_visits_updated_at on maintenance_visits;
+create trigger trg_maintenance_visits_updated_at
+  before update on maintenance_visits
+  for each row execute function set_updated_at();
+
+create table if not exists maintenance_visit_items (
+  visit_id uuid not null references maintenance_visits(id) on delete cascade,
+  item_id uuid not null references maintenance_items(id) on delete cascade,
+  notes text,
+  position integer not null default 0,
+  primary key (visit_id, item_id)
+);
+
+alter table maintenance_logs
+  drop constraint if exists maintenance_logs_visit_id_fkey;
+alter table maintenance_logs
+  add constraint maintenance_logs_visit_id_fkey
+  foreign key (visit_id) references maintenance_visits(id) on delete set null;
 
 
 -- ─────────────────────────────────────────────────────────────────────────

@@ -56,8 +56,11 @@ export class MaintenanceNeedsDetails extends Error {
   constructor(
     public policy: string,
     public fields: string[],
+    // Which item, when the caller is completing several at once (a visit).
+    public itemId: string | null = null,
+    public itemName: string | null = null,
   ) {
-    super(`This ${policy} item needs ${fields.join(' or ')} to be completed.`);
+    super(`${itemName ? `"${itemName}"` : `This ${policy} item`} needs ${fields.join(' or ')} to be completed.`);
     this.name = 'MaintenanceNeedsDetails';
   }
 }
@@ -94,6 +97,10 @@ export interface CompleteMaintenanceInput {
   runId?: string | null;
   // Idempotency key; server-generated when absent.
   eventKey?: string | null;
+  // A service visit (0051): the completion happened at it, and its meter
+  // is the visit's single reading (already recorded) rather than a new one.
+  visitId?: string | null;
+  readingId?: string | null;
   // Policy-specific facts.
   issuedUntil?: string | null;
   purchasedTo?: number | null;
@@ -220,7 +227,7 @@ export async function completeMaintenanceItem(
       nextReviewOn: input.nextReviewOn,
       nextReviewMeter: input.nextReviewMeter,
     });
-    if (missing.length > 0) throw new MaintenanceNeedsDetails(item.policy, missing);
+    if (missing.length > 0) throw new MaintenanceNeedsDetails(item.policy, missing, item.id, item.name);
 
     // Idempotent event insert. The partial unique index is on event_key
     // WHERE event_key IS NOT NULL; the conflict target must match it.
@@ -236,6 +243,8 @@ export async function completeMaintenanceItem(
         event_key: eventKey,
         actor: input.actor ?? null,
         run_id: input.runId ?? null,
+        visit_id: input.visitId ?? null,
+        reading_id: input.readingId ?? null,
         issued_until: input.issuedUntil ?? null,
         purchased_to: input.purchasedTo ?? null,
         finding: input.finding ?? null,
@@ -256,7 +265,8 @@ export async function completeMaintenanceItem(
       // A completion that carries a reading is a meter capture point —
       // record it through the validated path, linked, so undo can void
       // exactly this reading. A rejected reading rolls the log back too.
-      if (input.meter != null && asset?.meter_unit) {
+      // (At a visit the reading was recorded once already: readingId.)
+      if (input.meter != null && asset?.meter_unit && !input.readingId) {
         const { row: reading } = await recordReading(tx, {
           assetId: asset.id,
           reading: input.meter,

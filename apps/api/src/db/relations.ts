@@ -2,7 +2,7 @@
 // db.query.<table>.findMany({ with: { <key>: ... } }) surfaces them verbatim
 // in JSON responses the web app consumes. Renaming a key changes the API shape.
 import { relations } from "drizzle-orm/relations";
-import { stewardship_domains, projects, people, person_facts, person_interactions, milestones, activity_log, project_checklist_items, content_items, content_checklist_items, tasks, checklist_templates, checklist_instances, books, quotes, quote_annotations, journal_books, journal_entries, notes, observations, routines, routine_completions, health_visits, health_metrics, lab_panels, lab_results, health_documents, companies, conversations, project_contacts, assets, asset_meter_readings, maintenance_items, maintenance_logs } from "./schema.js";
+import { stewardship_domains, projects, people, person_facts, person_interactions, milestones, activity_log, project_checklist_items, content_items, content_checklist_items, tasks, checklist_templates, checklist_instances, books, quotes, quote_annotations, journal_books, journal_entries, notes, observations, routines, routine_completions, health_visits, health_metrics, lab_panels, lab_results, health_documents, companies, conversations, project_contacts, assets, asset_meter_readings, maintenance_items, maintenance_logs, maintenance_visits, maintenance_visit_items } from "./schema.js";
 
 export const projectsRelations = relations(projects, ({one, many}) => ({
 	domain: one(stewardship_domains, {
@@ -337,8 +337,36 @@ export const maintenance_logsRelations = relations(maintenance_logs, ({one}) => 
 		fields: [maintenance_logs.item_id],
 		references: [maintenance_items.id]
 	}),
+	visit: one(maintenance_visits, {
+		fields: [maintenance_logs.visit_id],
+		references: [maintenance_visits.id]
+	}),
 	reading: one(asset_meter_readings, {
 		fields: [maintenance_logs.reading_id],
 		references: [asset_meter_readings.id]
+	}),
+}));
+// Service visits (0051).
+export const maintenance_visitsRelations = relations(maintenance_visits, ({one, many}) => ({
+	asset: one(assets, {
+		fields: [maintenance_visits.asset_id],
+		references: [assets.id]
+	}),
+	reading: one(asset_meter_readings, {
+		fields: [maintenance_visits.reading_id],
+		references: [asset_meter_readings.id]
+	}),
+	lines: many(maintenance_visit_items),
+	logs: many(maintenance_logs),
+}));
+
+export const maintenance_visit_itemsRelations = relations(maintenance_visit_items, ({one}) => ({
+	visit: one(maintenance_visits, {
+		fields: [maintenance_visit_items.visit_id],
+		references: [maintenance_visits.id]
+	}),
+	item: one(maintenance_items, {
+		fields: [maintenance_visit_items.item_id],
+		references: [maintenance_items.id]
 	}),
 }));

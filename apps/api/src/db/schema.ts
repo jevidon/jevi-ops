@@ -1,4 +1,4 @@
-import { pgTable, index, uniqueIndex, foreignKey, check, uuid, text, numeric, date, timestamp, unique, jsonb, boolean, integer, real, time, smallint, bigint } from "drizzle-orm/pg-core"
+import { pgTable, index, uniqueIndex, foreignKey, primaryKey, check, uuid, text, numeric, date, timestamp, unique, jsonb, boolean, integer, real, time, smallint, bigint } from "drizzle-orm/pg-core"
 import { sql } from "drizzle-orm"
 
 // ─── Typed jsonb payload shapes ────────────────────────────────────────────
@@ -1354,6 +1354,8 @@ export const maintenance_logs = pgTable("maintenance_logs", {
 	actor: text(),
 	run_id: text(),
 	reading_id: uuid(),
+	// The service visit this completion happened at (0051).
+	visit_id: uuid(),
 	// Seed evidence entered at item creation; editable, not deletable.
 	is_baseline: boolean().default(false).notNull(),
 	// Policy-specific completion facts.
@@ -1376,7 +1378,78 @@ export const maintenance_logs = pgTable("maintenance_logs", {
 			foreignColumns: [asset_meter_readings.id],
 			name: "maintenance_logs_reading_id_fkey"
 		}).onDelete("set null"),
+	index("idx_maintenance_logs_visit").using("btree", table.visit_id.asc().nullsLast().op("uuid_ops")).where(sql`(visit_id IS NOT NULL)`),
+	foreignKey({
+			columns: [table.visit_id],
+			foreignColumns: [maintenance_visits.id],
+			name: "maintenance_logs_visit_id_fkey"
+		}).onDelete("set null"),
 	check("maintenance_logs_meter_at_completion_check", sql`meter_at_completion >= (0)::numeric`),
 	check("maintenance_logs_cost_check", sql`cost >= (0)::numeric`),
 	check("maintenance_logs_source_check", sql`source = ANY (ARRAY['manual'::text, 'task'::text, 'agent'::text, 'import'::text])`),
+]);
+
+// Service visits (0051): one event — several items done on one odometer
+// with one invoice. planned = a saved work order; done = the record. The
+// visit's `total` is the invoice; each log's `cost` is the allocated line.
+export const maintenance_visits = pgTable("maintenance_visits", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	asset_id: uuid().notNull(),
+	status: text().default('planned').notNull(),
+	planned_on: date(),
+	visited_on: date(),
+	// The odometer at the visit — recorded once, as one reading.
+	meter: numeric({ mode: 'number' }),
+	reading_id: uuid(),
+	provider: text(),
+	invoice_number: text(),
+	currency: text(),
+	total: numeric({ mode: 'number' }),
+	notes: text(),
+	// Invoice photos: StoredAttachment[].
+	attachments: jsonb().$type<StoredAttachment[]>().default([]).notNull(),
+	event_key: text(),
+	actor: text(),
+	run_id: text(),
+	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	updated_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	index("idx_maintenance_visits_asset").using("btree", table.asset_id.asc().nullsLast().op("uuid_ops"), table.visited_on.desc().nullsFirst().op("date_ops")),
+	index("idx_maintenance_visits_asset_status").using("btree", table.asset_id.asc().nullsLast().op("uuid_ops"), table.status.asc().nullsLast().op("text_ops")),
+	uniqueIndex("idx_maintenance_visits_event_key").using("btree", table.event_key.asc().nullsLast().op("text_ops")).where(sql`(event_key IS NOT NULL)`),
+	foreignKey({
+			columns: [table.asset_id],
+			foreignColumns: [assets.id],
+			name: "maintenance_visits_asset_id_fkey"
+		}).onDelete("cascade"),
+	foreignKey({
+			columns: [table.reading_id],
+			foreignColumns: [asset_meter_readings.id],
+			name: "maintenance_visits_reading_id_fkey"
+		}).onDelete("set null"),
+	check("maintenance_visits_status_check", sql`status = ANY (ARRAY['planned'::text, 'done'::text])`),
+	check("maintenance_visits_meter_check", sql`meter >= (0)::numeric`),
+	check("maintenance_visits_total_check", sql`total >= (0)::numeric`),
+	check("maintenance_visits_done_has_date", sql`(status <> 'done'::text) OR (visited_on IS NOT NULL)`),
+]);
+
+// The lines of a PLANNED visit (a work order). Cleared on completion — the
+// logs (maintenance_logs.visit_id) are then the record.
+export const maintenance_visit_items = pgTable("maintenance_visit_items", {
+	visit_id: uuid().notNull(),
+	item_id: uuid().notNull(),
+	notes: text(),
+	position: integer().default(0).notNull(),
+}, (table) => [
+	primaryKey({ columns: [table.visit_id, table.item_id], name: "maintenance_visit_items_pkey" }),
+	foreignKey({
+			columns: [table.visit_id],
+			foreignColumns: [maintenance_visits.id],
+			name: "maintenance_visit_items_visit_id_fkey"
+		}).onDelete("cascade"),
+	foreignKey({
+			columns: [table.item_id],
+			foreignColumns: [maintenance_items.id],
+			name: "maintenance_visit_items_item_id_fkey"
+		}).onDelete("cascade"),
 ]);

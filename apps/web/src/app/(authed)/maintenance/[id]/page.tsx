@@ -149,7 +149,7 @@ export default async function MaintenanceItemPage({
             No evidence yet — the schedule is anchored at the item&rsquo;s creation date.
           </p>
         ) : (
-          logs.map((log) => <LogRow key={log.id} log={log} itemId={item.id} unit={unit} />)
+          logs.map((log) => <LogRow key={log.id} log={log} itemId={item.id} unit={unit} assetId={item.asset?.id ?? null} />)
         )}
       </div>
 
@@ -180,7 +180,7 @@ export default async function MaintenanceItemPage({
   );
 }
 
-function LogRow({ log, itemId, unit }: { log: MaintenanceLog; itemId: string; unit: string }) {
+function LogRow({ log, itemId, unit, assetId }: { log: MaintenanceLog; itemId: string; unit: string; assetId: string | null }) {
   const facts: string[] = [];
   if (log.meter_at_completion != null) facts.push(`${log.meter_at_completion.toLocaleString('en-US')} ${unit}`.trim());
   if (log.issued_until) facts.push(`expires ${log.issued_until}`);
@@ -198,6 +198,11 @@ function LogRow({ log, itemId, unit }: { log: MaintenanceLog; itemId: string; un
       )}
       {log.notes && !log.is_baseline && (
         <span className="font-sans text-[12px] text-ink-3 flex-1 min-w-0 truncate">{log.notes}</span>
+      )}
+      {log.visit_id && (
+        <a href={assetId ? `/assets/${assetId}#visits` : '#'} className="font-mono text-[9px] uppercase tracking-[0.05em] px-1 py-px bg-surface-2 text-ink-3 hover:text-accent shrink-0" title="Done at a service visit — undo it from the visit.">
+          visit
+        </a>
       )}
       <span className="font-mono text-[9px] uppercase tracking-[0.05em] text-ink-3 ml-auto shrink-0">
         {log.is_baseline ? 'baseline' : log.source}

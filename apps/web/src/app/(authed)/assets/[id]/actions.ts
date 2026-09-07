@@ -1,7 +1,8 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { ApiError, assetsApi, type Attachment, type MetadataPatch } from '@/lib/api';
+import { redirect } from 'next/navigation';
+import { ApiError, assetsApi, visitsApi, type Attachment, type MetadataPatch, type VisitLineInput } from '@/lib/api';
 import { renderFact } from './facts';
 
 // Server actions for the asset page (0049). Two things the page owns that
@@ -51,6 +52,117 @@ export async function assignAssetDomainAction(
       ? 'Assigned — it now shows in that domain, and its projects and open upkeep moved with it.'
       : 'Unassigned — listed under Maintenance only; its upkeep still lands in Inbox.',
   };
+}
+
+// ─── Service visits (0051) ───────────────────────────────────────────────
+
+// "Plan a visit": the batch of workshop items becomes a saved work order.
+export async function planVisitAction(
+  _prev: SaveResult | null,
+  formData: FormData,
+): Promise<SaveResult> {
+  const assetId = String(formData.get('asset_id') ?? '').trim();
+  if (!assetId) return { ok: false, error: 'Missing asset.' };
+  let itemIds: string[];
+  try {
+    itemIds = JSON.parse(String(formData.get('item_ids') ?? '[]'));
+    if (!Array.isArray(itemIds) || itemIds.length === 0) throw new Error('empty');
+  } catch {
+    return { ok: false, error: 'Nothing to plan.' };
+  }
+  const provider = String(formData.get('provider') ?? '').trim() || null;
+  const plannedOn = String(formData.get('planned_on') ?? '').trim() || null;
+  try {
+    await visitsApi.plan(assetId, { provider, planned_on: plannedOn, items: itemIds.map((item_id) => ({ item_id })) });
+  } catch (err) {
+    return shapeError(err);
+  }
+  revalidateAsset(assetId, []);
+  return { ok: true, message: 'Planned — it is under Visits; complete it when the work is done.' };
+}
+
+export async function deleteVisitAction(
+  _prev: SaveResult | null,
+  formData: FormData,
+): Promise<SaveResult> {
+  const assetId = String(formData.get('asset_id') ?? '').trim();
+  const visitId = String(formData.get('visit_id') ?? '').trim();
+  const wasDone = formData.get('status') === 'done';
+  if (!assetId || !visitId) return { ok: false, error: 'Missing visit.' };
+  try {
+    await visitsApi.remove(visitId);
+  } catch (err) {
+    return shapeError(err);
+  }
+  revalidateAsset(assetId, []);
+  revalidatePath('/maintenance');
+  revalidatePath('/tasks');
+  revalidatePath('/');
+  return { ok: true, message: wasDone ? 'Undone — every line came out and the reading was voided.' : 'Plan removed.' };
+}
+
+// The visit form (new, or completing a plan): one date, one odometer, the
+// invoice, and a line per item done — each with its own evidence.
+export async function completeVisitAction(
+  _prev: SaveResult | null,
+  formData: FormData,
+): Promise<SaveResult> {
+  const assetId = String(formData.get('asset_id') ?? '').trim();
+  const visitId = String(formData.get('visit_id') ?? '').trim() || null;
+  if (!assetId) return { ok: false, error: 'Missing asset.' };
+  const str = (k: string) => String(formData.get(k) ?? '').trim() || null;
+  const num = (k: string) => {
+    const raw = String(formData.get(k) ?? '').trim();
+    if (!raw) return null;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : null;
+  };
+  let itemIds: string[] = [];
+  let attachments: Attachment[] = [];
+  try {
+    itemIds = JSON.parse(String(formData.get('item_ids') ?? '[]'));
+    attachments = JSON.parse(String(formData.get('attachments') ?? '[]'));
+  } catch {
+    return { ok: false, error: 'Could not read the form.' };
+  }
+  const lines: VisitLineInput[] = itemIds
+    .filter((id) => formData.get(`done_${id}`) === 'on')
+    .map((id) => ({
+      item_id: id,
+      cost: num(`cost_${id}`),
+      notes: str(`notes_${id}`),
+      issued_until: str(`issued_until_${id}`),
+      purchased_to: num(`purchased_to_${id}`),
+      finding: str(`finding_${id}`),
+      next_review_on: str(`next_review_on_${id}`),
+      next_review_meter: num(`next_review_meter_${id}`),
+    }));
+  if (lines.length === 0) return { ok: false, error: 'Tick at least one item that was done.' };
+  const eventKey = str('event_key');
+  const body = {
+    ...(str('visited_on') ? { visited_on: str('visited_on')! } : {}),
+    meter: num('meter'),
+    allow_decrease: formData.get('allow_decrease') === 'on',
+    provider: str('provider'),
+    invoice_number: str('invoice_number'),
+    currency: str('currency')?.toUpperCase() ?? null,
+    total: num('total'),
+    notes: str('notes'),
+    attachments,
+    ...(eventKey ? { event_key: eventKey } : {}),
+    lines,
+  };
+  try {
+    if (visitId) await visitsApi.complete(visitId, body);
+    else await visitsApi.log(assetId, body);
+  } catch (err) {
+    return shapeError(err);
+  }
+  revalidateAsset(assetId, []);
+  revalidatePath('/maintenance');
+  revalidatePath('/tasks');
+  revalidatePath('/');
+  redirect(`/assets/${assetId}#visits`);
 }
 
 // Photos (0050): the attachments array is the whole state — order is the
