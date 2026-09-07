@@ -1,15 +1,25 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { ApiError, assetsApi, domainsApi } from '@/lib/api';
-import { addReadingAction, deleteAssetAction } from '../../actions';
+import { ActionForm } from '../../action-form';
+import { addReadingAction, deleteAssetAction, voidReadingAction } from '../../actions';
 import { AssetForm } from '../../asset-form';
-import { cadenceLabel, dueDateLabel, meterLabel } from '../../format';
+import { cadenceLabel, dataLabel, dueDateLabel, meterLabel, statusLabel } from '../../format';
 import type { DomainOption } from '../../item-form';
 
-// /maintenance/assets/[id] — one asset: its items with due state, the meter
-// log + add-reading form (when metered), stored facts (the metadata jsonb —
-// read-only here; the future vehicle agent owns writing it), and the edit
-// form.
+// /maintenance/assets/[id] — one asset: its items with due state + data
+// confidence, the meter log + add-reading form (when metered), stored
+// facts (the metadata jsonb — read-only here; the future vehicle agent
+// owns writing it), and the edit form. Lifecycle (active / stored / sold
+// / archived) lives in the edit form; leaving 'active' retires the
+// asset's generated tasks and attention.
+
+const LIFECYCLE_NOTE: Record<string, string | null> = {
+  active: null,
+  stored: 'Stored — schedules paused, history kept.',
+  sold: 'Sold — history kept for the record.',
+  archived: 'Archived.',
+};
 
 export default async function AssetPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -30,6 +40,9 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
   }
 
   const facts = Object.entries(asset.metadata ?? {});
+  const live = readings.filter((r) => !r.voided_at);
+  const latest = live[0] ?? null;
+  const lifecycleNote = LIFECYCLE_NOTE[asset.lifecycle] ?? null;
 
   return (
     <div className="pb-32">
@@ -45,18 +58,24 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
         <h1 className="font-serif text-[28px] font-medium tracking-[-0.4px] text-ink leading-none">
           {asset.name}
         </h1>
-        <div className="mt-1.5 flex items-center gap-2 font-sans text-[12px] text-ink-3">
+        <div className="mt-1.5 flex items-center gap-2 flex-wrap font-sans text-[12px] text-ink-3">
           <span className="font-mono text-[9px] uppercase tracking-[0.05em] px-1.5 py-px bg-surface-2">
             {asset.kind}
           </span>
+          {asset.lifecycle !== 'active' && (
+            <span className="font-mono text-[9px] uppercase tracking-[0.05em] px-1.5 py-px border border-dashed border-line-strong">
+              {asset.lifecycle}
+            </span>
+          )}
           {asset.meter_unit && (
             <span>
-              {readings[0]
-                ? `${readings[0].reading.toLocaleString('en-US')} ${asset.meter_unit} as of ${readings[0].recorded_on}`
+              {latest
+                ? `${latest.reading.toLocaleString('en-US')} ${asset.meter_unit} as of ${latest.recorded_on}`
                 : `metered (${asset.meter_unit}) — no readings yet`}
             </span>
           )}
         </div>
+        {lifecycleNote && <p className="mt-2 font-sans text-[12px] text-ink-3 italic">{lifecycleNote}</p>}
       </div>
 
       <div className="hairline mt-4 mx-5 lg:mx-0" />
@@ -70,10 +89,10 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
           <p className="font-sans text-[13px] text-ink-3 italic">Nothing scheduled on this asset yet.</p>
         ) : (
           items.map((item) => {
-            const urgent =
-              item.due_state?.status === 'overdue' || item.due_state?.status === 'due';
+            const urgent = item.due_state?.status === 'overdue' || item.due_state?.status === 'due';
             const dateLabel = dueDateLabel(item.next_due_date, today);
             const meter = meterLabel(item);
+            const data_ = dataLabel(item);
             return (
               <Link
                 key={item.id}
@@ -83,11 +102,20 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
                 <span className="font-sans text-[14px] font-medium text-ink flex-1 min-w-0 truncate">
                   {item.name}
                 </span>
+                {item.system && (
+                  <span className="font-mono text-[9px] uppercase tracking-[0.05em] text-ink-4">{item.system}</span>
+                )}
                 <span className="font-mono text-[9px] tracking-[0.05em] px-1.5 py-px bg-surface-2 text-ink-3">
                   ↻ {cadenceLabel(item)}
                 </span>
+                {data_ && (
+                  <span className="font-mono text-[9px] tracking-[0.05em] px-1.5 py-px border border-dashed border-line-strong text-ink-3">
+                    {data_}
+                  </span>
+                )}
                 <span className={`font-mono text-[10px] tabular-nums ${urgent ? 'text-accent' : 'text-ink-3'}`}>
-                  {[dateLabel, meter].filter(Boolean).join(' · ') || 'needs a reading'}
+                  {statusLabel(item)}
+                  {dateLabel || meter ? ` · ${[dateLabel, meter].filter(Boolean).join(' · ')}` : ''}
                 </span>
               </Link>
             );
@@ -107,38 +135,54 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
           <div className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3 mb-2">
             {asset.meter_unit} log
           </div>
-          <form action={addReadingAction} className="flex flex-wrap items-end gap-3 mb-4">
-            <input type="hidden" name="asset_id" value={asset.id} />
+          <ActionForm
+            action={addReadingAction}
+            hidden={{ asset_id: asset.id }}
+            eventKey
+            submit="Log"
+            pendingLabel="Logging…"
+            className="flex flex-wrap items-end gap-3 mb-4"
+          >
             <label className="flex flex-col gap-1">
               <span className="font-mono text-[9px] uppercase tracking-[0.08em] text-ink-3">Reading</span>
               <input type="number" name="reading" min="0" step="any" required
-                placeholder={readings[0] ? String(readings[0].reading) : ''}
+                placeholder={latest ? String(latest.reading) : ''}
                 className="w-32 border border-line bg-surface px-2 py-1.5 font-sans text-[13px] text-ink" />
             </label>
             <label className="flex flex-col gap-1">
               <span className="font-mono text-[9px] uppercase tracking-[0.08em] text-ink-3">On</span>
-              <input type="date" name="recorded_on" defaultValue={today}
+              <input type="date" name="recorded_on" defaultValue={today} max={today}
                 className="border border-line bg-surface px-2 py-1.5 font-sans text-[13px] text-ink" />
             </label>
-            <button type="submit"
-              className="bg-ink text-bg px-4 py-2 font-sans font-semibold text-[12px] uppercase tracking-wider hover:bg-ink-2 transition-colors">
-              Log
-            </button>
-          </form>
-          {readings.length === 0 ? (
+            <label className="flex items-center gap-2 pb-2 font-sans text-[12px] text-ink-3">
+              <input type="checkbox" name="allow_decrease" className="accent-accent" />
+              meter replaced (allow a lower reading)
+            </label>
+          </ActionForm>
+          {live.length === 0 ? (
             <p className="font-sans text-[13px] text-ink-3 italic">
               No readings yet — meter-based schedules stay dark until one lands.
             </p>
           ) : (
             readings.map((r) => (
-              <div key={r.id} className="flex items-baseline gap-3 py-1.5 border-b border-line/60">
-                <span className="font-mono text-[12px] tabular-nums text-ink">
+              <div key={r.id} className={`flex items-baseline gap-3 py-1.5 border-b border-line/60 group ${r.voided_at ? 'opacity-50' : ''}`}>
+                <span className={`font-mono text-[12px] tabular-nums text-ink ${r.voided_at ? 'line-through' : ''}`}>
                   {r.reading.toLocaleString('en-US')} {asset.meter_unit}
                 </span>
                 <span className="font-mono text-[11px] tabular-nums text-ink-3">{r.recorded_on}</span>
                 <span className="font-mono text-[9px] uppercase tracking-[0.05em] text-ink-3 ml-auto">
-                  {r.source}
+                  {r.voided_at ? 'voided' : r.source}
                 </span>
+                {!r.voided_at && (
+                  <ActionForm
+                    action={voidReadingAction}
+                    hidden={{ asset_id: asset.id, reading_id: r.id }}
+                    submit="void"
+                    variant="quiet"
+                    pendingLabel="…"
+                    className="opacity-60 group-hover:opacity-100 transition-opacity"
+                  />
+                )}
               </div>
             ))
           )}
@@ -167,17 +211,21 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
       {/* ─── Edit ─────────────────────────────────────────────────── */}
       <div className="px-5 lg:px-0 mt-10">
         <div className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3 mb-3">Edit</div>
-        <AssetForm asset={asset} domains={domains} />
+        <AssetForm asset={asset} domains={domains} hasReadings={readings.length > 0} />
       </div>
 
       <div className="px-5 lg:px-0 mt-10">
-        <form action={deleteAssetAction}>
-          <input type="hidden" name="id" value={asset.id} />
-          <button type="submit"
-            className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3 hover:text-accent transition-colors">
-            Delete asset (items survive, unattached)
-          </button>
-        </form>
+        <ActionForm
+          action={deleteAssetAction}
+          hidden={{ id: asset.id }}
+          submit="Delete asset"
+          variant="quiet"
+          pendingLabel="Deleting…"
+        />
+        <p className="mt-1 font-sans text-[12px] text-ink-4">
+          For a car you sold, set the lifecycle above instead — history stays. Delete is refused while
+          meter-cadence items depend on this asset.
+        </p>
       </div>
     </div>
   );

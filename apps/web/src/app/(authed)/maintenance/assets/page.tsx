@@ -33,7 +33,7 @@ export default async function AssetsPage() {
           Assets
         </h1>
         <div className="mt-1.5 font-sans text-[12px] text-ink-3">
-          {assets.length} under upkeep · a meter unit unlocks the readings log
+          {assets.length} under upkeep · a meter unit unlocks the readings log · sold and archived assets are kept but hidden here
         </div>
       </div>
 
@@ -65,6 +65,11 @@ export default async function AssetsPage() {
               <span className="font-mono text-[9px] uppercase tracking-[0.05em] px-1.5 py-px bg-surface-2 text-ink-3">
                 {a.kind}
               </span>
+              {a.lifecycle !== 'active' && (
+                <span className="font-mono text-[9px] uppercase tracking-[0.05em] px-1.5 py-px border border-dashed border-line-strong text-ink-3">
+                  {a.lifecycle}
+                </span>
+              )}
               {a.meter_unit && (
                 <span className="font-mono text-[11px] tabular-nums text-ink-3">
                   {a.latest_reading != null

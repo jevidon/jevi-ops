@@ -10,6 +10,7 @@ import { SettingsSection } from './settings-section';
 import { AppearanceForm, type ThemePref } from './appearance-form';
 import { TimezoneForm } from './timezone-form';
 import { ModulesForm } from './modules-form';
+import { MaintenanceSettingsForm } from './maintenance-settings-form';
 import { BriefingPanelsForm, type PanelRow } from './briefing-panels-form';
 import { FrameUrlForm } from './frame-url-form';
 import { mergePanelConfig, panelDef } from '../_briefing/registry';
@@ -128,6 +129,10 @@ export default async function SettingsPage({
           ruleEnabled={ruleEnabled}
           maintenanceEnabled={webSettings.maintenance_module_enabled}
         />
+      </SettingsSection>
+
+      <SettingsSection title="Maintenance">
+        <MaintenanceSettingsForm meterStaleDays={webSettings.meter_stale_days} />
       </SettingsSection>
 
       <SettingsSection title="Agenda · panels">

@@ -6,7 +6,7 @@ import { getAppTz } from '../lib/app-settings.js';
 import { todayInTz } from '../lib/tz.js';
 import { getDb, type Db } from '../lib/db.js';
 import { clearAttentionForSource } from '../lib/attention.js';
-import { completeMaintenanceItem } from '../lib/maintenance.js';
+import { clearMaintenanceAttention, completeMaintenanceItem } from '../lib/maintenance.js';
 import { maintenance_items, milestones, projects, tasks } from '../db/schema.js';
 
 // Tasks CRUD. Auth-gated.
@@ -271,7 +271,36 @@ export const taskRoutes: FastifyPluginAsync = async (app) => {
         update.waiting_since = todayInTz(await getAppTz());
       }
     }
-    const [row] = await db.update(tasks).set(update).where(eq(tasks.id, req.params.id)).returning();
+    // Checking off a maintenance-generated task completes the maintenance
+    // item behind it — in ONE transaction with the task update, through the
+    // same lib the module's own complete endpoint uses, so "task done but
+    // item not logged" can't happen. Attention live-clear follows commit.
+    const linkedItem =
+      parsed.data.status === 'done' && !rolledOver
+        ? await db.query.maintenance_items.findFirst({
+            columns: { id: true },
+            where: eq(maintenance_items.generated_task_id, req.params.id),
+          })
+        : undefined;
+
+    let row: typeof tasks.$inferSelect | undefined;
+    if (linkedItem) {
+      const completedOn = todayInTz(await getAppTz());
+      row = await db.transaction(async (tx) => {
+        const [r] = await tx.update(tasks).set(update).where(eq(tasks.id, req.params.id)).returning();
+        if (!r) return undefined;
+        await completeMaintenanceItem(tx, linkedItem.id, {
+          completedOn,
+          source: 'task',
+          actor: req.authMethod === 'api_token' ? req.user!.email : `session:${req.user!.email}`,
+          eventKey: `task:${req.params.id}:${completedOn}`,
+        });
+        return r;
+      });
+      if (row) await clearMaintenanceAttention(db, linkedItem.id);
+    } else {
+      [row] = await db.update(tasks).set(update).where(eq(tasks.id, req.params.id)).returning();
+    }
     if (!row) return reply.code(404).send({ error: 'not_found' });
 
     // Live-reconcile this task's Attention items so a status/date change
@@ -302,28 +331,6 @@ export const taskRoutes: FastifyPluginAsync = async (app) => {
       }
     } catch (err) {
       req.log.warn({ err, taskId: req.params.id }, 'attention reconcile after task update failed');
-    }
-
-    // Checking off a maintenance-generated task completes the maintenance
-    // item behind it (log + roll-forward via the same lib the module's own
-    // complete endpoint uses; the lib's task-close update is a no-op here
-    // since the task is already done). Best-effort — never block the task
-    // response; the item stays completable from /api/maintenance.
-    if (parsed.data.status === 'done' && !rolledOver) {
-      try {
-        const linked = await db.query.maintenance_items.findFirst({
-          columns: { id: true },
-          where: eq(maintenance_items.generated_task_id, req.params.id),
-        });
-        if (linked) {
-          await completeMaintenanceItem(db, linked.id, {
-            completedOn: todayInTz(await getAppTz()),
-            source: 'task',
-          });
-        }
-      } catch (err) {
-        req.log.warn({ err, taskId: req.params.id }, 'maintenance completion after task done failed');
-      }
     }
 
     // Surface the rollover so the client can show a "Next: <date>" hint

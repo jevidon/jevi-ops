@@ -202,6 +202,28 @@ export async function toggleMaintenanceModuleAction(formData: FormData): Promise
   };
 }
 
+// The one reading-staleness policy (migration 0048): how many days a metered
+// asset with meter-cadence items may go without a reading before the
+// reading nag fires. Read by the attention rule and shown on /maintenance.
+export async function setMeterStaleDaysAction(formData: FormData): Promise<SyncResult> {
+  const raw = Number(String(formData.get('meter_stale_days') ?? '').trim());
+  if (!Number.isInteger(raw) || raw < 1 || raw > 365) {
+    return { ok: false, message: 'Enter a whole number of days between 1 and 365.' };
+  }
+  try {
+    await settingsApi.updateApp({ meter_stale_days: raw });
+  } catch (err) {
+    if (err instanceof ApiError) {
+      const body = err.body as { error?: string } | null;
+      return { ok: false, message: body?.error ?? `HTTP ${err.status}` };
+    }
+    return { ok: false, message: (err as Error).message };
+  }
+  revalidatePath('/settings');
+  revalidatePath('/maintenance');
+  return { ok: true, message: `Readings expected every ${raw} days.` };
+}
+
 export async function disconnectGoogleAction(): Promise<SyncResult> {
   try {
     await googleApi.disconnect();

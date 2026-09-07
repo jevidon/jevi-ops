@@ -97,6 +97,18 @@ curl -s http://127.0.0.1:3001/api/work -H "authorization: Bearer $TOKEN" | jq .
 
 Checks: `pnpm typecheck` and `pnpm build` from the repo root.
 
+## Tests
+
+`pnpm test` (root) runs the API's Vitest suite (`apps/api/test/`). It is an
+integration suite against a **disposable database**: the global setup drops
+and recreates `jeviops_test` on the same Postgres the dev `DATABASE_URL`
+points at (the docker dev container), loads `schema-selfhost.sql` +
+`seed.sql`, and each test file truncates the maintenance/task/attention
+tables between cases. Nothing touches the dev database. Requirements: the
+dev Postgres up, and `DATABASE_URL` in `.env`. Files run serially — they
+share the one test database. Route tests build the real Fastify app and
+`inject()` requests with a signed session; `test/helpers.ts` has fixtures.
+
 ## Gotchas
 
 - App timezone is a DB setting (default `America/Denver`), not the machine's.

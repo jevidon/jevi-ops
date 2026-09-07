@@ -332,4 +332,8 @@ export const maintenance_logsRelations = relations(maintenance_logs, ({one}) => 
 		fields: [maintenance_logs.item_id],
 		references: [maintenance_items.id]
 	}),
+	reading: one(asset_meter_readings, {
+		fields: [maintenance_logs.reading_id],
+		references: [asset_meter_readings.id]
+	}),
 }));

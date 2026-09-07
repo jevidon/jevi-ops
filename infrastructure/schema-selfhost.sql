@@ -300,6 +300,9 @@ create table if not exists tasks (
   reminders_sent jsonb not null default '{}'::jsonb,
   source text not null default 'manual' check (source in
     ('manual','voice','email','observation','import','maintenance')),
+  -- Durable occurrence identity for generated tasks (migration 0048):
+  -- maintenance uses maint:<item>:<due_date>:<due_meter>. Unique per source.
+  source_ref text,
   top3_for_date date,
   -- Waiting state (migration 0038): who it's blocked on + the aging anchor.
   waiting_on text,
@@ -318,6 +321,8 @@ create index if not exists idx_tasks_top3 on tasks(top3_for_date)
 create index if not exists idx_tasks_content_item on tasks(content_item_id)
   where content_item_id is not null;
 create index if not exists tasks_milestone_id_idx on tasks(milestone_id);
+create unique index if not exists idx_tasks_source_ref
+  on tasks(source, source_ref) where source_ref is not null;
 
 drop trigger if exists trg_tasks_updated_at on tasks;
 create trigger trg_tasks_updated_at
@@ -709,6 +714,9 @@ create table if not exists app_settings (
   rule_module_enabled boolean not null default false,
   -- Maintenance module (migration 0047). Default on — core home-ops.
   maintenance_module_enabled boolean not null default true,
+  -- Reading-staleness policy (migration 0048): days without a meter reading
+  -- before a metered asset with meter-cadence items gets the reading nag.
+  meter_stale_days integer not null default 14 check (meter_stale_days > 0),
   -- Briefing panel visibility/order (migration 0044): ordered array of
   -- {id, enabled}. Null → registry defaults (web mergePanelConfig).
   briefing_panels jsonb,
@@ -1233,10 +1241,14 @@ create table if not exists assets (
   kind text not null default 'other' check (kind in
     ('vehicle','appliance','home','device','equipment','other')),
   domain_id uuid references stewardship_domains(id) on delete set null,
-  -- Free text ('km','mi','hours'…). Null = date-only asset.
+  -- Free text ('km','mi','hours'…). Null = date-only asset. Locked once a
+  -- reading exists (app-enforced) — relabelling would change history.
   meter_unit text,
   metadata jsonb not null default '{}'::jsonb,
   notes text,
+  -- Only active assets generate tasks, attention, and reading nags (0048).
+  lifecycle text not null default 'active' check (lifecycle in
+    ('active','stored','sold','archived')),
   archived_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -1255,18 +1267,33 @@ create table if not exists asset_meter_readings (
   source text not null default 'manual' check (source in
     ('manual','completion','agent','import')),
   notes text,
+  -- Idempotency + provenance + corrections (migration 0048). Corrections
+  -- VOID rather than delete so history keeps its meaning.
+  event_key text,
+  actor text,
+  voided_at timestamptz,
   created_at timestamptz not null default now()
 );
 
 create index if not exists idx_asset_meter_readings_asset
   on asset_meter_readings(asset_id, recorded_on desc);
+create unique index if not exists idx_asset_meter_readings_event_key
+  on asset_meter_readings(event_key) where event_key is not null;
 
 create table if not exists maintenance_items (
   id uuid primary key default gen_random_uuid(),
   name text not null,
   notes text,
   asset_id uuid references assets(id) on delete set null,
-  domain_id uuid not null references stewardship_domains(id),
+  -- Null = inherit the asset's domain at read time, else Inbox (0048).
+  domain_id uuid references stewardship_domains(id),
+  -- Obligation policy (0048). interval: re-anchor from completion. expiry:
+  -- next due = issued_until. prepaid_meter: next due meter = purchased_to.
+  -- on_condition: no interval; completion records a finding + next review.
+  policy text not null default 'interval' check (policy in
+    ('interval','expiry','prepaid_meter','on_condition')),
+  -- Grouping for the per-asset schedule view (Fluids, Brakes, Legal…).
+  system text,
   -- One date unit (days XOR months) and/or a meter interval. App-enforced:
   -- interval_meter requires the asset to have a meter_unit (cross-table).
   interval_days integer check (interval_days > 0),
@@ -1285,7 +1312,8 @@ create table if not exists maintenance_items (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint maintenance_items_has_interval check (
-    interval_days is not null or interval_months is not null
+    policy <> 'interval'
+    or interval_days is not null or interval_months is not null
     or interval_meter is not null
   ),
   constraint maintenance_items_one_date_unit check (
@@ -1312,13 +1340,26 @@ create table if not exists maintenance_logs (
   cost numeric check (cost >= 0),
   source text not null default 'manual' check (source in
     ('manual','task','agent','import')),
-  created_at timestamptz not null default now(),
-  -- Idempotent complete (routine_completions precedent).
-  constraint maintenance_logs_item_day_unique unique (item_id, completed_on)
+  -- Idempotent events with provenance + linked evidence (migration 0048).
+  event_key text,
+  actor text,
+  run_id text,
+  reading_id uuid references asset_meter_readings(id) on delete set null,
+  -- Seed evidence entered at item creation; editable, not deletable.
+  is_baseline boolean not null default false,
+  -- Policy-specific completion facts: expiry / prepaid_meter / on_condition.
+  issued_until date,
+  purchased_to numeric,
+  finding text,
+  next_review_on date,
+  next_review_meter numeric,
+  created_at timestamptz not null default now()
 );
 
 create index if not exists idx_maintenance_logs_item
   on maintenance_logs(item_id, completed_on desc);
+create unique index if not exists idx_maintenance_logs_event_key
+  on maintenance_logs(event_key) where event_key is not null;
 
 
 -- ─────────────────────────────────────────────────────────────────────────

@@ -2,35 +2,46 @@
 
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
-import { ApiError, assetsApi, maintenanceApi, type AssetKind } from '@/lib/api';
+import {
+  ApiError,
+  assetsApi,
+  maintenanceApi,
+  type AssetKind,
+  type AssetLifecycle,
+  type MaintenancePolicy,
+} from '@/lib/api';
 
-// Server actions for the maintenance module. Same conventions as routines:
-// forms post FormData, empty strings become null, numbers parse defensively,
-// and every mutation revalidates the surfaces that show maintenance state.
+// Server actions for the maintenance module. Forms post FormData, empty
+// strings become null, numbers parse defensively, and every mutation
+// revalidates the surfaces that show maintenance state.
+//
+// Every action returns a SaveResult (0048): a failed completion, reading, or
+// undo is SHOWN, with the entered values kept — silently swallowing an error
+// meant the user couldn't tell whether maintenance was recorded.
 
-const ASSET_KINDS: readonly AssetKind[] = [
-  'vehicle', 'appliance', 'home', 'device', 'equipment', 'other',
-];
+const ASSET_KINDS: readonly AssetKind[] = ['vehicle', 'appliance', 'home', 'device', 'equipment', 'other'];
+const LIFECYCLES: readonly AssetLifecycle[] = ['active', 'stored', 'sold', 'archived'];
+const POLICIES: readonly MaintenancePolicy[] = ['interval', 'expiry', 'prepaid_meter', 'on_condition'];
 
-export type SaveResult = { ok: true } | { ok: false; error: string };
+export type SaveResult = { ok: true; message?: string } | { ok: false; error: string };
 
 function shapeError(err: unknown): SaveResult {
   if (err instanceof ApiError) {
     const body = err.body as {
       error?: string; message?: string; details?: Record<string, string[]>;
     } | null;
+    if (body?.message) return { ok: false, error: body.message };
     const detail = body?.details
-      ? ` — ${Object.entries(body.details).map(([k, v]) => `${k}: ${v.join('|')}`).join('; ')}`
-      : body?.message
-        ? ` — ${body.message}`
-        : '';
-    return { ok: false, error: `API ${err.status} ${body?.error ?? ''}${detail}`.trim() };
+      ? Object.entries(body.details).map(([k, v]) => `${k}: ${v.join(', ')}`).join('; ')
+      : '';
+    return { ok: false, error: detail || `${body?.error ?? 'request failed'} (HTTP ${err.status})` };
   }
   return { ok: false, error: (err as Error).message };
 }
 
 function revalidateAll(itemId?: string, assetId?: string) {
   revalidatePath('/'); // attention card + rail tasks
+  revalidatePath('/tasks');
   revalidatePath('/maintenance');
   revalidatePath('/maintenance/assets');
   if (itemId) revalidatePath(`/maintenance/${itemId}`);
@@ -49,8 +60,15 @@ function optionalString(formData: FormData, key: string): string | null {
   return raw || null;
 }
 
+function oneOf<T extends string>(raw: string, allowed: readonly T[], fallback: T): T {
+  return (allowed as readonly string[]).includes(raw) ? (raw as T) : fallback;
+}
+
 // Cadence fields shared by create + update. The form posts one "date
 // interval" number + a days/months unit selector, plus the meter fields.
+// Only the fields the form actually carries are sent — the API re-derives
+// an axis only when its interval VALUE changes, so echoing is safe, but
+// omitting what the form doesn't own keeps intent obvious.
 function readCadenceFields(formData: FormData): {
   interval_days: number | null;
   interval_months: number | null;
@@ -75,24 +93,36 @@ function readCadenceFields(formData: FormData): {
 
 // ─── Items ───────────────────────────────────────────────────────────────
 
-export async function completeItemAction(formData: FormData): Promise<void> {
+export async function completeItemAction(
+  _prev: SaveResult | null,
+  formData: FormData,
+): Promise<SaveResult> {
   const id = String(formData.get('id') ?? '');
-  if (!id) return;
-  const meter = optionalNumber(formData, 'meter');
-  const notes = optionalString(formData, 'notes');
-  const cost = optionalNumber(formData, 'cost');
+  if (!id) return { ok: false, error: 'Missing item.' };
   const completedOn = optionalString(formData, 'completed_on');
+  // Per-render idempotency key: a double submit of the same form is one
+  // completion; two distinct services on one day are two.
+  const eventKey = optionalString(formData, 'event_key');
   try {
-    await maintenanceApi.complete(id, {
+    const res = await maintenanceApi.complete(id, {
       ...(completedOn ? { completed_on: completedOn } : {}),
-      meter,
-      notes,
-      cost,
+      ...(eventKey ? { event_key: eventKey } : {}),
+      meter: optionalNumber(formData, 'meter'),
+      notes: optionalString(formData, 'notes'),
+      cost: optionalNumber(formData, 'cost'),
+      issued_until: optionalString(formData, 'issued_until'),
+      purchased_to: optionalNumber(formData, 'purchased_to'),
+      finding: optionalString(formData, 'finding'),
+      next_review_on: optionalString(formData, 'next_review_on'),
+      next_review_meter: optionalNumber(formData, 'next_review_meter'),
     });
-  } catch {
-    /* best-effort — UI reloads next render */
+    revalidateAll(id, res.item.asset_id ?? undefined);
+    if (res.historical) return { ok: true, message: 'Recorded as history — the current schedule is unchanged.' };
+    if (!res.logged) return { ok: true, message: 'Already recorded.' };
+    return { ok: true, message: 'Completed.' };
+  } catch (err) {
+    return shapeError(err);
   }
-  revalidateAll(id);
 }
 
 export async function createItemAction(
@@ -101,8 +131,9 @@ export async function createItemAction(
 ): Promise<SaveResult> {
   const name = String(formData.get('name') ?? '').trim();
   if (!name) return { ok: false, error: 'Name is required.' };
+  const policy = oneOf(String(formData.get('policy') ?? 'interval'), POLICIES, 'interval');
   const cadence = readCadenceFields(formData);
-  if (cadence.interval_days == null && cadence.interval_months == null && cadence.interval_meter == null) {
+  if (policy === 'interval' && cadence.interval_days == null && cadence.interval_months == null && cadence.interval_meter == null) {
     return { ok: false, error: 'Set a date interval, a meter interval, or both.' };
   }
   const asset_id = optionalString(formData, 'asset_id');
@@ -113,10 +144,14 @@ export async function createItemAction(
       name,
       notes: optionalString(formData, 'notes'),
       asset_id,
-      ...(domain_id ? { domain_id } : {}),
+      domain_id,
+      policy,
+      system: optionalString(formData, 'system'),
       ...cadence,
       last_completed_on: optionalString(formData, 'last_completed_on'),
       last_completed_meter: optionalNumber(formData, 'last_completed_meter'),
+      next_due_date: optionalString(formData, 'next_due_date'),
+      next_due_meter: optionalNumber(formData, 'next_due_meter'),
     });
   } catch (err) {
     return shapeError(err);
@@ -133,6 +168,7 @@ export async function updateItemAction(
   const name = String(formData.get('name') ?? '').trim();
   if (!id) return { ok: false, error: 'Missing id.' };
   if (!name) return { ok: false, error: 'Name is required.' };
+  const policy = oneOf(String(formData.get('policy') ?? 'interval'), POLICIES, 'interval');
   const cadence = readCadenceFields(formData);
   const asset_id = optionalString(formData, 'asset_id');
   const domain_id = optionalString(formData, 'domain_id');
@@ -141,50 +177,63 @@ export async function updateItemAction(
       name,
       notes: optionalString(formData, 'notes'),
       asset_id,
-      ...(domain_id ? { domain_id } : {}),
+      domain_id,
+      policy,
+      system: optionalString(formData, 'system'),
       ...cadence,
     });
   } catch (err) {
     return shapeError(err);
   }
   revalidateAll(id, asset_id ?? undefined);
-  return { ok: true };
+  return { ok: true, message: 'Saved.' };
 }
 
-export async function setItemActiveAction(formData: FormData): Promise<void> {
+export async function setItemActiveAction(
+  _prev: SaveResult | null,
+  formData: FormData,
+): Promise<SaveResult> {
   const id = String(formData.get('id') ?? '');
   const active = formData.get('active') === 'true';
-  if (!id) return;
+  if (!id) return { ok: false, error: 'Missing id.' };
   try {
     await maintenanceApi.update(id, { active });
-  } catch {
-    /* best-effort */
+  } catch (err) {
+    return shapeError(err);
   }
   revalidateAll(id);
+  return { ok: true, message: active ? 'Reactivated.' : 'Paused — its open task was retired.' };
 }
 
-export async function deleteItemAction(formData: FormData): Promise<void> {
+export async function deleteItemAction(
+  _prev: SaveResult | null,
+  formData: FormData,
+): Promise<SaveResult> {
   const id = String(formData.get('id') ?? '');
-  if (!id) return;
+  if (!id) return { ok: false, error: 'Missing id.' };
   try {
     await maintenanceApi.remove(id);
-  } catch {
-    /* best-effort */
+  } catch (err) {
+    return shapeError(err);
   }
   revalidateAll();
   redirect('/maintenance');
 }
 
-export async function deleteLogAction(formData: FormData): Promise<void> {
+export async function deleteLogAction(
+  _prev: SaveResult | null,
+  formData: FormData,
+): Promise<SaveResult> {
   const id = String(formData.get('id') ?? '');
   const logId = String(formData.get('log_id') ?? '');
-  if (!id || !logId) return;
+  if (!id || !logId) return { ok: false, error: 'Missing log.' };
   try {
     await maintenanceApi.deleteLog(id, logId);
-  } catch {
-    /* best-effort */
+  } catch (err) {
+    return shapeError(err);
   }
   revalidateAll(id);
+  return { ok: true, message: 'Undone — schedule re-derived from the remaining history.' };
 }
 
 // ─── Assets ──────────────────────────────────────────────────────────────
@@ -195,10 +244,7 @@ export async function createAssetAction(
 ): Promise<SaveResult> {
   const name = String(formData.get('name') ?? '').trim();
   if (!name) return { ok: false, error: 'Name is required.' };
-  const rawKind = String(formData.get('kind') ?? 'other');
-  const kind = (ASSET_KINDS as readonly string[]).includes(rawKind)
-    ? (rawKind as AssetKind)
-    : 'other';
+  const kind = oneOf(String(formData.get('kind') ?? 'other'), ASSET_KINDS, 'other');
   let created;
   try {
     created = await assetsApi.create({
@@ -223,14 +269,13 @@ export async function updateAssetAction(
   const name = String(formData.get('name') ?? '').trim();
   if (!id) return { ok: false, error: 'Missing id.' };
   if (!name) return { ok: false, error: 'Name is required.' };
-  const rawKind = String(formData.get('kind') ?? 'other');
-  const kind = (ASSET_KINDS as readonly string[]).includes(rawKind)
-    ? (rawKind as AssetKind)
-    : 'other';
+  const kind = oneOf(String(formData.get('kind') ?? 'other'), ASSET_KINDS, 'other');
+  const lifecycle = oneOf(String(formData.get('lifecycle') ?? 'active'), LIFECYCLES, 'active');
   try {
     await assetsApi.update(id, {
       name,
       kind,
+      lifecycle,
       domain_id: optionalString(formData, 'domain_id'),
       meter_unit: optionalString(formData, 'meter_unit'),
       notes: optionalString(formData, 'notes'),
@@ -239,34 +284,61 @@ export async function updateAssetAction(
     return shapeError(err);
   }
   revalidateAll(undefined, id);
-  return { ok: true };
+  return { ok: true, message: 'Saved.' };
 }
 
-export async function deleteAssetAction(formData: FormData): Promise<void> {
+export async function deleteAssetAction(
+  _prev: SaveResult | null,
+  formData: FormData,
+): Promise<SaveResult> {
   const id = String(formData.get('id') ?? '');
-  if (!id) return;
+  if (!id) return { ok: false, error: 'Missing id.' };
   try {
     await assetsApi.remove(id);
-  } catch {
-    /* best-effort */
+  } catch (err) {
+    return shapeError(err);
   }
   revalidateAll();
   redirect('/maintenance/assets');
 }
 
-export async function addReadingAction(formData: FormData): Promise<void> {
+export async function addReadingAction(
+  _prev: SaveResult | null,
+  formData: FormData,
+): Promise<SaveResult> {
   const assetId = String(formData.get('asset_id') ?? '');
   const reading = optionalNumber(formData, 'reading');
-  if (!assetId || reading == null || reading < 0) return;
+  if (!assetId) return { ok: false, error: 'Missing asset.' };
+  if (reading == null || reading < 0) return { ok: false, error: 'Enter a reading.' };
   const recordedOn = optionalString(formData, 'recorded_on');
+  const eventKey = optionalString(formData, 'event_key');
   try {
     await assetsApi.addReading(assetId, {
       reading,
       ...(recordedOn ? { recorded_on: recordedOn } : {}),
+      ...(eventKey ? { event_key: eventKey } : {}),
       notes: optionalString(formData, 'notes'),
+      allow_decrease: formData.get('allow_decrease') === 'on',
     });
-  } catch {
-    /* best-effort */
+  } catch (err) {
+    return shapeError(err);
   }
   revalidateAll(undefined, assetId);
+  return { ok: true, message: 'Reading logged.' };
+}
+
+export async function voidReadingAction(
+  _prev: SaveResult | null,
+  formData: FormData,
+): Promise<SaveResult> {
+  const assetId = String(formData.get('asset_id') ?? '');
+  const rid = String(formData.get('reading_id') ?? '');
+  if (!assetId || !rid) return { ok: false, error: 'Missing reading.' };
+  try {
+    await assetsApi.voidReading(assetId, rid);
+  } catch (err) {
+    return shapeError(err);
+  }
+  revalidateAll(undefined, assetId);
+  return { ok: true, message: 'Reading voided.' };
 }

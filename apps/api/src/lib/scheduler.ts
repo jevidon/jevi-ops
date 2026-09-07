@@ -10,6 +10,7 @@ import { runDailySummary } from './daily-summary.js';
 import { runObservations } from './observations.js';
 import { runAttention } from './attention.js';
 import { runCalendarSync } from './calendar-sync.js';
+import { runMaintenanceSweep } from './maintenance-sweep.js';
 
 // In-process scheduler — replaces the external HTTP cron pingers (XCloud).
 // Calls the same run* functions the /api/cron/* endpoints use; those
@@ -30,13 +31,11 @@ interface Job {
   needsPushover?: boolean;
 }
 
-export async function startScheduler(log: FastifyBaseLogger): Promise<() => void> {
-  // Timezone is read once at start — matches the app's "settings change =
-  // restart-rare" posture. A tz change via Settings needs an API restart to
-  // reschedule; document in Settings UI if that ever bites.
-  const tz = await getAppTz();
-
-  const jobs: Job[] = [
+// The job table, built separately from starting the crons so a test can
+// assert what's registered (a missing job here is silent in production —
+// exactly how the maintenance sweep went unscheduled in 0047).
+export function buildJobs(log: FastifyBaseLogger): Job[] {
+  return [
     {
       // Task reminders + routine reminders + missed sweep piggyback on one
       // per-minute tick — all three queries are cheap and independent.
@@ -96,6 +95,17 @@ export async function startScheduler(log: FastifyBaseLogger): Promise<() => void
       },
     },
     {
+      // Before attention (5am) so newly due maintenance has its task by the
+      // time the attention rules and the 7am summary look. Also fires
+      // opportunistically after a meter reading lands (routes/maintenance).
+      name: 'maintenance',
+      pattern: '0 4 * * *',
+      handler: async () => {
+        const result = await runMaintenanceSweep(getDb());
+        log.info({ event: 'maintenance_sweep', ...result }, 'maintenance sweep complete');
+      },
+    },
+    {
       // Before the 7am daily summary so the day starts with fresh items.
       name: 'attention',
       pattern: '0 5 * * *',
@@ -105,6 +115,14 @@ export async function startScheduler(log: FastifyBaseLogger): Promise<() => void
       },
     },
   ];
+}
+
+export async function startScheduler(log: FastifyBaseLogger): Promise<() => void> {
+  // Timezone is read once at start — matches the app's "settings change =
+  // restart-rare" posture. A tz change via Settings needs an API restart to
+  // reschedule; document in Settings UI if that ever bites.
+  const tz = await getAppTz();
+  const jobs = buildJobs(log);
 
   const crons = jobs.map((job) =>
     new Cron(job.pattern, { timezone: tz, protect: true, name: job.name }, async () => {

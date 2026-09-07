@@ -17,6 +17,7 @@
     "start:api": "pnpm --filter @jevi-ops/api start",
     "start:web": "pnpm --filter @jevi-ops/web start",
     "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r --if-present test",
     "lint": "pnpm -r lint",
     "db:generate": "pnpm --filter @jevi-ops/api drizzle:generate",
     "db:push": "pnpm --filter @jevi-ops/api drizzle:push",

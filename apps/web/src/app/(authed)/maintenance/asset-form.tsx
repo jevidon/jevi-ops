@@ -2,12 +2,14 @@
 
 import { useActionState } from 'react';
 import { useFormStatus } from 'react-dom';
-import type { Asset, AssetKind } from '@/lib/api';
+import type { Asset, AssetKind, AssetLifecycle } from '@/lib/api';
 import { createAssetAction, updateAssetAction, type SaveResult } from './actions';
 import type { DomainOption } from './item-form';
 
 // Create/edit form for an asset. kind is display/grouping only; setting a
-// meter unit is what unlocks the readings log + meter-cadence items.
+// meter unit is what unlocks the readings log + meter-cadence items. The
+// unit locks once a reading exists (the API refuses a change) — relabelling
+// km→mi would change what every historical number means.
 
 const KINDS: Array<{ value: AssetKind; label: string }> = [
   { value: 'vehicle', label: 'Vehicle' },
@@ -16,6 +18,13 @@ const KINDS: Array<{ value: AssetKind; label: string }> = [
   { value: 'device', label: 'Device' },
   { value: 'equipment', label: 'Equipment' },
   { value: 'other', label: 'Other' },
+];
+
+const LIFECYCLES: Array<{ value: AssetLifecycle; label: string; hint: string }> = [
+  { value: 'active', label: 'Active', hint: 'Generates tasks, attention, and reading nags.' },
+  { value: 'stored', label: 'Stored', hint: 'Kept, not in use — schedules pause, history stays.' },
+  { value: 'sold', label: 'Sold', hint: 'Gone. History stays for the record.' },
+  { value: 'archived', label: 'Archived', hint: 'Hidden from the default list.' },
 ];
 
 const field =
@@ -35,7 +44,17 @@ function SubmitButton({ label: text }: { label: string }) {
   );
 }
 
-export function AssetForm({ asset, domains }: { asset?: Asset; domains: DomainOption[] }) {
+export function AssetForm({
+  asset,
+  domains,
+  hasReadings = false,
+  defaultDomainId,
+}: {
+  asset?: Asset;
+  domains: DomainOption[];
+  hasReadings?: boolean;
+  defaultDomainId?: string | null;
+}) {
   const editing = !!asset;
   const [state, formAction] = useActionState<SaveResult | null, FormData>(
     async (prev, formData) =>
@@ -64,13 +83,21 @@ export function AssetForm({ asset, domains }: { asset?: Asset; domains: DomainOp
 
       <div className="grid grid-cols-2 gap-3">
         <label className="flex flex-col gap-1">
-          <span className={label}>Meter unit (km / mi / hours — blank = no meter)</span>
-          <input name="meter_unit" defaultValue={asset?.meter_unit ?? ''} placeholder="km" className={field} />
+          <span className={label}>
+            Meter unit (km / mi / hours — blank = no meter){hasReadings ? ' · locked: readings exist' : ''}
+          </span>
+          <input
+            name="meter_unit"
+            defaultValue={asset?.meter_unit ?? ''}
+            placeholder="km"
+            readOnly={hasReadings}
+            className={`${field} ${hasReadings ? 'opacity-60' : ''}`}
+          />
         </label>
         <label className="flex flex-col gap-1">
-          <span className={label}>Domain (optional)</span>
-          <select name="domain_id" defaultValue={asset?.domain_id ?? ''} className={field}>
-            <option value="">— none —</option>
+          <span className={label}>Domain (optional · assigning promotes it into the domain)</span>
+          <select name="domain_id" defaultValue={asset?.domain_id ?? defaultDomainId ?? ''} className={field}>
+            <option value="">— unassigned (maintenance only) —</option>
             {domains.map((d) => (
               <option key={d.id} value={d.id}>{d.name}</option>
             ))}
@@ -78,13 +105,24 @@ export function AssetForm({ asset, domains }: { asset?: Asset; domains: DomainOp
         </label>
       </div>
 
+      {editing && (
+        <label className="flex flex-col gap-1">
+          <span className={label}>Lifecycle</span>
+          <select name="lifecycle" defaultValue={asset.lifecycle} className={field}>
+            {LIFECYCLES.map((l) => (
+              <option key={l.value} value={l.value}>{l.label} — {l.hint}</option>
+            ))}
+          </select>
+        </label>
+      )}
+
       <label className="flex flex-col gap-1">
         <span className={label}>Notes</span>
         <textarea name="notes" rows={2} defaultValue={asset?.notes ?? ''} className={field} />
       </label>
 
-      {state && !state.ok && <p className="font-sans text-[12px] text-accent">{state.error}</p>}
-      {state?.ok && <p className="font-sans text-[12px] text-ink-2">Saved.</p>}
+      {state && !state.ok && <p role="alert" className="font-sans text-[12px] text-accent">{state.error}</p>}
+      {state?.ok && <p role="status" className="font-sans text-[12px] text-ink-2">{state.message ?? 'Saved.'}</p>}
 
       <div>
         <SubmitButton label={editing ? 'Save' : 'Create asset'} />

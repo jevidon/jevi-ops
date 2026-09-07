@@ -1,12 +1,15 @@
 import Link from 'next/link';
 import { ApiError, maintenanceApi, type MaintenanceItem } from '@/lib/api';
-import { completeItemAction } from './actions';
-import { cadenceLabel, dueDateLabel, meterLabel } from './format';
+import { CompleteForm } from './complete-form';
+import { cadenceLabel, dataLabel, dueDateLabel, meterLabel, statusLabel } from './format';
 
 // /maintenance — the recurring-upkeep ledger. Every active item with its
 // cadence and next-due, banded by urgency (the API pre-sorts overdue →
 // due → due_soon → ok). Completing an item logs it and re-anchors the
-// schedule from today — the record recurring tasks never kept.
+// schedule from the evidence — the record recurring tasks never kept.
+//
+// Urgency and data confidence are shown separately: an "on track" row
+// whose meter axis has no baseline says so, instead of looking healthy.
 
 const BANDS: Array<{ statuses: string[]; label: string }> = [
   { statuses: ['overdue', 'due'], label: 'Due' },
@@ -17,18 +20,21 @@ const BANDS: Array<{ statuses: string[]; label: string }> = [
 export default async function MaintenancePage() {
   let items: MaintenanceItem[] = [];
   let today = '';
+  let staleDays = 14;
   let errorMessage: string | null = null;
   try {
     const res = await maintenanceApi.list();
     items = res.items;
     today = res.today;
+    staleDays = res.meter_stale_days;
   } catch (err) {
     errorMessage = err instanceof ApiError ? `API ${err.status}` : (err as Error).message;
   }
 
-  const overdueCount = items.filter(
+  const dueCount = items.filter(
     (i) => i.due_state?.status === 'overdue' || i.due_state?.status === 'due',
   ).length;
+  const unknownCount = items.filter((i) => i.due_state && i.due_state.data !== 'complete').length;
 
   return (
     <div className="pb-32">
@@ -40,8 +46,9 @@ export default async function MaintenancePage() {
           </h1>
           <div className="mt-1.5 font-sans text-[12px] text-ink-3">
             {items.length} in rotation
-            {overdueCount > 0 ? ` · ${overdueCount} due` : ''}
-            {' · '}completing re-anchors the schedule from today
+            {dueCount > 0 ? ` · ${dueCount} due` : ''}
+            {unknownCount > 0 ? ` · ${unknownCount} need a reading` : ''}
+            {` · readings expected every ${staleDays} days`}
           </div>
         </div>
         <Link
@@ -102,15 +109,15 @@ export default async function MaintenancePage() {
   );
 }
 
-// One rotation row. The disclosure opens the quick-complete form: date
-// (defaults to today server-side), meter reading when the asset has one,
-// optional notes/cost.
+// One rotation row. The disclosure opens the policy-adapted completion
+// form (date + reading for a service; new expiry for a renewal; purchased
+// distance for RUC; finding + next review for an inspection).
 function ItemRow({ item, today }: { item: MaintenanceItem; today: string }) {
   const status = item.due_state?.status ?? 'ok';
   const urgent = status === 'overdue' || status === 'due';
   const dateLabel = dueDateLabel(item.next_due_date, today);
   const meter = meterLabel(item);
-  const metered = item.asset?.meter_unit != null && item.interval_meter != null;
+  const data = dataLabel(item);
 
   return (
     <details className="group border-b border-line">
@@ -127,14 +134,24 @@ function ItemRow({ item, today }: { item: MaintenanceItem; today: string }) {
           </span>
           <span className="mt-1 flex items-center gap-2 flex-wrap">
             {item.asset?.name && (
-              <span className="font-sans text-[11px] text-ink-3">{item.asset.name}</span>
+              <Link href={`/maintenance/assets/${item.asset.id}`} className="font-sans text-[11px] text-ink-3 hover:text-ink-2">
+                {item.asset.name}
+              </Link>
             )}
             <span className="font-mono text-[9px] tracking-[0.05em] px-1.5 py-px bg-surface-2 text-ink-3">
               ↻ {cadenceLabel(item)}
             </span>
+            {data && (
+              <span className="font-mono text-[9px] tracking-[0.05em] px-1.5 py-px border border-dashed border-line-strong text-ink-3">
+                {data}
+              </span>
+            )}
           </span>
         </span>
         <span className="flex flex-col items-end gap-0.5 shrink-0 pt-0.5">
+          <span className={`font-mono text-[9.5px] uppercase tracking-[0.06em] ${urgent ? 'text-accent' : 'text-ink-3'}`}>
+            {statusLabel(item)}
+          </span>
           {dateLabel && (
             <span className={`font-mono text-[10px] tabular-nums ${urgent && item.due_state?.trigger === 'date' ? 'text-accent' : 'text-ink-3'}`}>
               {dateLabel}
@@ -145,54 +162,10 @@ function ItemRow({ item, today }: { item: MaintenanceItem; today: string }) {
               {meter}
             </span>
           )}
-          {!dateLabel && !meter && (
-            <span className="font-mono text-[10px] text-ink-3">needs a reading</span>
-          )}
         </span>
       </summary>
 
-      <form action={completeItemAction} className="ml-7 mb-4 flex flex-wrap items-end gap-3">
-        <input type="hidden" name="id" value={item.id} />
-        <label className="flex flex-col gap-1">
-          <span className="font-mono text-[9px] uppercase tracking-[0.08em] text-ink-3">Done on</span>
-          <input
-            type="date"
-            name="completed_on"
-            defaultValue={today}
-            className="border border-line bg-surface px-2 py-1.5 font-sans text-[13px] text-ink"
-          />
-        </label>
-        {metered && (
-          <label className="flex flex-col gap-1">
-            <span className="font-mono text-[9px] uppercase tracking-[0.08em] text-ink-3">
-              {item.asset?.meter_unit} reading
-            </span>
-            <input
-              type="number"
-              name="meter"
-              min="0"
-              step="any"
-              placeholder={item.latest_reading != null ? String(item.latest_reading) : ''}
-              className="w-28 border border-line bg-surface px-2 py-1.5 font-sans text-[13px] text-ink"
-            />
-          </label>
-        )}
-        <label className="flex flex-col gap-1 flex-1 min-w-[140px]">
-          <span className="font-mono text-[9px] uppercase tracking-[0.08em] text-ink-3">Notes</span>
-          <input
-            type="text"
-            name="notes"
-            placeholder="optional"
-            className="border border-line bg-surface px-2 py-1.5 font-sans text-[13px] text-ink"
-          />
-        </label>
-        <button
-          type="submit"
-          className="bg-ink text-bg px-4 py-2 font-sans font-semibold text-[12px] uppercase tracking-wider hover:bg-ink-2 transition-colors"
-        >
-          Complete
-        </button>
-      </form>
+      <CompleteForm item={item} today={today} className="ml-7 mb-4" />
     </details>
   );
 }

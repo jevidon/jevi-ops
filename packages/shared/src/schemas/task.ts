@@ -34,6 +34,8 @@ export const TaskSchema = z.object({
   recurrence_rule: nullableString(),
   reminder_offsets: z.array(z.number()).default([]),
   source: TaskSourceSchema,
+  // Durable occurrence identity for generated tasks (0048).
+  source_ref: nullableString(),
   top3_for_date: nullableDate(),
   created_at: z.string().datetime({ offset: true }),
   completed_at: z.string().datetime({ offset: true }).nullable().optional(),

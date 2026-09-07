@@ -16,8 +16,8 @@ import {
   stewardship_domains,
   tasks,
 } from '../db/schema.js';
-import { getAppTz } from './app-settings.js';
-import { latestReadingByAsset } from './meter-readings.js';
+import { getAppSettings, getAppTz } from './app-settings.js';
+import { latestReadingRowByAsset } from './meter-readings.js';
 
 // The Attention Engine — ported from upstream jerad-ops v2.0.0 (Addendum 05
 // §10), re-expressed against Drizzle. Modeled on observations.ts: rule
@@ -537,15 +537,25 @@ async function ruleConversationFollowup(db: Db, ctx: Ctx): Promise<CandidateItem
 async function ruleMaintenanceDue(db: Db, ctx: Ctx): Promise<CandidateItem[]> {
   const items = await db.query.maintenance_items.findMany({
     where: eq(maintenance_items.active, true),
-    with: { asset: { columns: { id: true, name: true, meter_unit: true } } },
+    with: { asset: { columns: { id: true, name: true, meter_unit: true, lifecycle: true } } },
   });
   const assetIds = [...new Set(items.map((i) => i.asset_id).filter((v): v is string => v != null))];
-  const readings = await latestReadingByAsset(db, assetIds);
+  const readings = await latestReadingRowByAsset(db, assetIds);
+  const { meter_stale_days } = await getAppSettings();
 
   const out: CandidateItem[] = [];
   for (const m of items) {
-    const latestMeter = m.asset_id ? (readings.get(m.asset_id) ?? null) : null;
-    const state = maintenanceDueState({ todayIso: ctx.todayYmd, latestMeter, item: m });
+    // Stored/sold/archived assets keep their schedules but stop asking.
+    if (m.asset && m.asset.lifecycle !== 'active') continue;
+    const latest = m.asset_id ? (readings.get(m.asset_id) ?? null) : null;
+    const latestMeter = latest?.reading ?? null;
+    const state = maintenanceDueState({
+      todayIso: ctx.todayYmd,
+      latestMeter,
+      latestReadingOn: latest?.recorded_on ?? null,
+      staleDays: meter_stale_days,
+      item: m,
+    });
     if (state.status === 'ok') continue;
 
     const name = m.asset ? `${m.name} — ${m.asset.name}` : m.name;
@@ -576,43 +586,41 @@ async function ruleMaintenanceDue(db: Db, ctx: Ctx): Promise<CandidateItem[]> {
 }
 
 // The odometer nag: a metered asset with active meter-cadence items goes
-// dark when readings stop — every meter threshold is unverifiable. >14
-// days without a reading (or none ever) surfaces a low-key prompt.
-// Week-bucketed dedup so a dismiss quiets it for the week, not forever.
-const METER_STALE_DAYS = 14;
+// dark when readings stop — every meter threshold is unverifiable. More
+// than app_settings.meter_stale_days without a (non-voided) reading, or
+// none ever, surfaces a low-key prompt. Week-bucketed dedup so a dismiss
+// quiets it for the week, not forever. Only ACTIVE assets ask.
 async function ruleMeterReadingStale(db: Db, ctx: Ctx): Promise<CandidateItem[]> {
+  const { meter_stale_days } = await getAppSettings();
   const metered = await db.query.assets.findMany({
     columns: { id: true, name: true, meter_unit: true },
-    where: and(isNotNull(assets.meter_unit), isNull(assets.archived_at)),
+    where: and(isNotNull(assets.meter_unit), eq(assets.lifecycle, 'active')),
   });
   if (metered.length === 0) return [];
 
-  // Only nag for assets where a reading actually gates something.
+  // Only nag for assets where a reading actually gates something: a meter
+  // interval, or a prepaid-distance licence.
   const meterItems = await db.query.maintenance_items.findMany({
-    columns: { asset_id: true },
-    where: and(eq(maintenance_items.active, true), isNotNull(maintenance_items.interval_meter)),
+    columns: { asset_id: true, interval_meter: true, policy: true, next_due_meter: true },
+    where: eq(maintenance_items.active, true),
   });
-  const gated = new Set(meterItems.map((i) => i.asset_id).filter((v): v is string => v != null));
+  const gated = new Set(
+    meterItems
+      .filter((i) => i.interval_meter != null || i.policy === 'prepaid_meter' || i.next_due_meter != null)
+      .map((i) => i.asset_id)
+      .filter((v): v is string => v != null),
+  );
 
   const relevant = metered.filter((a) => gated.has(a.id));
   if (relevant.length === 0) return [];
 
-  // Latest reading DATE per asset (the value doesn't matter here).
-  const rows = await db.query.asset_meter_readings.findMany({
-    columns: { asset_id: true, recorded_on: true },
-    where: inArray(asset_meter_readings.asset_id, relevant.map((a) => a.id)),
-    orderBy: [desc(asset_meter_readings.recorded_on)],
-  });
-  const latestOn = new Map<string, string>();
-  for (const r of rows) {
-    if (!latestOn.has(r.asset_id)) latestOn.set(r.asset_id, r.recorded_on);
-  }
+  const latest = await latestReadingRowByAsset(db, relevant.map((a) => a.id));
 
   const out: CandidateItem[] = [];
   for (const a of relevant) {
-    const last = latestOn.get(a.id) ?? null;
+    const last = latest.get(a.id)?.recorded_on ?? null;
     const age = last ? daysBetween(last, ctx.todayYmd) : null;
-    if (age != null && age <= METER_STALE_DAYS) continue;
+    if (age != null && age <= meter_stale_days) continue;
     out.push({
       rule_type: 'meter_reading_stale',
       source_type: 'asset',

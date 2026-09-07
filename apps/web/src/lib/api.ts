@@ -887,6 +887,12 @@ export const routinesApi = {
 // agrees on due-ness.
 
 export type AssetKind = 'vehicle' | 'appliance' | 'home' | 'device' | 'equipment' | 'other';
+// Only active assets generate tasks, attention, and reading nags (0048).
+export type AssetLifecycle = 'active' | 'stored' | 'sold' | 'archived';
+// Obligation policy (0048): interval re-anchors from completion; expiry
+// takes the newly issued expiry; prepaid_meter takes the purchased end
+// distance (RUC); on_condition records a finding + next review.
+export type MaintenancePolicy = 'interval' | 'expiry' | 'prepaid_meter' | 'on_condition';
 
 export interface Asset {
   id: string;
@@ -896,6 +902,7 @@ export interface Asset {
   meter_unit: string | null;
   metadata: Record<string, unknown>;
   notes: string | null;
+  lifecycle: AssetLifecycle;
   archived_at: string | null;
   created_at: string;
   updated_at: string;
@@ -915,14 +922,23 @@ export interface MeterReading {
   recorded_on: string;
   source: 'manual' | 'completion' | 'agent' | 'import';
   notes: string | null;
+  event_key?: string | null;
+  actor?: string | null;
+  voided_at?: string | null;
   created_at: string;
 }
+
+// Urgency (status) and data confidence (data) are separate dimensions:
+// "ok" only ever means the tracked obligation is current.
+export type MaintenanceDataState = 'complete' | 'needs_baseline' | 'needs_reading' | 'stale_reading';
 
 export interface MaintenanceDueState {
   status: 'ok' | 'due_soon' | 'due' | 'overdue';
   trigger: 'date' | 'meter' | null;
   days_until: number | null;
   meter_remaining: number | null;
+  data: MaintenanceDataState;
+  reading_age_days: number | null;
 }
 
 export interface MaintenanceItem {
@@ -930,7 +946,10 @@ export interface MaintenanceItem {
   name: string;
   notes: string | null;
   asset_id: string | null;
-  domain_id: string;
+  // Null = inherit the asset's domain (else Inbox); see effective_domain_id.
+  domain_id: string | null;
+  policy: MaintenancePolicy;
+  system: string | null;
   interval_days: number | null;
   interval_months: number | null;
   interval_meter: number | null;
@@ -945,8 +964,10 @@ export interface MaintenanceItem {
   metadata: Record<string, unknown>;
   created_at: string;
   updated_at: string;
-  asset?: Pick<Asset, 'id' | 'name' | 'kind' | 'meter_unit'> | null;
+  asset?: Pick<Asset, 'id' | 'name' | 'kind' | 'meter_unit' | 'domain_id' | 'lifecycle'> | null;
+  effective_domain_id?: string;
   latest_reading?: number | null;
+  latest_reading_on?: string | null;
   due_state?: MaintenanceDueState;
 }
 
@@ -958,14 +979,39 @@ export interface MaintenanceLog {
   notes: string | null;
   cost: number | null;
   source: 'manual' | 'task' | 'agent' | 'import';
+  event_key?: string | null;
+  actor?: string | null;
+  run_id?: string | null;
+  reading_id?: string | null;
+  is_baseline: boolean;
+  issued_until?: string | null;
+  purchased_to?: number | null;
+  finding?: string | null;
+  next_review_on?: string | null;
+  next_review_meter?: number | null;
   created_at: string;
+}
+
+export interface CompleteMaintenanceBody {
+  completed_on?: string;
+  meter?: number | null;
+  notes?: string | null;
+  cost?: number | null;
+  event_key?: string;
+  issued_until?: string | null;
+  purchased_to?: number | null;
+  finding?: string | null;
+  next_review_on?: string | null;
+  next_review_meter?: number | null;
 }
 
 export interface MaintenanceItemBody {
   name?: string;
   notes?: string | null;
   asset_id?: string | null;
-  domain_id?: string;
+  domain_id?: string | null;
+  policy?: MaintenancePolicy;
+  system?: string | null;
   interval_days?: number | null;
   interval_months?: number | null;
   interval_meter?: number | null;
@@ -1003,12 +1049,19 @@ export const assetsApi = {
       meter_unit: string | null;
       metadata: Record<string, unknown>;
       notes: string | null;
+      lifecycle: AssetLifecycle;
       archived_at: string | null;
     }>,
   ) => api.patch<{ asset: Asset }>(`/api/assets/${id}`, body),
   remove: (id: string) => api.delete(`/api/assets/${id}`),
-  addReading: (id: string, body: { reading: number; recorded_on?: string; notes?: string | null }) =>
-    api.post<{ reading: MeterReading }>(`/api/assets/${id}/readings`, body),
+  addReading: (
+    id: string,
+    body: { reading: number; recorded_on?: string; notes?: string | null; event_key?: string; allow_decrease?: boolean },
+  ) => api.post<{ reading: MeterReading; logged: boolean }>(`/api/assets/${id}/readings`, body),
+  updateReading: (id: string, rid: string, body: { reading?: number; recorded_on?: string; notes?: string | null }) =>
+    api.patch<{ reading: MeterReading }>(`/api/assets/${id}/readings/${rid}`, body),
+  // Void, not delete — the row stays for audit.
+  voidReading: (id: string, rid: string) => api.delete(`/api/assets/${id}/readings/${rid}`),
 };
 
 export const maintenanceApi = {
@@ -1017,7 +1070,7 @@ export const maintenanceApi = {
     if (opts?.asset_id) qs.set('asset_id', opts.asset_id);
     if (opts?.include_inactive) qs.set('include_inactive', 'true');
     const q = qs.toString();
-    return api.get<{ items: MaintenanceItem[]; today: string }>(
+    return api.get<{ items: MaintenanceItem[]; today: string; meter_stale_days: number }>(
       `/api/maintenance${q ? `?${q}` : ''}`,
     );
   },
@@ -1030,12 +1083,18 @@ export const maintenanceApi = {
   update: (id: string, body: MaintenanceItemBody) =>
     api.patch<{ item: MaintenanceItem }>(`/api/maintenance/${id}`, body),
   remove: (id: string) => api.delete(`/api/maintenance/${id}`),
-  complete: (
+  complete: (id: string, body: CompleteMaintenanceBody) =>
+    api.post<{ item: MaintenanceItem; log: MaintenanceLog; logged: boolean; historical: boolean }>(
+      `/api/maintenance/${id}/complete`,
+      body,
+    ),
+  updateLog: (
     id: string,
-    body: { completed_on?: string; meter?: number | null; notes?: string | null; cost?: number | null },
-  ) => api.post<{ item: MaintenanceItem; logged: boolean }>(`/api/maintenance/${id}/complete`, body),
+    logId: string,
+    body: { completed_on?: string; meter_at_completion?: number | null; notes?: string | null; cost?: number | null },
+  ) => api.patch<{ item: MaintenanceItem; log: MaintenanceLog }>(`/api/maintenance/${id}/logs/${logId}`, body),
   deleteLog: (id: string, logId: string) =>
-    api.delete(`/api/maintenance/${id}/logs/${logId}`),
+    api.delete<{ item: MaintenanceItem }>(`/api/maintenance/${id}/logs/${logId}`),
 };
 
 // ─── People CRM ──────────────────────────────────────────────────────────
@@ -1632,6 +1691,8 @@ export interface AppSettings {
   rule_module_enabled: boolean;
   // Maintenance module (migration 0047). Default on — core home-ops.
   maintenance_module_enabled: boolean;
+  // Reading-staleness policy (0048): days before the reading nag fires.
+  meter_stale_days?: number;
   // Briefing panel visibility/order (migration 0044). Null → registry
   // defaults; resolved by mergePanelConfig in the panel registry.
   briefing_panels?: Array<{ id: string; enabled: boolean }> | null;

@@ -1,4 +1,4 @@
-import { pgTable, index, foreignKey, check, uuid, text, numeric, date, timestamp, unique, jsonb, boolean, integer, real, time, smallint, bigint } from "drizzle-orm/pg-core"
+import { pgTable, index, uniqueIndex, foreignKey, check, uuid, text, numeric, date, timestamp, unique, jsonb, boolean, integer, real, time, smallint, bigint } from "drizzle-orm/pg-core"
 import { sql } from "drizzle-orm"
 
 // ─── Typed jsonb payload shapes ────────────────────────────────────────────
@@ -450,6 +450,8 @@ export const tasks = pgTable("tasks", {
 	reminder_offsets: jsonb().$type<number[]>().default([]).notNull(),
 	reminders_sent: jsonb().$type<Record<string, string>>().default({}).notNull(),
 	source: text().default('manual').notNull(),
+	// Durable occurrence identity for generated tasks (0048); unique per source.
+	source_ref: text(),
 	top3_for_date: date(),
 	// Waiting state (migration 0038): who it's blocked on + the aging anchor.
 	waiting_on: text(),
@@ -465,6 +467,7 @@ export const tasks = pgTable("tasks", {
 	index("idx_tasks_status_due").using("btree", table.status.asc().nullsLast().op("text_ops"), table.due_date.asc().nullsLast().op("text_ops")),
 	index("idx_tasks_top3").using("btree", table.top3_for_date.asc().nullsLast().op("date_ops")).where(sql`(top3_for_date IS NOT NULL)`),
 	index("tasks_milestone_id_idx").using("btree", table.milestone_id.asc().nullsLast().op("uuid_ops")),
+	uniqueIndex("idx_tasks_source_ref").using("btree", table.source.asc().nullsLast().op("text_ops"), table.source_ref.asc().nullsLast().op("text_ops")).where(sql`(source_ref IS NOT NULL)`),
 	foreignKey({
 			columns: [table.project_id],
 			foreignColumns: [projects.id],
@@ -862,6 +865,9 @@ export const app_settings = pgTable("app_settings", {
 	rule_module_enabled: boolean().default(false).notNull(),
 	// Maintenance module (migration 0047). Default on — core home-ops.
 	maintenance_module_enabled: boolean().default(true).notNull(),
+	// Reading-staleness policy (0048): days without a meter reading before
+	// a metered asset with meter-cadence items gets the reading nag.
+	meter_stale_days: integer().default(14).notNull(),
 	// Briefing panel visibility/order (migration 0044): ordered {id, enabled}
 	// array. Null → registry defaults (resolved web-side by mergePanelConfig).
 	briefing_panels: jsonb().$type<Array<{ id: string; enabled: boolean }> | null>(),
@@ -1204,6 +1210,8 @@ export const assets = pgTable("assets", {
 	// substrate for the future vehicle-agent build.
 	metadata: jsonb().$type<Record<string, unknown>>().default({}).notNull(),
 	notes: text(),
+	// Only active assets generate tasks, attention, and reading nags (0048).
+	lifecycle: text().default('active').notNull(),
 	archived_at: timestamp({ withTimezone: true, mode: 'string' }),
 	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	updated_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
@@ -1214,6 +1222,7 @@ export const assets = pgTable("assets", {
 			name: "assets_domain_id_fkey"
 		}).onDelete("set null"),
 	check("assets_kind_check", sql`kind = ANY (ARRAY['vehicle'::text, 'appliance'::text, 'home'::text, 'device'::text, 'equipment'::text, 'other'::text])`),
+	check("assets_lifecycle_check", sql`lifecycle = ANY (ARRAY['active'::text, 'stored'::text, 'sold'::text, 'archived'::text])`),
 ]);
 
 export const asset_meter_readings = pgTable("asset_meter_readings", {
@@ -1223,9 +1232,14 @@ export const asset_meter_readings = pgTable("asset_meter_readings", {
 	recorded_on: date().notNull(),
 	source: text().default('manual').notNull(),
 	notes: text(),
+	// Idempotency + provenance + corrections (0048). Voided, never deleted.
+	event_key: text(),
+	actor: text(),
+	voided_at: timestamp({ withTimezone: true, mode: 'string' }),
 	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [
 	index("idx_asset_meter_readings_asset").using("btree", table.asset_id.asc().nullsLast().op("uuid_ops"), table.recorded_on.desc().nullsFirst().op("date_ops")),
+	uniqueIndex("idx_asset_meter_readings_event_key").using("btree", table.event_key.asc().nullsLast().op("text_ops")).where(sql`(event_key IS NOT NULL)`),
 	foreignKey({
 			columns: [table.asset_id],
 			foreignColumns: [assets.id],
@@ -1240,7 +1254,12 @@ export const maintenance_items = pgTable("maintenance_items", {
 	name: text().notNull(),
 	notes: text(),
 	asset_id: uuid(),
-	domain_id: uuid().notNull(),
+	// Null = inherit the asset's domain at read time, else Inbox (0048).
+	domain_id: uuid(),
+	// Obligation policy (0048): interval | expiry | prepaid_meter | on_condition.
+	policy: text().default('interval').notNull(),
+	// Grouping for the per-asset schedule view (Fluids, Brakes, Legal…).
+	system: text(),
 	// One date unit (days XOR months) and/or a meter interval. App-enforced:
 	// interval_meter requires the asset to have a meter_unit (cross-table).
 	interval_days: integer(),
@@ -1282,8 +1301,9 @@ export const maintenance_items = pgTable("maintenance_items", {
 	check("maintenance_items_interval_meter_check", sql`interval_meter > (0)::numeric`),
 	check("maintenance_items_lead_days_check", sql`lead_days >= 0`),
 	check("maintenance_items_lead_meter_check", sql`lead_meter >= (0)::numeric`),
-	check("maintenance_items_has_interval", sql`(interval_days IS NOT NULL) OR (interval_months IS NOT NULL) OR (interval_meter IS NOT NULL)`),
+	check("maintenance_items_has_interval", sql`(policy <> 'interval'::text) OR (interval_days IS NOT NULL) OR (interval_months IS NOT NULL) OR (interval_meter IS NOT NULL)`),
 	check("maintenance_items_one_date_unit", sql`(interval_days IS NULL) OR (interval_months IS NULL)`),
+	check("maintenance_items_policy_check", sql`policy = ANY (ARRAY['interval'::text, 'expiry'::text, 'prepaid_meter'::text, 'on_condition'::text])`),
 ]);
 
 export const maintenance_logs = pgTable("maintenance_logs", {
@@ -1294,16 +1314,33 @@ export const maintenance_logs = pgTable("maintenance_logs", {
 	notes: text(),
 	cost: numeric({ mode: 'number' }),
 	source: text().default('manual').notNull(),
+	// Idempotent events with provenance + linked evidence (0048).
+	event_key: text(),
+	actor: text(),
+	run_id: text(),
+	reading_id: uuid(),
+	// Seed evidence entered at item creation; editable, not deletable.
+	is_baseline: boolean().default(false).notNull(),
+	// Policy-specific completion facts.
+	issued_until: date(),
+	purchased_to: numeric({ mode: 'number' }),
+	finding: text(),
+	next_review_on: date(),
+	next_review_meter: numeric({ mode: 'number' }),
 	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [
 	index("idx_maintenance_logs_item").using("btree", table.item_id.asc().nullsLast().op("uuid_ops"), table.completed_on.desc().nullsFirst().op("date_ops")),
+	uniqueIndex("idx_maintenance_logs_event_key").using("btree", table.event_key.asc().nullsLast().op("text_ops")).where(sql`(event_key IS NOT NULL)`),
 	foreignKey({
 			columns: [table.item_id],
 			foreignColumns: [maintenance_items.id],
 			name: "maintenance_logs_item_id_fkey"
 		}).onDelete("cascade"),
-	// Idempotent complete (routine_completions precedent).
-	unique("maintenance_logs_item_day_unique").on(table.item_id, table.completed_on),
+	foreignKey({
+			columns: [table.reading_id],
+			foreignColumns: [asset_meter_readings.id],
+			name: "maintenance_logs_reading_id_fkey"
+		}).onDelete("set null"),
 	check("maintenance_logs_meter_at_completion_check", sql`meter_at_completion >= (0)::numeric`),
 	check("maintenance_logs_cost_check", sql`cost >= (0)::numeric`),
 	check("maintenance_logs_source_check", sql`source = ANY (ARRAY['manual'::text, 'task'::text, 'agent'::text, 'import'::text])`),
