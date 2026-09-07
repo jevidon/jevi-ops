@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { ApiError, assetsApi, domainsApi, maintenanceApi, type MaintenanceLog } from '@/lib/api';
 import { ActionForm } from '../action-form';
-import { deleteItemAction, deleteLogAction, setItemActiveAction } from '../actions';
+import { deleteItemAction, deleteLogAction, setBaselineAction, setItemActiveAction } from '../actions';
 import { CompleteForm } from '../complete-form';
 import { POLICY_LABEL, cadenceLabel, dataLabel, dueDateLabel, meterLabel, statusLabel } from '../format';
 import { ItemForm, type AssetOption, type DomainOption } from '../item-form';
@@ -41,6 +41,8 @@ export default async function MaintenanceItemPage({
   const data_ = dataLabel(item);
   const unit = item.asset?.meter_unit ?? '';
   const urgent = item.due_state?.status === 'overdue' || item.due_state?.status === 'due';
+  const baseline = logs.find((l) => l.is_baseline) ?? null;
+  const needsBaseline = item.due_state?.data === 'needs_baseline' || logs.length === 0;
 
   return (
     <div className="pb-32">
@@ -102,7 +104,39 @@ export default async function MaintenanceItemPage({
           )}
         </div>
 
+        <div id="complete" />
         <CompleteForm item={item} today={today} className="mt-4" />
+      </div>
+
+      {/* ─── Baseline (seed evidence) ─────────────────────────────── */}
+      <div id="baseline" className="px-5 lg:px-0 mt-8">
+        <div className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3 mb-2">Baseline</div>
+        <p className="font-sans text-[12.5px] text-ink-3 mb-3">
+          {needsBaseline
+            ? 'When was this last done, and at what reading? The schedule anchors here — it is seed evidence, not a new service.'
+            : 'Seed evidence — "last done on … at …". Editing it re-derives the schedule only while it is the latest evidence.'}
+        </p>
+        <ActionForm
+          action={setBaselineAction}
+          hidden={{ id: item.id }}
+          submit={baseline ? 'Update baseline' : 'Set baseline'}
+          variant={needsBaseline ? 'solid' : 'ghost'}
+          pendingLabel="Saving…"
+          className="flex flex-wrap items-end gap-3"
+        >
+          <label className="flex flex-col gap-1">
+            <span className="font-mono text-[9px] uppercase tracking-[0.08em] text-ink-3">Last done on</span>
+            <input type="date" name="completed_on" required defaultValue={baseline?.completed_on ?? ''} max={today}
+              className="border border-line bg-surface px-2 py-1.5 font-sans text-[13px] text-ink" />
+          </label>
+          {unit && (
+            <label className="flex flex-col gap-1">
+              <span className="font-mono text-[9px] uppercase tracking-[0.08em] text-ink-3">at ({unit})</span>
+              <input type="number" name="meter" min="0" step="any" defaultValue={baseline?.meter_at_completion ?? ''}
+                className="w-32 border border-line bg-surface px-2 py-1.5 font-sans text-[13px] text-ink" />
+            </label>
+          )}
+        </ActionForm>
       </div>
 
       {/* ─── History (evidence) ───────────────────────────────────── */}
@@ -170,9 +204,9 @@ function LogRow({ log, itemId, unit }: { log: MaintenanceLog; itemId: string; un
         {log.actor?.startsWith('token:') ? ` · ${log.actor.slice(6)}` : ''}
       </span>
       {log.is_baseline ? (
-        <span className="font-mono text-[10px] text-ink-4" title="Seed evidence — edit it via the API; it cannot be deleted.">
-          seed
-        </span>
+        <a href="#baseline" className="font-mono text-[10px] text-ink-4 hover:text-ink-2" title="Seed evidence — edit it in the Baseline block; it cannot be deleted.">
+          seed · edit
+        </a>
       ) : (
         <ActionForm
           action={deleteLogAction}

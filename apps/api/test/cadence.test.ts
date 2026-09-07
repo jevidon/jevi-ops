@@ -3,6 +3,9 @@ import {
   effectiveDomainId,
   maintenanceDueState,
   maintenanceOccurrenceKey,
+  maintenanceTaskTitle,
+  maintenanceTracked,
+  missingCompletionFields,
   nextAfterCompletion,
 } from '@jevi-ops/shared';
 import { INBOX } from './helpers.js';
@@ -10,6 +13,32 @@ import { INBOX } from './helpers.js';
 // Pure cadence math — no database.
 
 const interval = { policy: 'interval' as const, interval_days: null, interval_months: 6, interval_meter: 5000 };
+
+describe('missingCompletionFields', () => {
+  it('interval needs nothing; each obligation policy names what it needs', () => {
+    expect(missingCompletionFields('interval', { completedOn: '2026-09-01' })).toEqual([]);
+    expect(missingCompletionFields('expiry', { completedOn: '2026-09-01' })).toEqual(['issued_until']);
+    expect(missingCompletionFields('expiry', { completedOn: '2026-09-01', issuedUntil: '2026-08-01' })).toEqual(['issued_until']);
+    expect(missingCompletionFields('expiry', { completedOn: '2026-09-01', issuedUntil: '2027-09-01' })).toEqual([]);
+    expect(missingCompletionFields('prepaid_meter', { completedOn: '2026-09-01' })).toEqual(['purchased_to']);
+    expect(missingCompletionFields('prepaid_meter', { completedOn: '2026-09-01', purchasedTo: 120000 })).toEqual([]);
+    expect(missingCompletionFields('on_condition', { completedOn: '2026-09-01', finding: '  ' })).toEqual(['finding', 'next_review_on', 'next_review_meter']);
+    expect(missingCompletionFields('on_condition', { completedOn: '2026-09-01', nextReviewMeter: 1 })).toEqual([]);
+  });
+});
+
+describe('scope + title conventions', () => {
+  it('tracked = active item on an active (or no) asset', () => {
+    expect(maintenanceTracked({ active: true }, null)).toBe(true);
+    expect(maintenanceTracked({ active: true }, { lifecycle: 'active' })).toBe(true);
+    expect(maintenanceTracked({ active: false }, { lifecycle: 'active' })).toBe(false);
+    expect(maintenanceTracked({ active: true }, { lifecycle: 'stored' })).toBe(false);
+  });
+  it('the generated task title is item — asset', () => {
+    expect(maintenanceTaskTitle({ name: 'Oil' }, { name: 'Outback' })).toBe('Oil — Outback');
+    expect(maintenanceTaskTitle({ name: 'Filters' }, null)).toBe('Filters');
+  });
+});
 
 describe('nextAfterCompletion', () => {
   it('re-anchors an interval item from the completion (date + meter)', () => {

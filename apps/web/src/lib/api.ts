@@ -987,6 +987,17 @@ export interface MaintenanceItem {
   latest_reading?: number | null;
   latest_reading_on?: string | null;
   due_state?: MaintenanceDueState;
+  // Shared scope: active item on an active asset. False rows keep a
+  // due_state for display but count and prompt nowhere.
+  tracked?: boolean;
+}
+
+// A facts edit as a patch with per-key compare-and-set (see the API's
+// MetadataPatchSchema). `expected` is the value the writer last saw —
+// null for "none"; omit it for an unconditional write.
+export interface MetadataPatch {
+  set?: Record<string, { value: unknown; expected?: unknown }>;
+  unset?: Record<string, { expected?: unknown }>;
 }
 
 export interface MaintenanceLog {
@@ -1013,6 +1024,7 @@ export interface MaintenanceLog {
 export interface CompleteMaintenanceBody {
   completed_on?: string;
   meter?: number | null;
+  allow_decrease?: boolean;
   notes?: string | null;
   cost?: number | null;
   event_key?: string;
@@ -1051,6 +1063,9 @@ export const assetsApi = {
     api.get<{
       asset: Asset;
       domain: { id: string; name: string } | null;
+      // The authoritative latest non-voided reading — never derived from
+      // the paginated history below.
+      latest_reading: { id: string; reading: number; recorded_on: string } | null;
       readings: MeterReading[];
       items: MaintenanceItem[];
       projects: AssetProjectRow[];
@@ -1074,6 +1089,7 @@ export const assetsApi = {
       domain_id: string | null;
       meter_unit: string | null;
       metadata: Record<string, unknown>;
+      metadata_patch: MetadataPatch;
       notes: string | null;
       lifecycle: AssetLifecycle;
       archived_at: string | null;
@@ -1084,8 +1100,11 @@ export const assetsApi = {
     id: string,
     body: { reading: number; recorded_on?: string; notes?: string | null; event_key?: string; allow_decrease?: boolean },
   ) => api.post<{ reading: MeterReading; logged: boolean }>(`/api/assets/${id}/readings`, body),
-  updateReading: (id: string, rid: string, body: { reading?: number; recorded_on?: string; notes?: string | null }) =>
-    api.patch<{ reading: MeterReading }>(`/api/assets/${id}/readings/${rid}`, body),
+  updateReading: (
+    id: string,
+    rid: string,
+    body: { reading?: number; recorded_on?: string; notes?: string | null; allow_decrease?: boolean },
+  ) => api.patch<{ reading: MeterReading; item: MaintenanceItem | null }>(`/api/assets/${id}/readings/${rid}`, body),
   // Void, not delete — the row stays for audit.
   voidReading: (id: string, rid: string) => api.delete(`/api/assets/${id}/readings/${rid}`),
 };
@@ -1114,6 +1133,9 @@ export const maintenanceApi = {
       `/api/maintenance/${id}/complete`,
       body,
     ),
+  // Seed evidence: create or edit the item's baseline log.
+  setBaseline: (id: string, body: { completed_on: string; meter?: number | null }) =>
+    api.post<{ item: MaintenanceItem; log: MaintenanceLog }>(`/api/maintenance/${id}/baseline`, body),
   updateLog: (
     id: string,
     logId: string,

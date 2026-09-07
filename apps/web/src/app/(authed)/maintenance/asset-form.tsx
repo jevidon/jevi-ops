@@ -95,9 +95,9 @@ export function AssetForm({
           />
         </label>
         <label className="flex flex-col gap-1">
-          <span className={label}>Domain (optional · assigning promotes it into the domain)</span>
+          <span className={label}>Domain (optional · assigning promotes it into the domain; upkeep reaches Inbox either way)</span>
           <select name="domain_id" defaultValue={asset?.domain_id ?? defaultDomainId ?? ''} className={field}>
-            <option value="">— unassigned (maintenance only) —</option>
+            <option value="">— unassigned: listed under Maintenance only —</option>
             {domains.map((d) => (
               <option key={d.id} value={d.id}>{d.name}</option>
             ))}

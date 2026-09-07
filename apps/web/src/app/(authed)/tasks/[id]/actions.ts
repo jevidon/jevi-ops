@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation';
 import { z } from 'zod';
 import { tasksApi, ApiError } from '@/lib/api';
 import { isRecurrencePattern } from '@jevi-ops/shared';
+import { maintenanceDetailsHref } from '@/lib/needs-details';
 
 export type SaveResult = { ok: true } | { ok: false; error: string };
 
@@ -22,16 +23,20 @@ export async function setTaskStatusAction(formData: FormData): Promise<void> {
   // waiting_since and clears both when leaving waiting (Addendum 08).
   const payload: { status: 'open' | 'waiting' | 'done'; waiting_on?: string | null } = { status: next };
   if (next === 'waiting') payload.waiting_on = String(formData.get('waiting_on') ?? '').trim() || null;
+  let detailsHref: string | null = null;
   try {
     await tasksApi.update(taskId, payload);
-  } catch {
-    /* best-effort; revalidate resyncs */
+  } catch (err) {
+    // A maintenance task whose item needs evidence: go record it properly.
+    detailsHref = maintenanceDetailsHref(err);
+    /* otherwise best-effort; revalidate resyncs */
   }
   revalidatePath(`/tasks/${taskId}`);
   revalidatePath('/tasks');
   revalidatePath('/');
   revalidatePath('/attention');
   revalidatePath('/work');
+  if (detailsHref) redirect(detailsHref);
 }
 
 // Form schema — captures every field the shared TaskForm posts. The

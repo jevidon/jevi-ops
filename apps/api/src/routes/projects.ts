@@ -211,6 +211,22 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
     } else if (parsed.data.status === 'active' || parsed.data.status === 'paused') {
       update.completed_at = null;
     }
+    // Linking a domain-less project to an assigned asset routes it beside
+    // the asset (the create-time rule, applied late). An explicit domain in
+    // the same patch, or one the project already has, wins.
+    if (parsed.data.asset_id && !('domain_id' in parsed.data)) {
+      const [current] = await getDb()
+        .select({ domain_id: projects.domain_id })
+        .from(projects)
+        .where(eq(projects.id, req.params.id));
+      if (current && current.domain_id == null) {
+        const asset = await getDb().query.assets.findFirst({
+          columns: { domain_id: true },
+          where: eq(assets.id, parsed.data.asset_id),
+        });
+        if (asset?.domain_id) update.domain_id = asset.domain_id;
+      }
+    }
     const [row] = await getDb()
       .update(projects)
       .set(update)

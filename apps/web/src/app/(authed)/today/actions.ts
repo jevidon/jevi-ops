@@ -2,10 +2,12 @@
 
 import { revalidatePath } from 'next/cache';
 import { cookies } from 'next/headers';
+import { redirect } from 'next/navigation';
 import { z } from 'zod';
 import { tasksApi, observationsApi, conversationsApi, ApiError } from '@/lib/api';
 import { todayIsoDate } from '@/lib/today';
 import { getAppTimezone } from '@/lib/app-settings';
+import { maintenanceDetailsHref } from '@/lib/needs-details';
 
 const CreateTaskFormSchema = z.object({
   title: z.string().trim().min(1),
@@ -33,16 +35,19 @@ export async function toggleTaskDoneAction(formData: FormData) {
   const taskId = String(formData.get('taskId') ?? '');
   const currentStatus = String(formData.get('status') ?? 'open');
   if (!taskId) return;
+  let detailsHref: string | null = null;
   try {
     await tasksApi.update(taskId, {
       status: currentStatus === 'done' ? 'open' : 'done',
     });
-  } catch {
-    // Best-effort; UI will reload on next request and reflect reality.
+  } catch (err) {
+    detailsHref = maintenanceDetailsHref(err);
+    // Otherwise best-effort; UI will reload on next request and reflect reality.
   }
   revalidatePath('/');
   revalidatePath('/attention');
   revalidatePath('/work');
+  if (detailsHref) redirect(detailsHref);
 }
 
 export async function toggleTop3Action(formData: FormData) {

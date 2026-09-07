@@ -116,6 +116,15 @@ dev Postgres up, and `DATABASE_URL` in `.env`. Files run serially — they
 share the one test database. Route tests build the real Fastify app and
 `inject()` requests with a signed session; `test/helpers.ts` has fixtures.
 
+Two files go further: `test/web-actions.test.ts` transpiles the web's
+server actions and runs them against the real routes (mock `next/*`, route
+`@/lib/api` into `inject()`), and `test/upgrade.test.ts` builds a second
+disposable database (`jeviops_upgrade`) from the frozen 0047-era schema in
+`test/fixtures/schema-0047.sql`, populates it, and applies the later
+migrations on top — so a migration is tested on a populated database, not
+only via the clean `schema-selfhost.sql` bootstrap. When you add a
+migration, add it to that test's list.
+
 ## Gotchas
 
 - App timezone is a DB setting (default `America/Denver`), not the machine's.

@@ -3,7 +3,7 @@ import type {
   WorkPayload, WorkDomain, WorkProjectCard, WorkContentRow, WorkDirect, WorkRollup, WorkAssetCard,
 } from '@jevi-ops/shared/schemas';
 import {
-  urgencyFromCounts, parentUrgency, contentUrgency, moveVerb, maintenanceDueState, maintenanceUrgency,
+  urgencyFromCounts, parentUrgency, contentUrgency, moveVerb, maintenanceDueState, maintenanceTracked, maintenanceUrgency,
   type Urgency, type MaintenanceDueStatus, type MaintenanceDataState,
 } from '@jevi-ops/shared';
 import type { Db } from './db.js';
@@ -88,15 +88,16 @@ export async function buildWork(db: Db): Promise<WorkPayload> {
     // Assigned, active assets (0049) — assignment is what promotes an asset
     // into a domain; unassigned ones live only under /maintenance/assets.
     db.query.assets.findMany({
-      columns: { id: true, name: true, kind: true, domain_id: true, meter_unit: true, attachments: true },
+      columns: { id: true, name: true, kind: true, domain_id: true, meter_unit: true, lifecycle: true, attachments: true },
       where: and(isNotNull(assetsTable.domain_id), eq(assetsTable.lifecycle, 'active')),
     }),
-    // Their active maintenance items — counted with the same due-state the
-    // API lists use, so a card never disagrees with the asset page.
+    // Their tracked maintenance items (shared maintenanceTracked scope) —
+    // counted with the same due-state the API lists use, so a card never
+    // disagrees with the asset page.
     db.query.maintenance_items.findMany({
       columns: {
         id: true, asset_id: true, policy: true, interval_days: true, interval_months: true,
-        interval_meter: true, lead_days: true, lead_meter: true, next_due_date: true, next_due_meter: true,
+        interval_meter: true, lead_days: true, lead_meter: true, next_due_date: true, next_due_meter: true, active: true,
       },
       where: and(eq(maintenance_items.active, true), isNotNull(maintenance_items.asset_id)),
     }),
@@ -201,6 +202,9 @@ export async function buildWork(db: Db): Promise<WorkPayload> {
     let worst: MaintenanceDueStatus | null = null;
     let data: MaintenanceDataState = 'complete';
     for (const item of itemsByAsset.get(a.id) ?? []) {
+      // The queries above already narrow to active items on active assets;
+      // the shared predicate is the contract the asset page reads too.
+      if (!maintenanceTracked(item, a)) continue;
       const s = maintenanceDueState({
         todayIso: today,
         latestMeter: latest?.reading ?? null,

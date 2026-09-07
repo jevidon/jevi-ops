@@ -6,7 +6,7 @@ import { getAppTz } from '../lib/app-settings.js';
 import { todayInTz } from '../lib/tz.js';
 import { getDb, type Db } from '../lib/db.js';
 import { clearAttentionForSource } from '../lib/attention.js';
-import { clearMaintenanceAttention, completeMaintenanceItem } from '../lib/maintenance.js';
+import { MaintenanceNeedsDetails, clearMaintenanceAttention, completeMaintenanceItem } from '../lib/maintenance.js';
 import { maintenance_items, milestones, projects, tasks } from '../db/schema.js';
 
 // Tasks CRUD. Auth-gated.
@@ -286,17 +286,34 @@ export const taskRoutes: FastifyPluginAsync = async (app) => {
     let row: typeof tasks.$inferSelect | undefined;
     if (linkedItem) {
       const completedOn = todayInTz(await getAppTz());
-      row = await db.transaction(async (tx) => {
-        const [r] = await tx.update(tasks).set(update).where(eq(tasks.id, req.params.id)).returning();
-        if (!r) return undefined;
-        await completeMaintenanceItem(tx, linkedItem.id, {
-          completedOn,
-          source: 'task',
-          actor: req.authMethod === 'api_token' ? req.user!.email : `session:${req.user!.email}`,
-          eventKey: `task:${req.params.id}:${completedOn}`,
+      try {
+        row = await db.transaction(async (tx) => {
+          const [r] = await tx.update(tasks).set(update).where(eq(tasks.id, req.params.id)).returning();
+          if (!r) return undefined;
+          await completeMaintenanceItem(tx, linkedItem.id, {
+            completedOn,
+            today: completedOn,
+            source: 'task',
+            actor: req.authMethod === 'api_token' ? req.user!.email : `session:${req.user!.email}`,
+            eventKey: `task:${req.params.id}:${completedOn}`,
+          });
+          return r;
         });
-        return r;
-      });
+      } catch (err) {
+        // A checkbox can't carry the evidence an expiry/prepaid/inspection
+        // item requires. The transaction rolled back — the task stays open —
+        // and the client is told what the item needs and where to say it.
+        if (err instanceof MaintenanceNeedsDetails) {
+          return reply.code(409).send({
+            error: 'needs_details',
+            item_id: linkedItem.id,
+            policy: err.policy,
+            fields: err.fields,
+            message: err.message,
+          });
+        }
+        throw err;
+      }
       if (row) await clearMaintenanceAttention(db, linkedItem.id);
     } else {
       [row] = await db.update(tasks).set(update).where(eq(tasks.id, req.params.id)).returning();

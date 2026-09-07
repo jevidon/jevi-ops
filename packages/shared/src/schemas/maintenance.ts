@@ -106,11 +106,28 @@ export const CreateAssetSchema = z.object({
   notes: nullableString(),
 });
 
+// A facts edit as a PATCH with per-key compare-and-set. `set` writes keys,
+// `unset` removes them; an entry's `expected` is the value the writer last
+// saw for that key (null = "I saw none"). The API applies the patch under a
+// row lock and refuses (409 fact_conflict) any key whose current value no
+// longer matches its `expected` — so a human editing the make while an agent
+// adds the VIN both land, and two writers on the same key never silently
+// overwrite each other. Omit `expected` (JSON undefined) for an
+// unconditional write. Untouched keys are never sent, so they are never lost.
+export const MetadataPatchSchema = z.object({
+  set: z.record(z.string().min(1), z.object({ value: z.unknown(), expected: z.unknown().optional() })).optional(),
+  unset: z.record(z.string().min(1), z.object({ expected: z.unknown().optional() })).optional(),
+});
+export type MetadataPatch = z.infer<typeof MetadataPatchSchema>;
+
 export const UpdateAssetSchema = CreateAssetSchema.partial().extend({
   lifecycle: AssetLifecycleSchema.optional(),
   attachments: z.array(AttachmentSchema).optional(),
   // Archive/unarchive goes through the same PATCH (routines precedent).
   archived_at: z.string().datetime({ offset: true }).nullable().optional(),
+  // Preferred over whole-object `metadata` (which stays for imports and is
+  // last-writer-wins): see MetadataPatchSchema.
+  metadata_patch: MetadataPatchSchema.optional(),
 });
 
 export const MeterReadingSchema = z.object({
@@ -144,6 +161,8 @@ export const UpdateMeterReadingSchema = z.object({
   reading: z.number().nonnegative().optional(),
   recorded_on: z.string().date().optional(),
   notes: nullableString(),
+  // A correction is held to the same neighbour checks as a new reading.
+  allow_decrease: z.boolean().optional(),
 });
 
 export const MaintenanceDueStatusSchema = z.enum(['ok', 'due_soon', 'due', 'overdue']);
@@ -188,6 +207,9 @@ export const MaintenanceItemSchema = z.object({
   latest_reading: z.number().nullable().optional(),
   latest_reading_on: z.string().date().nullable().optional(),
   due_state: MaintenanceDueStateSchema.optional(),
+  // Shared scope (maintenanceTracked): active item on an active asset. False
+  // rows keep their due_state for display but count nowhere and prompt nothing.
+  tracked: z.boolean().optional(),
 });
 
 const cadenceFields = {
@@ -257,12 +279,26 @@ export const CompleteMaintenanceSchema = z.object({
   run_id: z.string().max(200).optional(),
   // Token callers may declare 'import'; sessions are always 'manual'.
   source: z.enum(['agent', 'import']).optional(),
-  // Policy-specific facts.
+  // A completion meter lower than the latest prior reading is refused
+  // unless the meter was replaced — same rule as a standalone reading.
+  allow_decrease: z.boolean().optional(),
+  // Policy-specific facts. REQUIRED per policy (missingCompletionFields):
+  // expiry → issued_until; prepaid_meter → purchased_to; on_condition → a
+  // finding or a next review. Missing → 400/409 needs_details, nothing written.
   issued_until: nullableDate(),          // expiry
   purchased_to: nullableNonNeg(),        // prepaid_meter
   finding: nullableString(),             // on_condition
   next_review_on: nullableDate(),        // on_condition
   next_review_meter: nullableNonNeg(),   // on_condition
+});
+
+// Seed evidence for an item: "last done on … at …". Creates or edits the
+// item's single is_baseline log; the schedule re-derives when the baseline
+// is the latest evidence. Never a reading row — a baseline meter is a fact
+// about the service, not an odometer observation.
+export const SetBaselineSchema = z.object({
+  completed_on: z.string().date(),
+  meter: nullableNonNeg(),
 });
 
 export const MaintenanceLogSchema = z.object({
@@ -288,9 +324,13 @@ export const MaintenanceLogSchema = z.object({
 
 export const UpdateMaintenanceLogSchema = z.object({
   completed_on: z.string().date().optional(),
+  // Follows through to the linked completion reading: null voids it, a
+  // value corrects it (validated like any reading), a value on a log that
+  // never had one creates it.
   meter_at_completion: nullableNonNeg(),
   notes: nullableString(),
   cost: nullableNonNeg(),
+  allow_decrease: z.boolean().optional(),
 });
 
 export type Asset = z.infer<typeof AssetSchema>;

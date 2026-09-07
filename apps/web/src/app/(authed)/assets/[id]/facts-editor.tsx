@@ -10,13 +10,23 @@ import { saveAssetFactsAction, type SaveResult } from './actions';
 // and an inline editor. Known profile keys get their labels and are offered
 // as suggestions; any key is allowed — the vehicle agent writes rich facts
 // through the API, a human types bare ones here, both render.
+//
+// The editor only ever touches what you change: it posts the rows AND the
+// originals it rendered from, and the action sends a per-key patch (see
+// actions.ts). Structured values (an object with no scalar `value`) are
+// shown read-only and are not editable here — round-tripping them through
+// a text box would flatten them to a string.
 
 export interface FactRow {
   key: string;
   value: string;
+  // The stored value, verbatim — what the patch's `expected` carries.
+  raw: unknown;
   source?: string | null;
   observed_on?: string | null;
   verified?: boolean;
+  // No scalar to edit: rendered, never editable here.
+  structured?: boolean;
 }
 
 function labelFor(key: string): string {
@@ -37,9 +47,12 @@ function SaveButton() {
 }
 
 export function FactsEditor({ assetId, initial }: { assetId: string; initial: FactRow[] }) {
+  const editable = initial.filter((f) => !f.structured);
+  const structured = initial.filter((f) => f.structured);
+  const original = Object.fromEntries(editable.map((f) => [f.key, f.raw]));
   const [editing, setEditing] = useState(false);
   const [rows, setRows] = useState<Array<{ key: string; value: string }>>(
-    initial.map(({ key, value }) => ({ key, value })),
+    editable.map(({ key, value }) => ({ key, value })),
   );
   const [state, formAction] = useActionState<SaveResult | null, FormData>(
     async (prev, formData) => {
@@ -60,10 +73,12 @@ export function FactsEditor({ assetId, initial }: { assetId: string; initial: Fa
             <div key={f.key} className="flex items-baseline justify-between gap-3 py-1.5 border-b border-line/60 last:border-b-0">
               <span className="font-mono text-[10px] uppercase tracking-[0.04em] text-ink-3 shrink-0">{labelFor(f.key)}</span>
               <span className="text-right min-w-0">
-                <span className="font-sans text-[13px] text-ink break-words">{f.value}</span>
-                {(f.source || f.observed_on || f.verified) && (
+                <span className={`font-sans text-[13px] text-ink break-words ${f.structured ? 'font-mono text-[11px]' : ''}`}>{f.value}</span>
+                {(f.source || f.observed_on || f.verified || f.structured) && (
                   <span className="block font-mono text-[9px] text-ink-4">
-                    {[f.verified ? '✓ verified' : null, f.source, f.observed_on].filter(Boolean).join(' · ')}
+                    {f.structured
+                      ? 'structured · edit via API'
+                      : [f.verified ? '✓ verified' : null, f.source, f.observed_on].filter(Boolean).join(' · ')}
                   </span>
                 )}
               </span>
@@ -93,6 +108,7 @@ export function FactsEditor({ assetId, initial }: { assetId: string; initial: Fa
     <form action={formAction} className="flex flex-col gap-2">
       <input type="hidden" name="asset_id" value={assetId} />
       <input type="hidden" name="facts" value={JSON.stringify(rows)} />
+      <input type="hidden" name="original" value={JSON.stringify(original)} />
       <datalist id="fact-keys">
         {suggestions.map((k) => (
           <option key={k} value={k}>{ASSET_PROFILE_LABELS[k]}</option>
@@ -126,12 +142,17 @@ export function FactsEditor({ assetId, initial }: { assetId: string; initial: Fa
       <button type="button" onClick={add} className="self-start font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3 hover:text-ink-2">
         + fact
       </button>
+      {structured.length > 0 && (
+        <p className="font-mono text-[9px] uppercase tracking-[0.06em] text-ink-4">
+          Not editable here: {structured.map((f) => labelFor(f.key)).join(', ')} (structured — edit via API).
+        </p>
+      )}
       <div className="flex items-center gap-3 mt-1">
         <SaveButton />
         <button
           type="button"
           onClick={() => {
-            setRows(initial.map(({ key, value }) => ({ key, value })));
+            setRows(editable.map(({ key, value }) => ({ key, value })));
             setEditing(false);
           }}
           className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3 hover:text-ink-2"
@@ -141,7 +162,7 @@ export function FactsEditor({ assetId, initial }: { assetId: string; initial: Fa
       </div>
       {state && !state.ok && <p role="alert" className="font-sans text-[12px] text-accent">{state.error}</p>}
       <p className="font-mono text-[9px] uppercase tracking-[0.06em] text-ink-4">
-        Editing a fact the agent recorded replaces its provenance.
+        Only what you change is saved. Editing a fact the agent recorded replaces its provenance.
       </p>
     </form>
   );

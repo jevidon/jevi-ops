@@ -20,6 +20,7 @@ import { AssetForm } from '../../maintenance/asset-form';
 import { dataLabel, dueDateLabel, meterLabel, statusLabel } from '../../maintenance/format';
 import type { DomainOption } from '../../maintenance/item-form';
 import { assignAssetDomainAction } from './actions';
+import { isStructuredFact, renderFact } from './facts';
 import { FactsEditor, type FactRow } from './facts-editor';
 import { ServiceSchedule } from './service-schedule';
 
@@ -31,14 +32,22 @@ import { ServiceSchedule } from './service-schedule';
 // domain assignment, and the hero photo. Assigned assets trail their
 // domain in the topbar; unassigned ones trail Maintenance and carry an
 // "Assign to a domain" prompt — assignment is what promotes an asset into
-// a domain, and nothing else changes.
+// a domain (cards, bands, the board); its upkeep reaches Inbox and
+// attention regardless.
+//
+// SCOPE: every count, prompt, and pill on this page comes from the items
+// the API marks `tracked` — the same predicate the Work card uses — so the
+// card and the page can never disagree. Paused items and a non-active
+// asset are shown, not counted.
 
 const LIFECYCLE_NOTE: Record<string, string | null> = {
   active: null,
-  stored: 'Stored — schedules paused, history kept.',
-  sold: 'Sold — history kept for the record.',
-  archived: 'Archived.',
+  stored: 'Stored — schedules paused; nothing here counts or prompts until it is active again. History kept.',
+  sold: 'Sold — history kept for the record; schedules are paused.',
+  archived: 'Archived — history kept; schedules are paused.',
 };
+
+const WORKSHOP_POLICIES = new Set(['interval', 'on_condition']);
 
 export default async function AssetPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -52,7 +61,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
     if (detailRes.reason instanceof ApiError && detailRes.reason.status === 404) notFound();
     throw detailRes.reason;
   }
-  const { asset, domain, readings, items, projects, cost_ytd, today, meter_stale_days } = detailRes.value;
+  const { asset, domain, latest_reading: latest, readings, items, projects, cost_ytd, today, meter_stale_days } = detailRes.value;
   const domains: DomainOption[] =
     domainsRes.status === 'fulfilled' ? domainsRes.value.domains.map(({ id: did, name }) => ({ id: did, name })) : [];
 
@@ -70,34 +79,48 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
   // Projects the board doesn't carry (paused-but-unassigned, done): plain rows.
   const otherProjects = projects.filter((p) => !cardIds.has(p.id));
 
+  const assetActive = asset.lifecycle === 'active';
   const live = readings.filter((r) => !r.voided_at);
-  const latest = live[0] ?? null;
   const readingAge = latest ? daysBetween(latest.recorded_on, today) : null;
+  const readingStale = assetActive && asset.meter_unit != null && readingAge != null && readingAge > meter_stale_days;
 
-  const due = items.filter((i) => i.due_state?.status === 'overdue' || i.due_state?.status === 'due');
-  const soon = items.filter((i) => i.due_state?.status === 'due_soon');
-  const unknown = items.filter((i) => i.due_state && i.due_state.data !== 'complete');
+  // Only tracked items count, prompt, or colour the pill.
+  const tracked = items.filter((i) => i.tracked !== false);
+  const paused = items.filter((i) => i.tracked === false);
+  const due = tracked.filter((i) => i.due_state?.status === 'overdue' || i.due_state?.status === 'due');
+  const soon = tracked.filter((i) => i.due_state?.status === 'due_soon');
+  const unknown = tracked.filter((i) => i.due_state && i.due_state.data !== 'complete');
   const DUE_RANK = { ok: 0, due_soon: 1, due: 2, overdue: 3 } as const;
   let worst: keyof typeof DUE_RANK | null = null;
-  for (const i of items) {
+  for (const i of tracked) {
     const s = i.due_state?.status;
     if (s && (worst == null || DUE_RANK[s] > DUE_RANK[worst])) worst = s;
   }
-  const urgency: Urgency = card?.urgency ?? maintenanceUrgency(worst, projectCards.length + otherProjects.length > 0);
+  const urgency: Urgency = !assetActive
+    ? 'quiet'
+    : card?.urgency ?? maintenanceUrgency(worst, projectCards.length + otherProjects.length > 0);
   const color = domain ? domainColor(domain.name) : null;
   const unit = asset.meter_unit;
   const lifecycleNote = LIFECYCLE_NOTE[asset.lifecycle] ?? null;
 
-  // Facts (metadata) — bare scalars or rich {value, source, observed_on, verified}.
+  // The batch is a suggestion: workshop jobs (services, inspections) plan
+  // together; renewals (rego, WoF, RUC) are errands with their own paths.
+  const window = [...due, ...soon];
+  const workshop = window.filter((i) => WORKSHOP_POLICIES.has(i.policy));
+  const renewals = window.filter((i) => !WORKSHOP_POLICIES.has(i.policy));
+
+  // Facts (metadata) — bare scalars, rich {value, source, observed_on,
+  // verified}, or structured objects (rendered, not editable).
   const facts: FactRow[] = Object.entries(asset.metadata ?? {}).map(([key, raw]) => {
-    const v = factValue(raw);
     const rich = raw && typeof raw === 'object' ? (raw as { source?: string | null; observed_on?: string | null; verified?: boolean }) : null;
     return {
       key,
-      value: v == null ? (typeof raw === 'object' ? JSON.stringify(raw) : String(raw)) : String(v),
+      value: renderFact(raw),
+      raw,
       source: rich?.source ?? null,
       observed_on: rich?.observed_on ?? null,
       verified: rich?.verified ?? false,
+      structured: isStructuredFact(raw),
     };
   });
   const fact = (k: string) => {
@@ -114,6 +137,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
 
   const hero = asset.attachments?.[0] ?? null;
   const year = today.slice(0, 4);
+  const hasNextUp = assetActive && (due.length > 0 || soon.length > 0 || unknown.length > 0 || readingStale);
 
   return (
     <div>
@@ -131,12 +155,12 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
         }
         name={asset.name}
         color={color}
-        state={<Pill state={urgency}>{card?.worst === 'due_soon' || (!card && worst === 'due_soon') ? 'Due soon' : undefined}</Pill>}
+        state={<Pill state={urgency}>{assetActive && (card?.worst === 'due_soon' || (!card && worst === 'due_soon')) ? 'Due soon' : undefined}</Pill>}
         actions={
           <>
             <ActionButton href={`/maintenance/new?asset_id=${asset.id}`}>＋ Item</ActionButton>
             <ActionButton href="#projects">＋ Project</ActionButton>
-            {unit && <ActionButton href="#meter">Log reading</ActionButton>}
+            {unit && assetActive && <ActionButton href="#meter">Log reading</ActionButton>}
             <EditDrawer title="Edit asset">
               <AssetForm asset={asset} domains={domains} hasReadings={readings.length > 0} />
               <div className="mt-8 pt-6 border-t border-line">
@@ -166,13 +190,14 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
       <StatStrip>
         <Stat
           label="Maintenance"
-          value={due.length}
-          unit={due.length === 1 ? 'due' : 'due'}
-          tone={due.length > 0 ? 'accent' : undefined}
+          value={assetActive ? due.length : '—'}
+          unit={assetActive ? 'due' : 'paused'}
+          tone={assetActive && due.length > 0 ? 'accent' : undefined}
           sub={[
-            soon.length > 0 ? `${soon.length} due soon` : null,
-            `${items.length} item${items.length === 1 ? '' : 's'}`,
-            unknown.length > 0 ? `${unknown.length} need a reading` : null,
+            assetActive && soon.length > 0 ? `${soon.length} due soon` : null,
+            `${tracked.length} tracked`,
+            paused.length > 0 ? `${paused.length} paused` : null,
+            assetActive && unknown.length > 0 ? `${unknown.length} need a reading` : null,
           ].filter(Boolean).join(' · ')}
         />
         {unit ? (
@@ -180,7 +205,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
             label="Meter"
             value={latest ? latest.reading.toLocaleString('en-US') : '—'}
             unit={unit}
-            tone={readingAge != null && readingAge > meter_stale_days ? 'warn' : undefined}
+            tone={readingStale ? 'warn' : undefined}
             sub={latest ? `read ${latest.recorded_on} · ${readingAge === 0 ? 'today' : `${readingAge}d ago`}` : 'no readings yet'}
           />
         ) : (
@@ -205,14 +230,20 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
       <DetailBody
         main={
           <>
+            {lifecycleNote && (
+              <p className="mt-0 mb-5 px-3 py-2 border border-dashed border-line-strong font-sans text-[12.5px] text-ink-3">
+                {lifecycleNote}
+              </p>
+            )}
+
             {/* Next up — the decision block, above everything: what's overdue,
                 what's coming, what the schedule can't evaluate yet. */}
-            {(due.length > 0 || soon.length > 0 || unknown.length > 0 || (unit && readingAge != null && readingAge > meter_stale_days)) && (
+            {hasNextUp && (
               <DetailSection label="Next up" className="mt-0">
                 <ul className="border-t border-line/40">
                   {due.map((i) => <NextUpRow key={i.id} item={i} today={today} />)}
                   {soon.map((i) => <NextUpRow key={i.id} item={i} today={today} />)}
-                  {unit && readingAge != null && readingAge > meter_stale_days && (
+                  {readingStale && unit && (
                     <li className="py-2 border-b border-line/40 flex items-baseline justify-between gap-3">
                       <span className="font-sans text-[14px] text-ink">
                         Log a {unit} reading
@@ -230,7 +261,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
                           <span className="ml-2 font-mono text-[10px] text-ink-3">{dataLabel(i)}</span>
                         </span>
                         <Link
-                          href={i.due_state?.data === 'needs_baseline' ? `/maintenance/${i.id}` : '#meter'}
+                          href={i.due_state?.data === 'needs_baseline' ? `/maintenance/${i.id}#baseline` : '#meter'}
                           className="font-mono text-[10px] uppercase tracking-[0.08em] text-accent hover:text-ink shrink-0"
                         >
                           {i.due_state?.data === 'needs_baseline' ? 'Set a baseline →' : 'Log a reading →'}
@@ -238,11 +269,17 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
                       </li>
                     ))}
                 </ul>
-                {due.length + soon.length >= 2 && (
+                {workshop.length >= 2 && (
                   <p className="mt-3 font-sans text-[12.5px] text-ink-3">
-                    <span className="font-mono text-[9.5px] uppercase tracking-[0.08em] text-ink-3 mr-2">Next service batch</span>
-                    {[...due, ...soon].map((i) => i.name).join(' · ')}
-                    <span className="text-ink-4"> — everything inside its lead window; one trip.</span>
+                    <span className="font-mono text-[9.5px] uppercase tracking-[0.08em] text-ink-3 mr-2">Plan together</span>
+                    {workshop.map((i) => i.name).join(' · ')}
+                    <span className="text-ink-4"> — inside their lead windows; a suggestion, grouped by who does the work.</span>
+                  </p>
+                )}
+                {renewals.length > 0 && (
+                  <p className="mt-1.5 font-sans text-[12.5px] text-ink-3">
+                    <span className="font-mono text-[9.5px] uppercase tracking-[0.08em] text-ink-3 mr-2">Renewals due</span>
+                    {renewals.map((i) => i.name).join(' · ')}
                   </p>
                 )}
               </DetailSection>
@@ -250,15 +287,15 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
 
             <DetailSection
               label="Service schedule"
-              count={items.length}
+              count={tracked.length}
               action={
                 <Link href={`/maintenance/new?asset_id=${asset.id}`} className="font-mono text-[10px] uppercase tracking-wider text-accent hover:text-ink transition-colors">
                   ＋ Item
                 </Link>
               }
-              className={due.length > 0 || soon.length > 0 || unknown.length > 0 ? '' : 'mt-0'}
+              className={hasNextUp || lifecycleNote ? '' : 'mt-0'}
             >
-              <ServiceSchedule items={items} today={today} unit={unit} />
+              <ServiceSchedule items={items} today={today} unit={unit} readOnly={!assetActive} />
             </DetailSection>
 
             <DetailSection label="Projects" count={projectCards.length + otherProjects.length}>
@@ -287,29 +324,31 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
             {unit && (
               <DetailSection label={`${unit} log`} count={live.length}>
                 <div id="meter" />
-                <ActionForm
-                  action={addReadingAction}
-                  hidden={{ asset_id: asset.id }}
-                  eventKey
-                  submit="Log"
-                  pendingLabel="Logging…"
-                  className="flex flex-wrap items-end gap-3 mb-4"
-                >
-                  <label className="flex flex-col gap-1">
-                    <span className="font-mono text-[9px] uppercase tracking-[0.08em] text-ink-3">Reading</span>
-                    <input type="number" name="reading" min="0" step="any" required placeholder={latest ? String(latest.reading) : ''}
-                      className="w-32 border border-line bg-surface px-2 py-1.5 font-sans text-[13px] text-ink" />
-                  </label>
-                  <label className="flex flex-col gap-1">
-                    <span className="font-mono text-[9px] uppercase tracking-[0.08em] text-ink-3">On</span>
-                    <input type="date" name="recorded_on" defaultValue={today} max={today}
-                      className="border border-line bg-surface px-2 py-1.5 font-sans text-[13px] text-ink" />
-                  </label>
-                  <label className="flex items-center gap-2 pb-2 font-sans text-[12px] text-ink-3">
-                    <input type="checkbox" name="allow_decrease" className="accent-accent" />
-                    meter replaced
-                  </label>
-                </ActionForm>
+                {assetActive && (
+                  <ActionForm
+                    action={addReadingAction}
+                    hidden={{ asset_id: asset.id }}
+                    eventKey
+                    submit="Log"
+                    pendingLabel="Logging…"
+                    className="flex flex-wrap items-end gap-3 mb-4"
+                  >
+                    <label className="flex flex-col gap-1">
+                      <span className="font-mono text-[9px] uppercase tracking-[0.08em] text-ink-3">Reading</span>
+                      <input type="number" name="reading" min="0" step="any" required placeholder={latest ? String(latest.reading) : ''}
+                        className="w-32 border border-line bg-surface px-2 py-1.5 font-sans text-[13px] text-ink" />
+                    </label>
+                    <label className="flex flex-col gap-1">
+                      <span className="font-mono text-[9px] uppercase tracking-[0.08em] text-ink-3">On</span>
+                      <input type="date" name="recorded_on" defaultValue={today} max={today}
+                        className="border border-line bg-surface px-2 py-1.5 font-sans text-[13px] text-ink" />
+                    </label>
+                    <label className="flex items-center gap-2 pb-2 font-sans text-[12px] text-ink-3">
+                      <input type="checkbox" name="allow_decrease" className="accent-accent" />
+                      meter replaced
+                    </label>
+                  </ActionForm>
+                )}
                 {live.length === 0 ? (
                   <p className="font-sans text-[13px] text-ink-3 italic">No readings yet — meter-based schedules stay dark until one lands.</p>
                 ) : (
@@ -320,7 +359,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
                       </span>
                       <span className="font-mono text-[11px] tabular-nums text-ink-3">{r.recorded_on}</span>
                       <span className="font-mono text-[9px] uppercase tracking-[0.05em] text-ink-3 ml-auto">{r.voided_at ? 'voided' : r.source}</span>
-                      {!r.voided_at && (
+                      {!r.voided_at && assetActive && (
                         <ActionForm action={voidReadingAction} hidden={{ asset_id: asset.id, reading_id: r.id }} submit="void" variant="quiet" pendingLabel="…"
                           className="opacity-60 group-hover:opacity-100 transition-opacity" />
                       )}
@@ -351,17 +390,17 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
               <KV k="Lifecycle" v={asset.lifecycle} />
               {unit && <KV k="Readings" v={`every ${meter_stale_days} days`} />}
               <KV k="Created" v={asset.created_at.slice(0, 10)} />
-              {lifecycleNote && <p className="mt-2 font-sans text-[12px] text-ink-3 italic">{lifecycleNote}</p>}
               {/* Assignment — the one switch that promotes the asset into a
-                  domain (Assets band + Work board) or drops it back to
-                  maintenance-only. */}
+                  domain (Assets band + Work board) or drops it back to the
+                  Maintenance list. Awareness is unaffected either way. */}
               <div className="mt-3 pt-3 border-t border-line/60">
                 <div className="font-mono text-[9px] uppercase tracking-[0.08em] text-ink-4 mb-1">
                   {domain ? 'Domain' : 'Assign to a domain'}
                 </div>
                 {!domain && (
                   <p className="font-sans text-[12px] text-ink-3 mb-2">
-                    Unassigned — this asset shows only under Maintenance. Assigning it puts it in the domain&rsquo;s Assets band and on the board.
+                    Unassigned — listed under Maintenance only. Its schedules still raise tasks in Inbox and attention;
+                    assigning it puts it in the domain&rsquo;s Assets band and on the board, and routes that upkeep there.
                   </p>
                 )}
                 <ActionForm

@@ -254,6 +254,56 @@ export function maintenanceDueState(params: {
   return { status, trigger, days_until, meter_remaining, data, reading_age_days };
 }
 
+// Is this item's schedule being tracked right now? One scope for every
+// consumer — the Work card, the asset page, the sweep, the attention rules —
+// so a paused item or a stored car can never be "0 tracked" on the card and
+// "1 overdue" on the page. Paused items and non-active assets keep their
+// schedules and history; they just stop counting and stop prompting.
+export function maintenanceTracked(
+  item: { active: boolean },
+  asset: { lifecycle: string } | null | undefined,
+): boolean {
+  return item.active && (asset?.lifecycle ?? 'active') === 'active';
+}
+
+// The generated task's title. One convention, so the sweep and the
+// reconciler agree on what "still the machine-written title" means when
+// deciding whether a task was touched by a person.
+export function maintenanceTaskTitle(item: { name: string }, asset: { name: string } | null | undefined): string {
+  return asset ? `${item.name} — ${asset.name}` : item.name;
+}
+
+// The evidence a completion MUST carry, per policy. An 'interval' service
+// needs nothing beyond the date; an expiry renewal without the newly issued
+// expiry, a prepaid licence without its end distance, or an inspection with
+// neither a finding nor a next review would silently erase the obligation.
+// Enforced in the completion lib, so the task checkbox and the agent API are
+// held to the same standard as the form.
+export function missingCompletionFields(
+  policy: MaintenancePolicy | string,
+  event: {
+    completedOn: string;
+    issuedUntil?: string | null;
+    purchasedTo?: number | null;
+    finding?: string | null;
+    nextReviewOn?: string | null;
+    nextReviewMeter?: number | null;
+  },
+): string[] {
+  switch (policy) {
+    case 'expiry':
+      return event.issuedUntil && event.issuedUntil > event.completedOn ? [] : ['issued_until'];
+    case 'prepaid_meter':
+      return event.purchasedTo != null ? [] : ['purchased_to'];
+    case 'on_condition':
+      return event.finding?.trim() || event.nextReviewOn || event.nextReviewMeter != null
+        ? []
+        : ['finding', 'next_review_on', 'next_review_meter'];
+    default:
+      return [];
+  }
+}
+
 // Visibility/ownership policy in one place: an item belongs to its own
 // domain if set, else its asset's domain, else Inbox. Awareness (tasks,
 // attention) always flows — domain VISIBILITY is what assignment unlocks.

@@ -110,6 +110,7 @@ export async function completeItemAction(
       ...(completedOn ? { completed_on: completedOn } : {}),
       ...(eventKey ? { event_key: eventKey } : {}),
       meter: optionalNumber(formData, 'meter'),
+      allow_decrease: formData.get('allow_decrease') === 'on',
       notes: optionalString(formData, 'notes'),
       cost: optionalNumber(formData, 'cost'),
       issued_until: optionalString(formData, 'issued_until'),
@@ -140,6 +141,18 @@ export async function createItemAction(
   }
   const asset_id = optionalString(formData, 'asset_id');
   const domain_id = optionalString(formData, 'domain_id');
+  // Seed evidence and pins are sent ONLY when filled in. To the API an
+  // explicit null is an intentional "clear this axis" — posting one for a
+  // blank input would erase the date it just derived from the baseline.
+  const seed: Record<string, string | number> = {};
+  const lastOn = optionalString(formData, 'last_completed_on');
+  const lastMeter = optionalNumber(formData, 'last_completed_meter');
+  const pinDate = optionalString(formData, 'next_due_date');
+  const pinMeter = optionalNumber(formData, 'next_due_meter');
+  if (lastOn) seed.last_completed_on = lastOn;
+  if (lastMeter != null) seed.last_completed_meter = lastMeter;
+  if (pinDate) seed.next_due_date = pinDate;
+  if (pinMeter != null) seed.next_due_meter = pinMeter;
   let created;
   try {
     created = await maintenanceApi.create({
@@ -150,16 +163,33 @@ export async function createItemAction(
       policy,
       system: optionalString(formData, 'system'),
       ...cadence,
-      last_completed_on: optionalString(formData, 'last_completed_on'),
-      last_completed_meter: optionalNumber(formData, 'last_completed_meter'),
-      next_due_date: optionalString(formData, 'next_due_date'),
-      next_due_meter: optionalNumber(formData, 'next_due_meter'),
+      ...seed,
     });
   } catch (err) {
     return shapeError(err);
   }
   revalidateAll(undefined, asset_id ?? undefined);
   redirect(`/maintenance/${created.item.id}`);
+}
+
+// Seed evidence for an existing item — "last done on … at …" — creating or
+// editing its baseline log. Never a completion, never a reading.
+export async function setBaselineAction(
+  _prev: SaveResult | null,
+  formData: FormData,
+): Promise<SaveResult> {
+  const id = String(formData.get('id') ?? '');
+  const completedOn = optionalString(formData, 'completed_on');
+  if (!id) return { ok: false, error: 'Missing item.' };
+  if (!completedOn) return { ok: false, error: 'Enter the date it was last done.' };
+  let res;
+  try {
+    res = await maintenanceApi.setBaseline(id, { completed_on: completedOn, meter: optionalNumber(formData, 'meter') });
+  } catch (err) {
+    return shapeError(err);
+  }
+  revalidateAll(id, res.item.asset_id ?? undefined);
+  return { ok: true, message: 'Baseline saved — the schedule anchors here.' };
 }
 
 export async function updateItemAction(
@@ -315,8 +345,9 @@ export async function addReadingAction(
   if (reading == null || reading < 0) return { ok: false, error: 'Enter a reading.' };
   const recordedOn = optionalString(formData, 'recorded_on');
   const eventKey = optionalString(formData, 'event_key');
+  let res;
   try {
-    await assetsApi.addReading(assetId, {
+    res = await assetsApi.addReading(assetId, {
       reading,
       ...(recordedOn ? { recorded_on: recordedOn } : {}),
       ...(eventKey ? { event_key: eventKey } : {}),
@@ -327,7 +358,9 @@ export async function addReadingAction(
     return shapeError(err);
   }
   revalidateAll(undefined, assetId);
-  return { ok: true, message: 'Reading logged.' };
+  // logged:false = the API matched an earlier event with this key — a
+  // retry or double-tap. Say so rather than claiming a second reading.
+  return { ok: true, message: res.logged ? 'Reading logged.' : 'Already logged — that submission was recorded earlier.' };
 }
 
 export async function voidReadingAction(

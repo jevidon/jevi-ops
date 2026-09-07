@@ -33,17 +33,25 @@ export function CompleteForm({ item, today, className = '' }: { item: Maintenanc
       </label>
 
       {metered && policy !== 'on_condition' && (
-        <label className="flex flex-col gap-1">
-          <span className={labelCls}>{unit} reading</span>
-          <input
-            type="number"
-            name="meter"
-            min="0"
-            step="any"
-            placeholder={item.latest_reading != null ? String(item.latest_reading) : ''}
-            className={`${inputCls} w-28`}
-          />
-        </label>
+        <>
+          <label className="flex flex-col gap-1">
+            <span className={labelCls}>{unit} reading</span>
+            <input
+              type="number"
+              name="meter"
+              min="0"
+              step="any"
+              placeholder={item.latest_reading != null ? String(item.latest_reading) : ''}
+              className={`${inputCls} w-28`}
+            />
+          </label>
+          {/* A completion's meter is a reading: it may not go backwards
+              unless the meter itself was replaced. */}
+          <label className="flex items-center gap-2 pb-2 font-sans text-[12px] text-ink-3" title="Allow a lower reading than the last one — only if the meter was replaced.">
+            <input type="checkbox" name="allow_decrease" className="accent-accent" />
+            meter replaced
+          </label>
+        </>
       )}
 
       {policy === 'expiry' && (

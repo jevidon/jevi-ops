@@ -66,7 +66,7 @@ describe('runMaintenanceSweep', () => {
 
     await addReading(asset.id, 105200, await today());
     const res = await runMaintenanceSweep(getDb());
-    expect(res.pulled_forward).toBe(1);
+    expect(res.retargeted).toBe(1);
     expect((await getTask(task!.id))?.due_date).toBe(await today());
   });
 
