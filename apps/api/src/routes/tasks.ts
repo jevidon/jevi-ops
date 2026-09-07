@@ -227,7 +227,12 @@ export const taskRoutes: FastifyPluginAsync = async (app) => {
 
       const ruleRaw = existing?.recurrence_rule;
       if (ruleRaw && isRecurrencePattern(ruleRaw)) {
-        const todayIso = new Date().toISOString().slice(0, 10);
+        // App-tz today, not UTC — a UTC date is already "tomorrow" for
+        // evening completions in a behind-UTC zone, which advances the
+        // roll-forward one occurrence too far (and one short in the
+        // ahead-of-UTC morning case). Same convention as waiting_since
+        // below and every other date consumer.
+        const todayIso = todayInTz(await getAppTz());
         const next = nextDueDate({
           currentDue: existing?.due_date ?? null,
           rule: ruleRaw,
