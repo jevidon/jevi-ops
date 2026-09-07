@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { MAINTENANCE_POLICIES } from '../maintenance.js';
+import { docFields, docUpdateFields } from './doc.js';
 import { AttachmentSchema } from './note.js';
 
 // Maintenance module (migrations 0047 + 0048) — wire shapes for /api/assets
@@ -92,6 +93,8 @@ export const AssetSchema = z.object({
   lifecycle: AssetLifecycleSchema,
   // Photos (0049): StoredAttachment[]; [0] is the hero.
   attachments: z.array(AttachmentSchema).default([]),
+  // Markdown overview + its version (0050).
+  ...docFields,
   archived_at: z.string().datetime({ offset: true }).nullable().optional(),
   created_at: z.string().datetime({ offset: true }),
   updated_at: z.string().datetime({ offset: true }),
@@ -128,6 +131,7 @@ export const UpdateAssetSchema = CreateAssetSchema.partial().extend({
   // Preferred over whole-object `metadata` (which stays for imports and is
   // last-writer-wins): see MetadataPatchSchema.
   metadata_patch: MetadataPatchSchema.optional(),
+  ...docUpdateFields,
 });
 
 export const MeterReadingSchema = z.object({

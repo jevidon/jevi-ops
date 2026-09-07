@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { docFields, docUpdateFields } from './doc.js';
 
 export const FailurePatternSchema = z.object({
   rule: z.string(),
@@ -45,6 +46,8 @@ export const DomainSchema = z.object({
   // Added by migration 0033. Candidate render awaiting Keep/Discard on
   // the domain settings page — never shown on the board.
   illustration_draft: DomainIllustrationSchema.nullable().optional(),
+  // Markdown overview + its version (0050).
+  ...docFields,
   created_at: z.string().datetime({ offset: true }),
   updated_at: z.string().datetime({ offset: true }),
 });
@@ -79,4 +82,5 @@ export const UpdateDomainSchema = z.object({
   stale_enabled: z.boolean().optional(),
   stale_days: z.number().int().positive().nullable().optional(),
   parked: z.boolean().optional(),
+  ...docUpdateFields,
 });

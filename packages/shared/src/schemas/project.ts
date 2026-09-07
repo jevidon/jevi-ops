@@ -1,6 +1,10 @@
 import { z } from 'zod';
+import { docFields, docUpdateFields } from './doc.js';
 
-export const ProjectStatusSchema = z.enum(['active', 'paused', 'done', 'archived']);
+// 'idea' (0050): a candidate grouped under an asset or a domain that is not
+// yet work — off the Work board and attention until promoted (a status
+// change; notes, document, and attachments come along).
+export const ProjectStatusSchema = z.enum(['idea', 'active', 'paused', 'done', 'archived']);
 export const ProjectTypeSchema = z.enum(['client', 'internal', 'content']);
 export const EngagementTypeSchema = z.enum(['project', 'retainer']);
 export type EngagementType = z.infer<typeof EngagementTypeSchema>;
@@ -48,6 +52,8 @@ export const ProjectSchema = z.object({
   retainer_anchor_day: z.number().int().min(1).max(31).nullable().optional(),
   // The asset this work groups under (0049) — the asset is the area.
   asset_id: z.string().uuid().nullable().optional(),
+  // Markdown overview + its version (0050).
+  ...docFields,
   completed_at: z.string().datetime({ offset: true }).nullable().optional(),
   created_at: z.string().datetime({ offset: true }),
   updated_at: z.string().datetime({ offset: true }),
@@ -74,9 +80,13 @@ export const CreateProjectSchema = z.object({
   retainer_anchor_day: z.number().int().min(1).max(31).nullable().optional(),
   // With asset_id and no domain_id, the server inherits the asset's domain.
   asset_id: z.string().uuid().nullable().optional(),
+  // Create as an idea (0050) or, the default, active.
+  status: z.enum(['idea', 'active']).optional(),
+  doc_md: z.string().max(200_000).nullable().optional(),
 });
 
 export const UpdateProjectSchema = CreateProjectSchema.partial().extend({
   status: ProjectStatusSchema.optional(),
   hours_logged: z.number().optional(),
+  ...docUpdateFields,
 });

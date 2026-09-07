@@ -39,6 +39,7 @@ import { briefingRoutes } from './routes/briefing.js';
 import { widgetRoutes } from './routes/widget.js';
 import { immichRoutes } from './routes/immich.js';
 import { maintenanceRoutes } from './routes/maintenance.js';
+import { docRoutes } from './routes/docs.js';
 
 export async function buildServer() {
   const app = Fastify({
@@ -124,6 +125,7 @@ export async function buildServer() {
   await app.register(widgetRoutes);
   await app.register(immichRoutes);
   await app.register(maintenanceRoutes);
+  await app.register(docRoutes);
 
   app.get('/', async () => ({
     name: 'jevi-ops/api',

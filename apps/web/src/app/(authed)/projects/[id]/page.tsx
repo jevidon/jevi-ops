@@ -23,6 +23,9 @@ import { ContactsSection } from './contacts-section';
 import { ConversationTimeline } from '@/components/conversations/ConversationTimeline';
 import { LogConversationForm } from '@/components/conversations/LogConversationForm';
 import { QuickAddTask } from '@/components/QuickAddTask';
+import { DocPanel } from '@/components/doc/DocPanel';
+import { ActionForm } from '../../maintenance/action-form';
+import { promoteIdeaAction } from '../actions';
 
 // /projects/[id] — project detail (Detail Pages v2, Addendum 10 §6). Per-item
 // dashboard: header band + action buttons, a computed stat strip, a two-column
@@ -30,7 +33,7 @@ import { QuickAddTask } from '@/components/QuickAddTask';
 // relocated into the Edit drawer. Retainer and target-date variants differ only
 // in the stat strip and whether milestones show.
 
-const STATUS_LABELS: Record<string, string> = { active: 'Active', paused: 'Paused', done: 'Done', archived: 'Archived' };
+const STATUS_LABELS: Record<string, string> = { idea: 'Idea', active: 'Active', paused: 'Paused', done: 'Done', archived: 'Archived' };
 
 export default async function ProjectDetailPage({
   params,
@@ -158,6 +161,15 @@ export default async function ProjectDetailPage({
         actions={
           <>
             <PinButton targetType="project" targetId={project.id} path={`/projects/${project.id}`} />
+            {project.status === 'idea' && (
+              <ActionForm
+                action={promoteIdeaAction}
+                hidden={{ id: project.id, asset_id: project.asset?.id ?? '' }}
+                submit="Promote to project"
+                variant="ghost"
+                pendingLabel="Promoting…"
+              />
+            )}
             <ActionButton href={`/tasks/new?project_id=${project.id}&from=/projects/${project.id}`}>＋ Task</ActionButton>
             <ActionButton href="#log-work">＋ Log work</ActionButton>
             <ActionButton href="#conversations">＋ Conversation</ActionButton>
@@ -170,7 +182,7 @@ export default async function ProjectDetailPage({
                   description: project.description ?? '',
                   domain_id: project.domain_id ?? '',
                   type: (project.type as '' | 'client' | 'internal' | 'content') ?? '',
-                  status: project.status as 'active' | 'paused' | 'done' | 'archived',
+                  status: project.status as 'idea' | 'active' | 'paused' | 'done' | 'archived',
                   engagement_type: project.engagement_type ?? 'project',
                   kind: project.kind ?? 'project',
                   quoted_hours: project.quoted_hours != null ? String(project.quoted_hours) : '',
@@ -260,10 +272,26 @@ export default async function ProjectDetailPage({
       <DetailBody
         main={
           <>
+            {/* The overview document (0050) — the living page under the
+                blurb: specs, links, decisions, the story so far. */}
+            <DetailSection label="Overview" className="mt-0">
+              <DocPanel
+                entity="project"
+                id={project.id}
+                body={project.doc_md ?? null}
+                version={project.doc_version ?? 1}
+                promote={{ projectId: project.id, source: `overview of ${project.name}`, revalidate: `/projects/${project.id}` }}
+                emptyHint={
+                  project.status === 'idea'
+                    ? 'What is the idea, what would it take, why bother? Markdown — a checklist line can become a task once this is a project.'
+                    : 'The living page for this project — scope, decisions, links, a parts list. Markdown; a checklist line can become a task with → task.'
+                }
+              />
+            </DetailSection>
+
             <DetailSection
               label="Tasks"
               count={<>{openTasks.length} open{overdueCount > 0 && <span className="text-accent"> · {overdueCount} overdue</span>}{waitingTasks.length > 0 && <span> · {waitingTasks.length} waiting</span>}</>}
-              className="mt-0"
             >
               {/* Quick capture (Wave 2 #2) — title-only add into this
                   project; the ＋ buttons above stay the full-editor path. */}

@@ -51,6 +51,9 @@ create table if not exists stewardship_domains (
   last_shipped_at timestamptz,
   illustration jsonb,
   illustration_draft jsonb,
+  -- Markdown overview + optimistic-concurrency version (0050); history in doc_revisions.
+  doc_md text,
+  doc_version integer not null default 1,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -124,8 +127,9 @@ create table if not exists projects (
   name text not null,
   description text,
   domain_id uuid references stewardship_domains(id) on delete set null,
+  -- 'idea' (0050): a candidate grouped under an asset/domain, not yet work.
   status text not null default 'active' check (status in
-    ('active','paused','done','archived')),
+    ('idea','active','paused','done','archived')),
   type text check (type in ('client','internal','content')),
   -- The primary contact person (named client_id pre-0041 on migrated DBs).
   primary_contact_id uuid references people(id) on delete set null,
@@ -140,6 +144,9 @@ create table if not exists projects (
   -- Retainer cycle anchor day-of-month (migration 0038); null until set.
   retainer_anchor_day int check (retainer_anchor_day between 1 and 31),
   kind text not null default 'project' check (kind in ('project','area')),
+  -- Markdown overview + optimistic-concurrency version (0050); history in doc_revisions.
+  doc_md text,
+  doc_version integer not null default 1,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -1251,12 +1258,30 @@ create table if not exists assets (
     ('active','stored','sold','archived')),
   -- Photos (0049): StoredAttachment[] like notes/journal; [0] is the hero.
   attachments jsonb not null default '[]'::jsonb,
+  -- Markdown overview + optimistic-concurrency version (0050); history in doc_revisions.
+  doc_md text,
+  doc_version integer not null default 1,
   archived_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 
 create index if not exists idx_assets_attachments on assets using gin(attachments);
+
+-- Every saved version of an entity's doc_md (0050). No FK — polymorphic.
+create table if not exists doc_revisions (
+  id uuid primary key default gen_random_uuid(),
+  entity_type text not null check (entity_type in ('asset','project','domain')),
+  entity_id uuid not null,
+  version integer not null,
+  body text,
+  actor text,
+  created_at timestamptz not null default now(),
+  constraint doc_revisions_entity_version_unique unique (entity_type, entity_id, version)
+);
+
+create index if not exists idx_doc_revisions_entity
+  on doc_revisions(entity_type, entity_id, version desc);
 
 drop trigger if exists trg_assets_updated_at on assets;
 create trigger trg_assets_updated_at

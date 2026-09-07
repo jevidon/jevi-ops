@@ -19,6 +19,7 @@ import {
 import { getAppSettings } from '../lib/app-settings.js';
 import { clearAttentionForSource } from '../lib/attention.js';
 import { getDb } from '../lib/db.js';
+import { DocConflict, deleteDocRevisions, saveDoc } from '../lib/docs.js';
 import {
   MaintenanceConflict,
   MaintenanceNeedsDetails,
@@ -312,8 +313,20 @@ export const maintenanceRoutes: FastifyPluginAsync = async (app) => {
     const db = getDb();
     const ctx = await policyContext();
     const d = parsed.data;
+    const { actor } = provenance(req);
 
-    const result = await db.transaction(async (tx) => {
+    let result: Awaited<ReturnType<typeof patchAsset>>;
+    try {
+      result = await patchAsset();
+    } catch (err) {
+      if (err instanceof DocConflict) {
+        return reply.code(409).send({ error: 'doc_conflict', ...err.current, message: err.message });
+      }
+      throw err;
+    }
+
+    async function patchAsset() {
+    return db.transaction(async (tx) => {
       const [existing] = await tx.select().from(assets).where(eq(assets.id, req.params.id)).for('update');
       if (!existing) return { error: 404 as const };
 
@@ -350,7 +363,7 @@ export const maintenanceRoutes: FastifyPluginAsync = async (app) => {
         }
       }
 
-      const { attachments, metadata_patch, ...rest } = d;
+      const { attachments, metadata_patch, doc_md, doc_version, ...rest } = d;
       const update: Partial<typeof assets.$inferInsert> = { ...rest };
       // Zod's Attachment and the persisted StoredAttachment are the same shape
       // spelled twice (notes route precedent) — cast at the boundary.
@@ -379,8 +392,20 @@ export const maintenanceRoutes: FastifyPluginAsync = async (app) => {
         update.lifecycle = d.archived_at ? 'archived' : 'active';
       }
 
-      const [updated] = await tx.update(assets).set(update).where(eq(assets.id, existing.id)).returning();
+      // A doc-only or patch-only PATCH leaves no columns here; Drizzle
+      // refuses an empty set, and there is nothing to write anyway.
+      let [updated] = Object.keys(update).length > 0
+        ? await tx.update(assets).set(update).where(eq(assets.id, existing.id)).returning()
+        : [existing];
       if (!updated) return { error: 404 as const };
+
+      // The overview document (0050): versioned, revisioned, refused on a
+      // stale version — a DocConflict thrown here rolls the whole PATCH
+      // back and reaches the client as 409 doc_conflict.
+      if (doc_md !== undefined) {
+        const saved = await saveDoc(tx, { entityType: 'asset', id: existing.id, body: doc_md, expectedVersion: doc_version ?? null, actor });
+        if (saved) updated = { ...updated, doc_md: saved.doc_md, doc_version: saved.doc_version };
+      }
 
       const items = await tx
         .select({ id: maintenance_items.id, name: maintenance_items.name })
@@ -422,6 +447,7 @@ export const maintenanceRoutes: FastifyPluginAsync = async (app) => {
       }
       return { asset: updated };
     });
+    }
 
     if ('error' in result) {
       if (result.error === 404) return reply.code(404).send({ error: 'not_found' });
@@ -466,6 +492,7 @@ export const maintenanceRoutes: FastifyPluginAsync = async (app) => {
         .from(maintenance_items)
         .where(eq(maintenance_items.asset_id, existing.id));
       await reconcileGeneratedWork(tx, items.map((i) => i.id));
+      await deleteDocRevisions(tx, 'asset', existing.id);
       await tx.delete(assets).where(eq(assets.id, existing.id));
     });
     return { deleted: true };

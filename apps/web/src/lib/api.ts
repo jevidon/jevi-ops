@@ -216,10 +216,16 @@ export interface ProjectCreate {
   retainer_anchor_day?: number | null;
   // With asset_id and no domain_id, the server inherits the asset's domain.
   asset_id?: string | null;
+  // Create as an idea (0050) — a candidate, off the board until promoted.
+  status?: 'idea' | 'active';
+  doc_md?: string | null;
 }
 
-export interface ProjectUpdate extends Partial<ProjectCreate> {
-  status?: 'active' | 'paused' | 'done' | 'archived';
+export interface ProjectUpdate extends Partial<Omit<ProjectCreate, 'status'>> {
+  status?: 'idea' | 'active' | 'paused' | 'done' | 'archived';
+  // The overview document (0050): body + the version it was written against.
+  doc_md?: string | null;
+  doc_version?: number;
 }
 
 export const projectsApi = {
@@ -297,6 +303,9 @@ export interface DomainCreate {
 }
 
 export interface DomainUpdate {
+  // The overview document (0050): body + the version it was written against.
+  doc_md?: string | null;
+  doc_version?: number;
   name?: string;
   description?: string | null;
   fruit_definition?: string | null;
@@ -403,12 +412,15 @@ export const captureApi = {
 // storage folder. Alt text can be passed as ?alt= but most clients
 // just leave it null at upload time and let the user fill it in later.
 
+// Storage folder for an upload; 'assets' (0050) is the asset gallery.
+export type UploadPrefix = 'notes' | 'journal' | 'assets' | 'other';
+
 export const uploadsApi = {
   // The FormData carries the file and (optionally) `prefix` / `title_hint`
   // as additional fields. Passing prefix via query also works as a
   // fallback for old clients; the server prefers the form-field value
   // when both are present.
-  image: (formData: FormData, prefix: 'notes' | 'journal' | 'other' = 'other') =>
+  image: (formData: FormData, prefix: UploadPrefix = 'other') =>
     call<Attachment>(`/api/uploads/image?prefix=${prefix}`, {
       method: 'POST',
       body: formData,
@@ -909,16 +921,20 @@ export interface Asset {
   lifecycle: AssetLifecycle;
   // Photos (0049): StoredAttachment[]; [0] is the hero.
   attachments: Attachment[];
+  // Markdown overview + its version (0050).
+  doc_md?: string | null;
+  doc_version?: number;
   archived_at: string | null;
   created_at: string;
   updated_at: string;
 }
 
 // A project grouped under an asset, as the asset detail bundle carries it.
+// 'idea' (0050): a candidate, not yet work.
 export interface AssetProjectRow {
   id: string;
   name: string;
-  status: 'active' | 'paused' | 'done' | 'archived';
+  status: 'idea' | 'active' | 'paused' | 'done' | 'archived';
   kind: ProjectKind;
   color: string | null;
   target_date: string | null;
@@ -1093,6 +1109,9 @@ export const assetsApi = {
       notes: string | null;
       lifecycle: AssetLifecycle;
       archived_at: string | null;
+      attachments: Attachment[];
+      doc_md: string | null;
+      doc_version: number;
     }>,
   ) => api.patch<{ asset: Asset }>(`/api/assets/${id}`, body),
   remove: (id: string) => api.delete(`/api/assets/${id}`),

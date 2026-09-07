@@ -125,6 +125,39 @@ describe('maintenance create action (#5)', () => {
   });
 });
 
+describe('doc save action (0050)', () => {
+  const load = () =>
+    loadWebModule('components/doc/doc-actions.ts', {
+      ...baseMocks,
+      '@/lib/api': {
+        ApiError,
+        api: { get: (url: string) => call('GET', url) },
+        assetsApi: { update: (id: string, body: unknown) => call('PATCH', `/api/assets/${id}`, body) },
+        projectsApi: { update: (id: string, body: unknown) => call('PATCH', `/api/projects/${id}`, body) },
+        domainsApi: { update: (id: string, body: unknown) => call('PATCH', `/api/domains/${id}`, body) },
+        tasksApi: { create: (body: unknown) => call('POST', '/api/tasks', body) },
+      },
+    });
+  type Save = (input: { entity: 'asset' | 'project' | 'domain'; id: string; body: string; version: number }) => Promise<
+    { ok: true; doc_md: string | null; doc_version: number } | { ok: false; conflict: { doc_md: string | null; doc_version: number } } | { ok: false; error: string }
+  >;
+  type Promote = (input: { title: string; domainId?: string | null; source: string; revalidate: string }) => Promise<{ ok: boolean; taskId?: string }>;
+
+  it('saves against the version it read and surfaces a conflict as a typed result', async () => {
+    const asset = await createAsset({ name: 'Outback' });
+    const { saveDocAction, promoteChecklistLineAction } = load() as { saveDocAction: Save; promoteChecklistLineAction: Promote };
+    const first = await saveDocAction({ entity: 'asset', id: asset.id, body: '# Outback', version: 1 });
+    expect(first).toEqual({ ok: true, doc_md: '# Outback', doc_version: 2 });
+    const stale = await saveDocAction({ entity: 'asset', id: asset.id, body: 'mine', version: 1 });
+    expect(stale).toEqual({ ok: false, conflict: { doc_md: '# Outback', doc_version: 2 } });
+    const promoted = await promoteChecklistLineAction({ title: 'order the roof rack', domainId: null, source: 'overview of Outback', revalidate: `/assets/${asset.id}` });
+    expect(promoted.ok).toBe(true);
+    const task = await call<{ title: string; notes: string | null; domain_id: string }>('GET', `/api/tasks/${promoted.taskId}`);
+    expect(task.title).toBe('order the roof rack');
+    expect(task.notes).toBe('From the overview of Outback.');
+  });
+});
+
 describe('facts action (#1, #2)', () => {
   const load = () =>
     loadWebModule('app/(authed)/assets/[id]/actions.ts', {

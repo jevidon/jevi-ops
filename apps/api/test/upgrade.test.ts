@@ -14,7 +14,9 @@ import { adminUrl, devUrl } from './db-url.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const DB = 'jeviops_upgrade';
-const MIGRATIONS = ['0048_maintenance_hardening.sql', '0049_asset_area.sql'].map((f) => resolve(ROOT, 'infrastructure/migrations', f));
+const MIGRATIONS = ['0048_maintenance_hardening.sql', '0049_asset_area.sql', '0050_docs_ideas.sql'].map((f) =>
+  resolve(ROOT, 'infrastructure/migrations', f),
+);
 
 function upgradeUrl(): string {
   const u = new URL(devUrl());
@@ -105,6 +107,17 @@ describe('0047 → 0048 → 0049', () => {
     expect(idx!.n).toBe(3);
     const [settings] = await sql`select meter_stale_days from app_settings limit 1`;
     expect(settings!.meter_stale_days).toBe(14);
+
+    // 0050: docs + ideas.
+    const docCols = await sql`
+      select table_name from information_schema.columns
+      where column_name = 'doc_version' and table_name in ('assets', 'projects', 'stewardship_domains')`;
+    expect(docCols).toHaveLength(3);
+    const [docRev] = await sql`select count(*)::int as n from information_schema.tables where table_name = 'doc_revisions'`;
+    expect(docRev!.n).toBe(1);
+    const [idea] = await sql`insert into projects (name, domain_id, status) values ('Lift kit', ${domainA}, 'idea') returning status, doc_version`;
+    expect(idea!.status).toBe('idea');
+    expect(idea!.doc_version).toBe(1);
 
     // The (item, day) unique is gone: two same-day services are allowed.
     await sql`insert into maintenance_logs (item_id, completed_on, source, event_key) values (${withLog!.id}, '2026-03-01', 'manual', 'a'), (${withLog!.id}, '2026-03-01', 'manual', 'b')`;

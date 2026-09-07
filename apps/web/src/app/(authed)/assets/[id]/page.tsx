@@ -19,7 +19,10 @@ import { addReadingAction, deleteAssetAction, voidReadingAction } from '../../ma
 import { AssetForm } from '../../maintenance/asset-form';
 import { dataLabel, dueDateLabel, meterLabel, statusLabel } from '../../maintenance/format';
 import type { DomainOption } from '../../maintenance/item-form';
+import { DocPanel } from '@/components/doc/DocPanel';
+import { promoteIdeaAction } from '../../projects/actions';
 import { assignAssetDomainAction } from './actions';
+import { AssetGallery } from './asset-gallery';
 import { isStructuredFact, renderFact } from './facts';
 import { FactsEditor, type FactRow } from './facts-editor';
 import { ServiceSchedule } from './service-schedule';
@@ -76,8 +79,11 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
     }
   }
   const cardIds = new Set(projectCards.map((p) => p.id));
+  // Ideas (0050): candidates grouped under the asset — off the board until
+  // promoted, so they never ride in projectCards.
+  const ideas = projects.filter((p) => p.status === 'idea');
   // Projects the board doesn't carry (paused-but-unassigned, done): plain rows.
-  const otherProjects = projects.filter((p) => !cardIds.has(p.id));
+  const otherProjects = projects.filter((p) => !cardIds.has(p.id) && p.status !== 'idea');
 
   const assetActive = asset.lifecycle === 'active';
   const live = readings.filter((r) => !r.voided_at);
@@ -135,7 +141,6 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
     latest && unit ? `${latest.reading.toLocaleString('en-US')} ${unit}` : null,
   ].filter(Boolean);
 
-  const hero = asset.attachments?.[0] ?? null;
   const year = today.slice(0, 4);
   const hasNextUp = assetActive && (due.length > 0 || soon.length > 0 || unknown.length > 0 || readingStale);
 
@@ -285,6 +290,19 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
               </DetailSection>
             )}
 
+            {/* The overview document (0050) — the asset's living page, under
+                Next up (decisions first) and above the schedule. */}
+            <DetailSection label="Overview" className={hasNextUp || lifecycleNote ? '' : 'mt-0'}>
+              <DocPanel
+                entity="asset"
+                id={asset.id}
+                body={asset.doc_md ?? null}
+                version={asset.doc_version ?? 1}
+                promote={{ domainId: domain?.id ?? null, source: `overview of ${asset.name}`, revalidate: `/assets/${asset.id}` }}
+                emptyHint="The living page for this asset — specs, history, links, decisions, a parts list. Markdown; a checklist line can become a task with → task."
+              />
+            </DetailSection>
+
             <DetailSection
               label="Service schedule"
               count={tracked.length}
@@ -293,7 +311,6 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
                   ＋ Item
                 </Link>
               }
-              className={hasNextUp || lifecycleNote ? '' : 'mt-0'}
             >
               <ServiceSchedule items={items} today={today} unit={unit} readOnly={!assetActive} />
             </DetailSection>
@@ -318,6 +335,43 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
               )}
               <div className="mt-2 pt-3 border-t border-line/40">
                 <ProjectQuickCreate assetId={asset.id} domainId={domain?.id} placeholder={`New project for ${asset.name}…`} />
+              </div>
+            </DetailSection>
+
+            {/* Improvement ideas (0050): projects with status 'idea' — candidates
+                grouped under the asset, off the Work board and attention until
+                promoted. Distinct from the board's Ideas (content ideas). */}
+            <DetailSection label="Improvement ideas" count={ideas.length}>
+              <p className="font-sans text-[12.5px] text-ink-3 mb-2">
+                Candidates for {asset.name} — not work yet, not on the board. Promote one when you commit to it; its notes, overview and photos come along.
+              </p>
+              {ideas.length > 0 && (
+                <div className="border border-line rounded mb-3">
+                  {ideas.map((p) => (
+                    <div key={p.id} className="flex items-center gap-3 px-3 py-2.5 border-b border-line last:border-b-0">
+                      <span className="w-[9px] h-[9px] rounded-[2.5px] shrink-0 border border-dashed border-ink-3" aria-hidden />
+                      <Link href={`/projects/${p.id}`} className="flex-1 min-w-0 font-sans text-[14.5px] leading-[1.3] text-ink truncate hover:text-accent transition-colors">
+                        {p.name}
+                      </Link>
+                      <ActionForm
+                        action={promoteIdeaAction}
+                        hidden={{ id: p.id, asset_id: asset.id }}
+                        submit="Promote →"
+                        variant="quiet"
+                        pendingLabel="…"
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="mt-2 pt-3 border-t border-line/40">
+                <ProjectQuickCreate
+                  assetId={asset.id}
+                  domainId={domain?.id}
+                  status="idea"
+                  returnTo={`/assets/${asset.id}`}
+                  placeholder={`An idea for ${asset.name}…`}
+                />
               </div>
             </DetailSection>
 
@@ -375,12 +429,11 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
         }
         rail={
           <>
-            {hero && (
-              <RailBlock label="Photo">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={hero.url} alt={hero.alt ?? asset.name} className="w-full rounded border border-line object-cover" />
-              </RailBlock>
-            )}
+            {/* Photos (0050): gallery + uploader; the hero is an explicit
+                choice ("Set as hero"), never upload order. */}
+            <RailBlock label="Photos">
+              <AssetGallery assetId={asset.id} assetName={asset.name} attachments={asset.attachments ?? []} />
+            </RailBlock>
             <RailBlock label="Facts">
               <FactsEditor assetId={asset.id} initial={facts} />
             </RailBlock>

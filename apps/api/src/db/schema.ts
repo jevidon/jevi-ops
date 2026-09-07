@@ -78,6 +78,9 @@ export const projects = pgTable("projects", {
 	kind: text().default('project').notNull(),
 	// The asset this work groups under (0049) — the asset is the area.
 	asset_id: uuid(),
+	// Markdown overview + optimistic-concurrency version (0050); history in doc_revisions.
+	doc_md: text(),
+	doc_version: integer().default(1).notNull(),
 	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	updated_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [
@@ -106,7 +109,7 @@ export const projects = pgTable("projects", {
 			foreignColumns: [companies.id],
 			name: "projects_company_id_fkey"
 		}).onDelete("set null"),
-	check("projects_status_check", sql`status = ANY (ARRAY['active'::text, 'paused'::text, 'done'::text, 'archived'::text])`),
+	check("projects_status_check", sql`status = ANY (ARRAY['idea'::text, 'active'::text, 'paused'::text, 'done'::text, 'archived'::text])`),
 	check("projects_type_check", sql`type = ANY (ARRAY['client'::text, 'internal'::text, 'content'::text])`),
 	check("projects_engagement_type_check", sql`engagement_type = ANY (ARRAY['project'::text, 'retainer'::text])`),
 	check("projects_kind_check", sql`kind = ANY (ARRAY['project'::text, 'area'::text])`),
@@ -131,6 +134,9 @@ export const stewardship_domains = pgTable("stewardship_domains", {
 	illustration: jsonb().$type<DomainIllustration>(),
 	// Candidate awaiting Keep/Discard on the settings page (migration 0033).
 	illustration_draft: jsonb().$type<DomainIllustration>(),
+	// Markdown overview + optimistic-concurrency version (0050); history in doc_revisions.
+	doc_md: text(),
+	doc_version: integer().default(1).notNull(),
 	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	updated_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [
@@ -1207,6 +1213,22 @@ export const attention_items = pgTable("attention_items", {
 // cadence edits (never on new readings); completion re-anchors the schedule
 // (unlike task recurrence). Cadence math: packages/shared/src/maintenance.ts.
 
+// Every saved version of an entity's doc_md (0050). Polymorphic — no FK;
+// (entity_type, entity_id, version) is the identity.
+export const doc_revisions = pgTable("doc_revisions", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	entity_type: text().notNull(),
+	entity_id: uuid().notNull(),
+	version: integer().notNull(),
+	body: text(),
+	actor: text(),
+	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	index("idx_doc_revisions_entity").using("btree", table.entity_type.asc().nullsLast().op("text_ops"), table.entity_id.asc().nullsLast().op("uuid_ops"), table.version.desc().nullsFirst().op("int4_ops")),
+	unique("doc_revisions_entity_version_unique").on(table.entity_type, table.entity_id, table.version),
+	check("doc_revisions_entity_type_check", sql`entity_type = ANY (ARRAY['asset'::text, 'project'::text, 'domain'::text])`),
+]);
+
 export const assets = pgTable("assets", {
 	id: uuid().defaultRandom().primaryKey().notNull(),
 	name: text().notNull(),
@@ -1222,6 +1244,9 @@ export const assets = pgTable("assets", {
 	lifecycle: text().default('active').notNull(),
 	// Photos (0049): StoredAttachment[] like notes/journal; [0] is the hero.
 	attachments: jsonb().$type<StoredAttachment[]>().default([]).notNull(),
+	// Markdown overview + optimistic-concurrency version (0050); history in doc_revisions.
+	doc_md: text(),
+	doc_version: integer().default(1).notNull(),
 	archived_at: timestamp({ withTimezone: true, mode: 'string' }),
 	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	updated_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),

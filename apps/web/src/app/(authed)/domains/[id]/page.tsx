@@ -16,6 +16,7 @@ import { MarkShipped } from './mark-shipped';
 import { IllustrationControls } from './illustration-controls';
 import { ProjectQuickCreate } from './quick-create';
 import { AssignAsset } from './assign-asset';
+import { DocPanel } from '@/components/doc/DocPanel';
 import { DomainIllustration } from '../domain-illustration';
 import { ProjectCard, ContentRow, AssetCard, FittedArt } from '../../work/cards';
 import { PRIMARY_CADENCE_RULES, type CadenceRuleType } from './cadence-rules';
@@ -294,6 +295,17 @@ export default async function DomainDetailPage({
               </div>
             ) : (
               <>
+              {/* The overview document (0050) — the domain's living page. */}
+              <DetailSection label="Overview" className="mt-0">
+                <DocPanel
+                  entity="domain"
+                  id={domain.id}
+                  body={domain.doc_md ?? null}
+                  version={domain.doc_version ?? 1}
+                  promote={{ domainId: domain.id, source: `overview of ${domain.name}`, revalidate: `/domains/${domain.id}` }}
+                  emptyHint="The living page for this domain — what it is for, how it runs, standing decisions, links. Markdown; a checklist line can become a task with → task."
+                />
+              </DetailSection>
               {/* Assets band (0049): the domain's assigned assets — the asset
                   is the area. Shown when the domain has any, or when there's
                   an unassigned asset to offer. */}
@@ -301,7 +313,6 @@ export default async function DomainDetailPage({
                 <DetailSection
                   label="Assets"
                   count={work.assets.length}
-                  className="mt-0"
                   action={<AssignAsset domainId={domain.id} unassigned={unassignedAssets} />}
                 >
                   {work.assets.length > 0 ? (
@@ -321,7 +332,6 @@ export default async function DomainDetailPage({
               <DetailSection
                 label="Projects & content"
                 count={work ? work.projects.length + work.content.length : undefined}
-                className={work && (work.assets.length > 0 || unassignedAssets.length > 0) ? '' : 'mt-0'}
               >
                 {work && work.projects.length > 0 && (
                   <div

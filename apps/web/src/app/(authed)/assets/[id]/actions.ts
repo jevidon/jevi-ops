@@ -1,7 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { ApiError, assetsApi, type MetadataPatch } from '@/lib/api';
+import { ApiError, assetsApi, type Attachment, type MetadataPatch } from '@/lib/api';
 import { renderFact } from './facts';
 
 // Server actions for the asset page (0049). Two things the page owns that
@@ -51,6 +51,22 @@ export async function assignAssetDomainAction(
       ? 'Assigned — it now shows in that domain, and its projects and open upkeep moved with it.'
       : 'Unassigned — listed under Maintenance only; its upkeep still lands in Inbox.',
   };
+}
+
+// Photos (0050): the attachments array is the whole state — order is the
+// hero choice ([0]) and membership is what's kept.
+export async function saveAssetPhotosAction(input: {
+  assetId: string;
+  attachments: Attachment[];
+}): Promise<SaveResult> {
+  if (!input.assetId) return { ok: false, error: 'Missing asset.' };
+  try {
+    await assetsApi.update(input.assetId, { attachments: input.attachments });
+  } catch (err) {
+    return shapeError(err);
+  }
+  revalidateAsset(input.assetId, []);
+  return { ok: true, message: 'Photos saved.' };
 }
 
 // Facts, saved as a PATCH the API applies with per-key compare-and-set.
