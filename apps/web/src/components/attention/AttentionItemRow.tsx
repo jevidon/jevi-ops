@@ -17,6 +17,8 @@ function sourceHref(type: AttentionSourceType, id: string): string | null {
     case 'project': return `/projects/${id}`;
     case 'task': return `/tasks/${id}`;
     case 'content': return `/content/${id}`;
+    case 'maintenance_item': return `/maintenance/${id}`;
+    case 'asset': return `/maintenance/assets/${id}`;
     case 'conversation': return null;
     default: return null;
   }

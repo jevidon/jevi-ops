@@ -880,6 +880,164 @@ export const routinesApi = {
     api.post<unknown>(`/api/routines/${id}/completions`, body),
 };
 
+// ─── Maintenance module (migration 0047) ─────────────────────────────────
+// Assets (kind is display-only; meter behavior gates on meter_unit) +
+// recurring maintenance items with date and/or meter cadence. due_state is
+// computed server-side by the shared maintenanceDueState so every surface
+// agrees on due-ness.
+
+export type AssetKind = 'vehicle' | 'appliance' | 'home' | 'device' | 'equipment' | 'other';
+
+export interface Asset {
+  id: string;
+  name: string;
+  kind: AssetKind;
+  domain_id: string | null;
+  meter_unit: string | null;
+  metadata: Record<string, unknown>;
+  notes: string | null;
+  archived_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AssetListItem extends Asset {
+  latest_reading: number | null;
+  latest_reading_on: string | null;
+  latest_reading_days_ago: number | null;
+  active_item_count: number;
+}
+
+export interface MeterReading {
+  id: string;
+  asset_id: string;
+  reading: number;
+  recorded_on: string;
+  source: 'manual' | 'completion' | 'agent' | 'import';
+  notes: string | null;
+  created_at: string;
+}
+
+export interface MaintenanceDueState {
+  status: 'ok' | 'due_soon' | 'due' | 'overdue';
+  trigger: 'date' | 'meter' | null;
+  days_until: number | null;
+  meter_remaining: number | null;
+}
+
+export interface MaintenanceItem {
+  id: string;
+  name: string;
+  notes: string | null;
+  asset_id: string | null;
+  domain_id: string;
+  interval_days: number | null;
+  interval_months: number | null;
+  interval_meter: number | null;
+  lead_days: number;
+  lead_meter: number | null;
+  next_due_date: string | null;
+  next_due_meter: number | null;
+  last_completed_on: string | null;
+  last_completed_meter: number | null;
+  generated_task_id: string | null;
+  active: boolean;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+  asset?: Pick<Asset, 'id' | 'name' | 'kind' | 'meter_unit'> | null;
+  latest_reading?: number | null;
+  due_state?: MaintenanceDueState;
+}
+
+export interface MaintenanceLog {
+  id: string;
+  item_id: string;
+  completed_on: string;
+  meter_at_completion: number | null;
+  notes: string | null;
+  cost: number | null;
+  source: 'manual' | 'task' | 'agent' | 'import';
+  created_at: string;
+}
+
+export interface MaintenanceItemBody {
+  name?: string;
+  notes?: string | null;
+  asset_id?: string | null;
+  domain_id?: string;
+  interval_days?: number | null;
+  interval_months?: number | null;
+  interval_meter?: number | null;
+  lead_days?: number;
+  lead_meter?: number | null;
+  last_completed_on?: string | null;
+  last_completed_meter?: number | null;
+  next_due_date?: string | null;
+  next_due_meter?: number | null;
+  active?: boolean;
+}
+
+export const assetsApi = {
+  list: (opts?: { include_archived?: boolean }) =>
+    api.get<{ assets: AssetListItem[] }>(
+      `/api/assets${opts?.include_archived ? '?include_archived=true' : ''}`,
+    ),
+  get: (id: string) =>
+    api.get<{ asset: Asset; readings: MeterReading[]; items: MaintenanceItem[]; today: string }>(
+      `/api/assets/${id}`,
+    ),
+  create: (body: {
+    name: string;
+    kind?: AssetKind;
+    domain_id?: string | null;
+    meter_unit?: string | null;
+    notes?: string | null;
+  }) => api.post<{ asset: Asset }>('/api/assets', body),
+  update: (
+    id: string,
+    body: Partial<{
+      name: string;
+      kind: AssetKind;
+      domain_id: string | null;
+      meter_unit: string | null;
+      metadata: Record<string, unknown>;
+      notes: string | null;
+      archived_at: string | null;
+    }>,
+  ) => api.patch<{ asset: Asset }>(`/api/assets/${id}`, body),
+  remove: (id: string) => api.delete(`/api/assets/${id}`),
+  addReading: (id: string, body: { reading: number; recorded_on?: string; notes?: string | null }) =>
+    api.post<{ reading: MeterReading }>(`/api/assets/${id}/readings`, body),
+};
+
+export const maintenanceApi = {
+  list: (opts?: { asset_id?: string; include_inactive?: boolean }) => {
+    const qs = new URLSearchParams();
+    if (opts?.asset_id) qs.set('asset_id', opts.asset_id);
+    if (opts?.include_inactive) qs.set('include_inactive', 'true');
+    const q = qs.toString();
+    return api.get<{ items: MaintenanceItem[]; today: string }>(
+      `/api/maintenance${q ? `?${q}` : ''}`,
+    );
+  },
+  get: (id: string) =>
+    api.get<{ item: MaintenanceItem; logs: MaintenanceLog[]; today: string }>(
+      `/api/maintenance/${id}`,
+    ),
+  create: (body: MaintenanceItemBody & { name: string }) =>
+    api.post<{ item: MaintenanceItem }>('/api/maintenance', body),
+  update: (id: string, body: MaintenanceItemBody) =>
+    api.patch<{ item: MaintenanceItem }>(`/api/maintenance/${id}`, body),
+  remove: (id: string) => api.delete(`/api/maintenance/${id}`),
+  complete: (
+    id: string,
+    body: { completed_on?: string; meter?: number | null; notes?: string | null; cost?: number | null },
+  ) => api.post<{ item: MaintenanceItem; logged: boolean }>(`/api/maintenance/${id}/complete`, body),
+  deleteLog: (id: string, logId: string) =>
+    api.delete(`/api/maintenance/${id}/logs/${logId}`),
+};
+
 // ─── People CRM ──────────────────────────────────────────────────────────
 
 export type RelationshipType =
@@ -987,7 +1145,8 @@ export interface ConversationCreate {
 // ─── Attention Engine (Addendum 05) ──────────────────────────────────────
 
 export type AttentionSourceType =
-  | 'person' | 'company' | 'domain' | 'project' | 'conversation' | 'task' | 'content';
+  | 'person' | 'company' | 'domain' | 'project' | 'conversation' | 'task' | 'content'
+  | 'maintenance_item' | 'asset';
 export type AttentionUrgency = 'low' | 'normal' | 'high';
 export type AttentionStatus = 'active' | 'dismissed' | 'snoozed' | 'acted_on' | 'expired';
 

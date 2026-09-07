@@ -27,7 +27,7 @@ interface NavItem {
   href: string;
   label: string;
   icon: IconName;
-  flag?: 'health' | 'routines';
+  flag?: 'health' | 'routines' | 'maintenance';
 }
 
 // No Today/home item — the brand block above the nav is the home link
@@ -40,6 +40,7 @@ const NAV: NavItem[] = [
   { href: '/companies', label: 'Companies', icon: 'companies' },
   { href: '/library', label: 'Library', icon: 'library' },
   { href: '/routines', label: 'Routines', icon: 'routines', flag: 'routines' },
+  { href: '/maintenance', label: 'Maintenance', icon: 'maintenance', flag: 'maintenance' },
   { href: '/health', label: 'Health', icon: 'health', flag: 'health' },
 ];
 
@@ -55,12 +56,14 @@ export function IconRail({
   attentionActive = 0,
   healthEnabled = false,
   routinesEnabled = true,
+  maintenanceEnabled = true,
 }: {
   email?: string;
   unreadNotifications?: number;
   attentionActive?: number;
   healthEnabled?: boolean;
   routinesEnabled?: boolean;
+  maintenanceEnabled?: boolean;
 }) {
   const pathname = usePathname();
   const navRef = useRef<HTMLElement>(null);
@@ -131,7 +134,9 @@ export function IconRail({
 
   const tabs = NAV.filter(
     (t) =>
-      (t.flag !== 'health' || healthEnabled) && (t.flag !== 'routines' || routinesEnabled),
+      (t.flag !== 'health' || healthEnabled) &&
+      (t.flag !== 'routines' || routinesEnabled) &&
+      (t.flag !== 'maintenance' || maintenanceEnabled),
   );
 
   const isActive = (href: string) => pathname === href || pathname.startsWith(href + '/');

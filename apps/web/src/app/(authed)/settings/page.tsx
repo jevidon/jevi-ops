@@ -126,6 +126,7 @@ export default async function SettingsPage({
           healthEnabled={healthEnabled}
           routinesEnabled={routinesEnabled}
           ruleEnabled={ruleEnabled}
+          maintenanceEnabled={webSettings.maintenance_module_enabled}
         />
       </SettingsSection>
 

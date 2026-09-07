@@ -181,6 +181,27 @@ export async function toggleRuleModuleAction(formData: FormData): Promise<SyncRe
   };
 }
 
+// Toggle the Maintenance module (migration 0047). Default on; turning it off
+// hides /maintenance from the nav. The cron sweep + attention rules keep
+// running server-side either way — the flag is a UI gate, not a data gate.
+export async function toggleMaintenanceModuleAction(formData: FormData): Promise<SyncResult> {
+  const enabled = formData.get('enabled') === 'true';
+  try {
+    await settingsApi.updateApp({ maintenance_module_enabled: enabled });
+  } catch (err) {
+    if (err instanceof ApiError) {
+      const body = err.body as { error?: string } | null;
+      return { ok: false, message: body?.error ?? `HTTP ${err.status}` };
+    }
+    return { ok: false, message: (err as Error).message };
+  }
+  revalidatePath('/', 'layout');
+  return {
+    ok: true,
+    message: enabled ? 'Maintenance module enabled.' : 'Maintenance module hidden.',
+  };
+}
+
 export async function disconnectGoogleAction(): Promise<SyncResult> {
   try {
     await googleApi.disconnect();

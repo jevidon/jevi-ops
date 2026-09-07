@@ -8,7 +8,7 @@
 
 export type IconName =
   | 'today' | 'work' | 'tasks' | 'content' | 'people' | 'companies'
-  | 'library' | 'routines' | 'health'
+  | 'library' | 'routines' | 'health' | 'maintenance'
   | 'search' | 'capture' | 'bell' | 'flag' | 'gear' | 'ask' | 'pin'
   | 'chev' | 'arrow' | 'x' | 'check'
   // Capture Portal additions (same 24×24 thin-stroke language).
@@ -25,6 +25,8 @@ const ICONS: Record<IconName, string> = {
   routines: '<path d="M4.5 9.5a7.5 7.5 0 0113-4.2M19.5 14.5a7.5 7.5 0 01-13 4.2"/><path d="M4.5 5.5v4h4M19.5 18.5v-4h-4"/>',
   // Health is feature-flagged and usually absent; a simple pulse line.
   health: '<path d="M3.5 12.5h4l2-5 3 10 2.5-7 1.5 2h4.5"/>',
+  // Maintenance (migration 0047) — a wrench in the same thin-stroke language.
+  maintenance: '<path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/>',
   search: '<circle cx="11" cy="11" r="7"/><path d="M16.2 16.2L21 21"/>',
   capture: '<path d="M12 5v14M5 12h14"/>',
   bell: '<path d="M12 4a5.5 5.5 0 00-5.5 5.5c0 4-1.5 5.5-1.5 5.5h14s-1.5-1.5-1.5-5.5A5.5 5.5 0 0012 4zM10.2 18.5a2 2 0 003.6 0"/>',
