@@ -76,10 +76,18 @@ export const projects = pgTable("projects", {
 	// Retainer cycle anchor day-of-month (migration 0038); null until set.
 	retainer_anchor_day: integer(),
 	kind: text().default('project').notNull(),
+	// The asset this work groups under (0049) — the asset is the area.
+	asset_id: uuid(),
 	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	updated_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [
 	index("idx_projects_domain").using("btree", table.domain_id.asc().nullsLast().op("uuid_ops")),
+	index("idx_projects_asset").using("btree", table.asset_id.asc().nullsLast().op("uuid_ops")).where(sql`(asset_id IS NOT NULL)`),
+	foreignKey({
+			columns: [table.asset_id],
+			foreignColumns: [assets.id],
+			name: "projects_asset_id_fkey"
+		}).onDelete("set null"),
 	index("idx_projects_kind_status").using("btree", table.kind.asc().nullsLast().op("text_ops"), table.status.asc().nullsLast().op("text_ops")),
 	index("idx_projects_status").using("btree", table.status.asc().nullsLast().op("text_ops")),
 	foreignKey({
@@ -1212,6 +1220,8 @@ export const assets = pgTable("assets", {
 	notes: text(),
 	// Only active assets generate tasks, attention, and reading nags (0048).
 	lifecycle: text().default('active').notNull(),
+	// Photos (0049): StoredAttachment[] like notes/journal; [0] is the hero.
+	attachments: jsonb().$type<StoredAttachment[]>().default([]).notNull(),
 	archived_at: timestamp({ withTimezone: true, mode: 'string' }),
 	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	updated_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),

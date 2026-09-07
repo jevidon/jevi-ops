@@ -46,6 +46,8 @@ export const ProjectSchema = z.object({
   kind: ProjectKindSchema.default('project'),
   // Retainer billing-cycle anchor day-of-month (1-31; migration 0038).
   retainer_anchor_day: z.number().int().min(1).max(31).nullable().optional(),
+  // The asset this work groups under (0049) — the asset is the area.
+  asset_id: z.string().uuid().nullable().optional(),
   completed_at: z.string().datetime({ offset: true }).nullable().optional(),
   created_at: z.string().datetime({ offset: true }),
   updated_at: z.string().datetime({ offset: true }),
@@ -70,6 +72,8 @@ export const CreateProjectSchema = z.object({
   engagement_type: EngagementTypeSchema.optional(),
   kind: ProjectKindSchema.optional(),
   retainer_anchor_day: z.number().int().min(1).max(31).nullable().optional(),
+  // With asset_id and no domain_id, the server inherits the asset's domain.
+  asset_id: z.string().uuid().nullable().optional(),
 });
 
 export const UpdateProjectSchema = CreateProjectSchema.partial().extend({

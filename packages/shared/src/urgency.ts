@@ -75,6 +75,21 @@ export function moveVerb(status: string, type: string, unpublishedShorts: number
   }
 }
 
+// An asset's pill state from its maintenance (0049). overdue → over; due
+// and due_soon → due (lead_days IS the awareness threshold, and the sweep
+// has already made these real tasks); ok → ok; no active items and no
+// projects → quiet. Data confidence is reported separately — an unknown
+// meter axis is not "quiet", it's a question, and the card shows it.
+export function maintenanceUrgency(
+  worst: 'ok' | 'due_soon' | 'due' | 'overdue' | null,
+  hasWork: boolean,
+): Urgency {
+  if (worst === 'overdue') return 'over';
+  if (worst === 'due' || worst === 'due_soon') return 'due';
+  if (worst === 'ok') return 'ok';
+  return hasWork ? 'ok' : 'quiet';
+}
+
 // A parent's urgency, computed so it can NEVER read calmer than a child — the
 // domainStatus escalation from the handoff. `children` are the already-derived
 // urgencies of the projects + content inside it.

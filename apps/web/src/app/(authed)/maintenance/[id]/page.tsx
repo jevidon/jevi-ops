@@ -58,7 +58,7 @@ export default async function MaintenanceItemPage({
         </h1>
         <div className="mt-1.5 flex items-center gap-2 flex-wrap font-sans text-[12px] text-ink-3">
           {item.asset && (
-            <Link href={`/maintenance/assets/${item.asset.id}`} className="hover:text-ink-2 transition-colors">
+            <Link href={`/assets/${item.asset.id}`} className="hover:text-ink-2 transition-colors">
               {item.asset.name}
             </Link>
           )}

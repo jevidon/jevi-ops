@@ -51,17 +51,20 @@ export function ItemForm({
   item,
   assets,
   domains,
+  defaultAssetId,
 }: {
   item?: MaintenanceItem;
   assets: AssetOption[];
   domains: DomainOption[];
+  // Preselect the asset (the asset page's "＋ Item" arrives with ?asset_id).
+  defaultAssetId?: string | null;
 }) {
   const editing = !!item;
   const [state, formAction] = useActionState<SaveResult | null, FormData>(
     async (prev, formData) => (editing ? updateItemAction(prev, formData) : createItemAction(prev, formData)),
     null,
   );
-  const [assetId, setAssetId] = useState(item?.asset_id ?? '');
+  const [assetId, setAssetId] = useState(item?.asset_id ?? defaultAssetId ?? '');
   const [policy, setPolicy] = useState<MaintenancePolicy>(item?.policy ?? 'interval');
   const selectedAsset = assets.find((a) => a.id === assetId);
   const meterUnit = selectedAsset?.meter_unit ?? null;

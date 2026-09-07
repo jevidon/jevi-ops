@@ -24,6 +24,7 @@ function readFields(formData: FormData): {
   start_date: string | null;
   target_date: string | null;
   color: string | null;
+  asset_id: string | null;
 } {
   const name = String(formData.get('name') ?? '').trim();
   const description = String(formData.get('description') ?? '').trim() || null;
@@ -57,8 +58,11 @@ function readFields(formData: FormData): {
   const start_date = String(formData.get('start_date') ?? '').trim() || null;
   const target_date = String(formData.get('target_date') ?? '').trim() || null;
   const color = String(formData.get('color') ?? '').trim() || null;
+  // The asset this work groups under (0049); the domain page's quick-create
+  // and the asset page pass it as a hidden field.
+  const asset_id = String(formData.get('asset_id') ?? '').trim() || null;
 
-  return { name, description, domain_id, type, status, engagement_type, kind, quoted_hours, retainer_anchor_day, start_date, target_date, color };
+  return { name, description, domain_id, type, status, engagement_type, kind, quoted_hours, retainer_anchor_day, start_date, target_date, color, asset_id };
 }
 
 export async function createProjectAction(
@@ -86,6 +90,7 @@ export async function createProjectAction(
     start_date: isArea ? null : fields.start_date,
     target_date: isArea ? null : fields.target_date,
     color: fields.color,
+    asset_id: fields.asset_id,
   };
   let created;
   try {
@@ -102,6 +107,7 @@ export async function createProjectAction(
   }
   revalidatePath('/projects');
   revalidatePath('/');
+  if (fields.asset_id) revalidatePath(`/assets/${fields.asset_id}`);
   redirect(`/projects/${created.id}`);
 }
 

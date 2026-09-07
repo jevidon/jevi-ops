@@ -1249,15 +1249,26 @@ create table if not exists assets (
   -- Only active assets generate tasks, attention, and reading nags (0048).
   lifecycle text not null default 'active' check (lifecycle in
     ('active','stored','sold','archived')),
+  -- Photos (0049): StoredAttachment[] like notes/journal; [0] is the hero.
+  attachments jsonb not null default '[]'::jsonb,
   archived_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 
+create index if not exists idx_assets_attachments on assets using gin(attachments);
+
 drop trigger if exists trg_assets_updated_at on assets;
 create trigger trg_assets_updated_at
   before update on assets
   for each row execute function set_updated_at();
+
+-- The asset is the area (0049): improvement work groups under it. projects
+-- is declared before assets, so the FK lands here rather than inline.
+alter table projects
+  add column if not exists asset_id uuid references assets(id) on delete set null;
+create index if not exists idx_projects_asset
+  on projects(asset_id) where asset_id is not null;
 
 create table if not exists asset_meter_readings (
   id uuid primary key default gen_random_uuid(),

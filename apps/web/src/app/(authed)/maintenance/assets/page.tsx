@@ -7,7 +7,14 @@ import type { DomainOption } from '../item-form';
 // meter reading (and its age — the staleness signal the odometer nag keys
 // on) plus how many active items hang off the asset.
 
-export default async function AssetsPage() {
+export default async function AssetsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ domain_id?: string }>;
+}) {
+  // ?domain_id preselects the domain on the new-asset form (the domain
+  // page's "＋ Asset" and the board's "+ Asset in …" arrive this way).
+  const { domain_id: defaultDomainId } = await searchParams;
   let assets: AssetListItem[] = [];
   let domains: DomainOption[] = [];
   let errorMessage: string | null = null;
@@ -18,6 +25,7 @@ export default async function AssetsPage() {
   } catch (err) {
     errorMessage = err instanceof ApiError ? `API ${err.status}` : (err as Error).message;
   }
+  const domainName = new Map(domains.map((d) => [d.id, d.name]));
 
   return (
     <div className="pb-32">
@@ -56,7 +64,7 @@ export default async function AssetsPage() {
           assets.map((a) => (
             <Link
               key={a.id}
-              href={`/maintenance/assets/${a.id}`}
+              href={`/assets/${a.id}`}
               className="flex items-baseline gap-3 py-3 border-b border-line hover:opacity-80 transition-opacity"
             >
               <span className="font-sans text-[14px] font-medium text-ink flex-1 min-w-0 truncate">
@@ -65,6 +73,17 @@ export default async function AssetsPage() {
               <span className="font-mono text-[9px] uppercase tracking-[0.05em] px-1.5 py-px bg-surface-2 text-ink-3">
                 {a.kind}
               </span>
+              {/* Assignment (0049): a domain chip when promoted, else
+                  "unassigned" — the asset lives only here until it's assigned. */}
+              {a.domain_id && domainName.has(a.domain_id) ? (
+                <span className="font-mono text-[9px] uppercase tracking-[0.05em] px-1.5 py-px bg-surface-2 text-ink-2">
+                  {domainName.get(a.domain_id)}
+                </span>
+              ) : (
+                <span className="font-mono text-[9px] uppercase tracking-[0.05em] px-1.5 py-px border border-dashed border-line-strong text-ink-4">
+                  unassigned
+                </span>
+              )}
               {a.lifecycle !== 'active' && (
                 <span className="font-mono text-[9px] uppercase tracking-[0.05em] px-1.5 py-px border border-dashed border-line-strong text-ink-3">
                   {a.lifecycle}
@@ -93,7 +112,7 @@ export default async function AssetsPage() {
         <div className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3 mb-3">
           New asset
         </div>
-        <AssetForm domains={domains} />
+        <AssetForm domains={domains} defaultDomainId={defaultDomainId ?? null} />
       </div>
     </div>
   );

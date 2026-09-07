@@ -17,6 +17,10 @@ export const projectsRelations = relations(projects, ({one, many}) => ({
 		fields: [projects.company_id],
 		references: [companies.id]
 	}),
+	asset: one(assets, {
+		fields: [projects.asset_id],
+		references: [assets.id]
+	}),
 	contacts: many(project_contacts),
 	milestones: many(milestones),
 	activity_log: many(activity_log),
@@ -302,6 +306,7 @@ export const assetsRelations = relations(assets, ({one, many}) => ({
 	}),
 	readings: many(asset_meter_readings),
 	maintenance_items: many(maintenance_items),
+	projects: many(projects),
 }));
 
 export const asset_meter_readingsRelations = relations(asset_meter_readings, ({one}) => ({

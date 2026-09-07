@@ -29,7 +29,10 @@ import { runMaintenanceSweep } from '../lib/maintenance-sweep.js';
 import type { DbOrTx } from '../lib/maintenance-tx.js';
 import { latestReadingRowByAsset, type LatestReading } from '../lib/meter-readings.js';
 import { todayInTz } from '../lib/tz.js';
-import { asset_meter_readings, assets, attention_items, maintenance_items, maintenance_logs } from '../db/schema.js';
+import {
+  asset_meter_readings, assets, attention_items, maintenance_items, maintenance_logs, projects,
+  type StoredAttachment,
+} from '../db/schema.js';
 
 // Maintenance module (migrations 0047 + 0048): assets + meter readings +
 // maintenance items + completion logs. Deliberately flat JSON with no UI
@@ -147,14 +150,20 @@ export const maintenanceRoutes: FastifyPluginAsync = async (app) => {
     };
   });
 
-  // Asset + recent readings + its items with due_state — one round-trip.
-  // This response is also the future agent's per-asset context bundle.
+  // Asset + domain + recent readings + its items with due_state + the
+  // projects grouped under it + spend this year — one round-trip. This
+  // response is also the future agent's per-asset context bundle.
   app.get<{ Params: { id: string } }>('/api/assets/:id', async (req, reply) => {
     const db = getDb();
-    const asset = await db.query.assets.findFirst({ where: eq(assets.id, req.params.id) });
+    const asset = await db.query.assets.findFirst({
+      where: eq(assets.id, req.params.id),
+      with: { domain: { columns: { id: true, name: true } } },
+    });
     if (!asset) return reply.code(404).send({ error: 'not_found' });
+    const ctx = await policyContext();
+    const yearStart = `${ctx.today.slice(0, 4)}-01-01`;
 
-    const [readings, items] = await Promise.all([
+    const [readings, items, projectRows, costRow] = await Promise.all([
       db.query.asset_meter_readings.findMany({
         where: eq(asset_meter_readings.asset_id, asset.id),
         orderBy: [desc(asset_meter_readings.recorded_on), desc(asset_meter_readings.created_at)],
@@ -165,12 +174,33 @@ export const maintenanceRoutes: FastifyPluginAsync = async (app) => {
         with: { asset: ASSET_EMBED },
         orderBy: [asc(maintenance_items.name)],
       }),
+      db.query.projects.findMany({
+        columns: { id: true, name: true, status: true, kind: true, color: true, target_date: true, description: true, created_at: true },
+        where: and(eq(projects.asset_id, asset.id), sql`${projects.status} <> 'archived'`),
+        orderBy: [desc(projects.created_at)],
+      }),
+      // Logged completion costs this app-tz year, across the asset's items.
+      db
+        .select({ total: sql<string>`coalesce(sum(${maintenance_logs.cost}), 0)` })
+        .from(maintenance_logs)
+        .innerJoin(maintenance_items, eq(maintenance_items.id, maintenance_logs.item_id))
+        .where(and(eq(maintenance_items.asset_id, asset.id), sql`${maintenance_logs.completed_on} >= ${yearStart}`))
+        .then((rows) => rows[0]),
     ]);
 
-    const ctx = await policyContext();
     const latest = (await latestReadingRowByAsset(db, [asset.id])).get(asset.id) ?? null;
     const withState = items.map((i) => withDueState(i, ctx, latest)).sort(dueSort);
-    return { asset, readings, items: withState, today: ctx.today };
+    const { domain, ...assetRow } = asset;
+    return {
+      asset: assetRow,
+      domain: domain ?? null,
+      readings,
+      items: withState,
+      projects: projectRows,
+      cost_ytd: Number(costRow?.total ?? 0),
+      today: ctx.today,
+      meter_stale_days: ctx.staleDays,
+    };
   });
 
   app.post('/api/assets', async (req, reply) => {
@@ -234,7 +264,11 @@ export const maintenanceRoutes: FastifyPluginAsync = async (app) => {
       }
     }
 
-    const update: Partial<typeof assets.$inferInsert> = { ...d };
+    const { attachments, ...rest } = d;
+    const update: Partial<typeof assets.$inferInsert> = { ...rest };
+    // Zod's Attachment and the persisted StoredAttachment are the same shape
+    // spelled twice (notes route precedent) — cast at the boundary.
+    if (attachments) update.attachments = attachments as StoredAttachment[];
     // Lifecycle ⇄ archived_at stay consistent whichever one the caller sets.
     if (d.lifecycle) {
       if (d.lifecycle === 'active') update.archived_at = null;

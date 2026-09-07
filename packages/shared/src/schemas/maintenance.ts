@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { MAINTENANCE_POLICIES } from '../maintenance.js';
+import { AttachmentSchema } from './note.js';
 
 // Maintenance module (migrations 0047 + 0048) — wire shapes for /api/assets
 // and /api/maintenance. Cadence semantics live in ../maintenance.ts
@@ -36,6 +37,47 @@ const nullableString = () => z.string().nullable().optional();
 const nullableDate = () => z.string().date().nullable().optional();
 const nullableNonNeg = () => z.number().nonnegative().nullable().optional();
 
+// A fact with provenance: the value, where it came from, when it was
+// observed, whether it's been verified. Metadata values may be a bare
+// scalar OR this shape — the agent writes the rich form, a human typing
+// into the Facts editor writes the bare one, and both render.
+export const AssetFactSchema = z.object({
+  value: z.union([z.string(), z.number(), z.boolean()]),
+  source: z.string().nullable().optional(),
+  observed_on: z.string().date().nullable().optional(),
+  verified: z.boolean().optional(),
+});
+export type AssetFact = z.infer<typeof AssetFactSchema>;
+
+// Well-known metadata keys (0049). Generic on purpose — any asset kind may
+// use any key, and unknown keys are retained — but these are the ones the
+// Facts rail labels and the vehicle agent reads without guessing spelling.
+// Values are validated only when present.
+export const ASSET_PROFILE_KEYS = [
+  'make', 'model', 'year', 'variant', 'engine', 'transmission',
+  'vin', 'plate', 'first_registered', 'purchased_on', 'purchased_meter',
+  'usage', 'colour', 'serial', 'warranty_until', 'supplier', 'location',
+] as const;
+export type AssetProfileKey = (typeof ASSET_PROFILE_KEYS)[number];
+
+export const ASSET_PROFILE_LABELS: Record<AssetProfileKey, string> = {
+  make: 'Make', model: 'Model', year: 'Year', variant: 'Variant', engine: 'Engine',
+  transmission: 'Transmission', vin: 'VIN', plate: 'Plate', first_registered: 'First registered',
+  purchased_on: 'Purchased', purchased_meter: 'Purchased at', usage: 'Usage', colour: 'Colour',
+  serial: 'Serial', warranty_until: 'Warranty until', supplier: 'Supplier', location: 'Location',
+};
+
+// Read the scalar out of a metadata value, whichever form it's in.
+export function factValue(v: unknown): string | number | boolean | null {
+  if (v == null) return null;
+  if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') return v;
+  if (typeof v === 'object' && 'value' in (v as Record<string, unknown>)) {
+    const inner = (v as { value: unknown }).value;
+    return typeof inner === 'string' || typeof inner === 'number' || typeof inner === 'boolean' ? inner : null;
+  }
+  return null;
+}
+
 export const AssetSchema = z.object({
   id: z.string().uuid(),
   name: z.string().min(1),
@@ -43,10 +85,13 @@ export const AssetSchema = z.object({
   domain_id: z.string().uuid().nullable().optional(),
   // Free text ('km','mi','hours'…). Null = date-only asset.
   meter_unit: nullableString(),
-  // Schemaless per-asset facts (VIN, rego, insurance, warranty…).
+  // Per-asset facts (VIN, rego, insurance, warranty…): bare scalars or
+  // AssetFact objects under any key; ASSET_PROFILE_KEYS are the labelled ones.
   metadata: z.record(z.string(), z.unknown()),
   notes: nullableString(),
   lifecycle: AssetLifecycleSchema,
+  // Photos (0049): StoredAttachment[]; [0] is the hero.
+  attachments: z.array(AttachmentSchema).default([]),
   archived_at: z.string().datetime({ offset: true }).nullable().optional(),
   created_at: z.string().datetime({ offset: true }),
   updated_at: z.string().datetime({ offset: true }),
@@ -63,6 +108,7 @@ export const CreateAssetSchema = z.object({
 
 export const UpdateAssetSchema = CreateAssetSchema.partial().extend({
   lifecycle: AssetLifecycleSchema.optional(),
+  attachments: z.array(AttachmentSchema).optional(),
   // Archive/unarchive goes through the same PATCH (routines precedent).
   archived_at: z.string().datetime({ offset: true }).nullable().optional(),
 });

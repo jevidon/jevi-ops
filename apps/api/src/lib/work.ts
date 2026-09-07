@@ -1,14 +1,18 @@
 import { and, count, desc, eq, inArray, isNotNull, isNull, ne } from 'drizzle-orm';
 import type {
-  WorkPayload, WorkDomain, WorkProjectCard, WorkContentRow, WorkDirect, WorkRollup,
+  WorkPayload, WorkDomain, WorkProjectCard, WorkContentRow, WorkDirect, WorkRollup, WorkAssetCard,
 } from '@jevi-ops/shared/schemas';
-import { urgencyFromCounts, parentUrgency, contentUrgency, moveVerb, type Urgency } from '@jevi-ops/shared';
+import {
+  urgencyFromCounts, parentUrgency, contentUrgency, moveVerb, maintenanceDueState, maintenanceUrgency,
+  type Urgency, type MaintenanceDueStatus, type MaintenanceDataState,
+} from '@jevi-ops/shared';
 import type { Db } from './db.js';
 import {
-  activity_log, attention_items, companies as companiesTable, content_items,
-  people, projects as projectsTable, stewardship_domains, tasks as tasksTable,
+  activity_log, assets as assetsTable, attention_items, companies as companiesTable, content_items,
+  maintenance_items, people, projects as projectsTable, stewardship_domains, tasks as tasksTable,
 } from '../db/schema.js';
-import { getAppTz } from './app-settings.js';
+import { getAppSettings } from './app-settings.js';
+import { latestReadingRowByAsset } from './meter-readings.js';
 import { todayInTz, formatInTz } from './tz.js';
 
 // The Work page's computed manager's map. Ported from upstream jerad-ops
@@ -29,10 +33,11 @@ interface TaskRow {
 }
 
 export async function buildWork(db: Db): Promise<WorkPayload> {
-  const tz = await getAppTz();
+  const settings = await getAppSettings();
+  const tz = settings.timezone;
   const today = todayInTz(tz);
 
-  const [domains, projects, tasks, content, children, attn, activity, ideasRow] = await Promise.all([
+  const [domains, projects, tasks, content, children, attn, activity, ideasRow, assetRows, maintItems] = await Promise.all([
     db.query.stewardship_domains.findMany({
       columns: { id: true, name: true, parked: true },
       where: and(eq(stewardship_domains.active, true), eq(stewardship_domains.is_system, false)),
@@ -41,7 +46,7 @@ export async function buildWork(db: Db): Promise<WorkPayload> {
       columns: {
         id: true, name: true, domain_id: true, engagement_type: true,
         target_date: true, retainer_anchor_day: true, status: true,
-        primary_contact_id: true, company_id: true,
+        primary_contact_id: true, company_id: true, asset_id: true,
       },
       with: { milestones: { columns: { weight: true, status: true } } },
       where: inArray(projectsTable.status, ['active', 'paused']),
@@ -80,7 +85,33 @@ export async function buildWork(db: Db): Promise<WorkPayload> {
     db.select({ n: count() }).from(content_items)
       .where(and(eq(content_items.status, 'idea'), isNull(content_items.archived_at)))
       .then((rows) => rows[0]),
+    // Assigned, active assets (0049) — assignment is what promotes an asset
+    // into a domain; unassigned ones live only under /maintenance/assets.
+    db.query.assets.findMany({
+      columns: { id: true, name: true, kind: true, domain_id: true, meter_unit: true, attachments: true },
+      where: and(isNotNull(assetsTable.domain_id), eq(assetsTable.lifecycle, 'active')),
+    }),
+    // Their active maintenance items — counted with the same due-state the
+    // API lists use, so a card never disagrees with the asset page.
+    db.query.maintenance_items.findMany({
+      columns: {
+        id: true, asset_id: true, policy: true, interval_days: true, interval_months: true,
+        interval_meter: true, lead_days: true, lead_meter: true, next_due_date: true, next_due_meter: true,
+      },
+      where: and(eq(maintenance_items.active, true), isNotNull(maintenance_items.asset_id)),
+    }),
   ]);
+
+  // Latest (non-voided) reading per assigned asset, one query.
+  const assetIds = assetRows.map((a) => a.id);
+  const readings = await latestReadingRowByAsset(db, assetIds);
+  const itemsByAsset = groupBy(maintItems, (i) => i.asset_id ?? '');
+  const assetProjectCount = new Map<string, number>();
+  for (const p of projects) {
+    if (p.asset_id) assetProjectCount.set(p.asset_id, (assetProjectCount.get(p.asset_id) ?? 0) + 1);
+  }
+  const assetName = new Map(assetRows.map((a) => [a.id, a.name]));
+  const itemAsset = new Map(maintItems.map((i) => [i.id, i.asset_id]));
 
   // Client names: companies first, contact people as fallback (see header).
   const companyIds = [...new Set(projects.map((p) => p.company_id).filter((v): v is string => v != null))];
@@ -106,6 +137,9 @@ export async function buildWork(db: Db): Promise<WorkPayload> {
   const flaggedProjects = new Set<string>();
   const flaggedDomains = new Set<string>();
   const flaggedContent = new Set<string>();
+  // Assets flag from their own attention (reading nag) or any of their
+  // items' (maintenance_due) — resolved to the asset id.
+  const flaggedAssets = new Set<string>();
   // Highest attention urgency per domain-scoped item — floors the domain pill
   // so the Work chip can never read calmer than an active domain attention
   // item that Today already shows as slipping. high → over, otherwise due.
@@ -117,6 +151,11 @@ export async function buildWork(db: Db): Promise<WorkPayload> {
       const floor: Urgency = a.urgency === 'high' ? 'over' : 'due';
       if (domainAttnUrgency.get(a.source_id) !== 'over') domainAttnUrgency.set(a.source_id, floor);
     } else if (a.source_type === 'content') flaggedContent.add(a.source_id);
+    else if (a.source_type === 'asset') flaggedAssets.add(a.source_id);
+    else if (a.source_type === 'maintenance_item') {
+      const aid = itemAsset.get(a.source_id);
+      if (aid) flaggedAssets.add(aid);
+    }
   }
 
   // Flagged content can be in ANY status (idea/published/…), not just the
@@ -148,10 +187,62 @@ export async function buildWork(db: Db): Promise<WorkPayload> {
   const projectsByDomain = groupBy(projects, (p) => p.domain_id ?? '');
   const contentByDomain = groupBy(content, (c) => c.domain_id ?? '');
   const tasksByDomain = groupBy(tasks as TaskRow[], (t) => t.domain_id);
+  const assetsByDomain = groupBy(assetRows, (a) => a.domain_id ?? '');
+
+  const DUE_RANK: Record<MaintenanceDueStatus, number> = { ok: 0, due_soon: 1, due: 2, overdue: 3 };
+  const DATA_RANK: Record<MaintenanceDataState, number> = { complete: 0, stale_reading: 1, needs_reading: 2, needs_baseline: 3 };
+
+  // The asset card (0049): counts + worst due state + data confidence from
+  // the shared predicate, urgency from maintenanceUrgency. Sorted over →
+  // due → ok → quiet, then name.
+  const assetCard = (a: (typeof assetRows)[number]): WorkAssetCard => {
+    const latest = readings.get(a.id) ?? null;
+    const counts = { total: 0, overdue: 0, due: 0, due_soon: 0 };
+    let worst: MaintenanceDueStatus | null = null;
+    let data: MaintenanceDataState = 'complete';
+    for (const item of itemsByAsset.get(a.id) ?? []) {
+      const s = maintenanceDueState({
+        todayIso: today,
+        latestMeter: latest?.reading ?? null,
+        latestReadingOn: latest?.recorded_on ?? null,
+        staleDays: settings.meter_stale_days,
+        item,
+      });
+      counts.total += 1;
+      if (s.status === 'overdue') counts.overdue += 1;
+      else if (s.status === 'due') counts.due += 1;
+      else if (s.status === 'due_soon') counts.due_soon += 1;
+      if (worst == null || DUE_RANK[s.status] > DUE_RANK[worst]) worst = s.status;
+      if (DATA_RANK[s.data] > DATA_RANK[data]) data = s.data;
+    }
+    const projectCount = assetProjectCount.get(a.id) ?? 0;
+    const hero = a.attachments?.[0]?.url ?? null;
+    return {
+      id: a.id,
+      name: a.name,
+      kind: a.kind,
+      meter_unit: a.meter_unit,
+      latest_reading: latest?.reading ?? null,
+      latest_reading_days_ago: latest ? daysBetween(latest.recorded_on, today) : null,
+      maintenance: counts,
+      worst,
+      data,
+      projects: projectCount,
+      hero,
+      flagged: flaggedAssets.has(a.id),
+      urgency: maintenanceUrgency(worst, projectCount > 0),
+    };
+  };
+  const URGENCY_RANK: Record<Urgency, number> = { over: 0, due: 1, ok: 2, quiet: 3 };
 
   const build = (d: { id: string; name: string; parked: boolean }): WorkDomain => {
     const domTasks = tasksByDomain.get(d.id) ?? [];
     const tasksByProject = groupBy(domTasks, (t) => t.project_id ?? '__direct__');
+
+    const assetCards: WorkAssetCard[] = (assetsByDomain.get(d.id) ?? []).map(assetCard);
+    assetCards.sort((a, b) =>
+      URGENCY_RANK[a.urgency] - URGENCY_RANK[b.urgency] || a.name.localeCompare(b.name),
+    );
 
     const projectCards: WorkProjectCard[] = (projectsByDomain.get(d.id) ?? []).map((p) => {
       const pt = tasksByProject.get(p.id) ?? [];
@@ -162,6 +253,7 @@ export async function buildWork(db: Db): Promise<WorkPayload> {
         id: p.id,
         kind: isRetainer ? 'retainer' : 'target',
         name: p.name,
+        asset: p.asset_id && assetName.has(p.asset_id) ? { id: p.asset_id, name: assetName.get(p.asset_id)! } : null,
         client:
           (p.company_id ? companyNames.get(p.company_id) : undefined)
           ?? (p.primary_contact_id ? clientNames.get(p.primary_contact_id) : undefined)
@@ -239,20 +331,25 @@ export async function buildWork(db: Db): Promise<WorkPayload> {
     };
 
     // Rollup: totals across the whole domain + a distinct-flagged-object count.
+    // Task counts already include the maintenance sweep's generated tasks,
+    // so assets add only their flag — never a second count of the same work.
     const all = bucketTasks(domTasks, today);
     const flaggedCount =
       (flaggedDomains.has(d.id) ? 1 : 0) +
       projectCards.filter((p) => p.flagged).length +
+      assetCards.filter((a) => a.flagged).length +
       (flaggedContentByDomain.get(d.id) ?? 0);
     const rollup: WorkRollup = { attention: flaggedCount, open: all.open, overdue: all.overdue, waiting: all.waiting };
 
     // Domain pill escalates from its children, so it can never read calmer
-    // than a card inside it. An active domain-scoped attention item is
-    // injected as a pseudo-child so the chip agrees with Today.
+    // than a card inside it — a slipping vehicle counts. An active
+    // domain-scoped attention item is injected as a pseudo-child so the
+    // chip agrees with Today.
     const domainAttnFloor = domainAttnUrgency.get(d.id);
     const urgency = parentUrgency(
       { overdue: all.overdue, dueToday: all.today, open: all.open, waiting: all.waiting },
       [
+        ...assetCards.map((a) => a.urgency),
         ...projectCards.map((p) => p.urgency),
         ...contentRows.map((c) => c.urgency),
         ...(domainAttnFloor ? [domainAttnFloor] : []),
@@ -261,7 +358,7 @@ export async function buildWork(db: Db): Promise<WorkPayload> {
 
     return {
       id: d.id, name: d.name, parked: d.parked, urgency, rollup,
-      projects: projectCards, content: contentRows, direct,
+      assets: assetCards, projects: projectCards, content: contentRows, direct,
     };
   };
 
@@ -269,7 +366,8 @@ export async function buildWork(db: Db): Promise<WorkPayload> {
   const parked = domains.filter((d) => d.parked).map(build);
 
   // Domain order: attention-flagged first, then by open-work volume.
-  const workVolume = (w: WorkDomain) => w.rollup.open + w.rollup.waiting + w.projects.length + w.content.length;
+  const workVolume = (w: WorkDomain) =>
+    w.rollup.open + w.rollup.waiting + w.assets.length + w.projects.length + w.content.length;
   active.sort((a, b) => {
     if ((a.rollup.attention > 0) !== (b.rollup.attention > 0)) return a.rollup.attention > 0 ? -1 : 1;
     return workVolume(b) - workVolume(a) || a.name.localeCompare(b.name);

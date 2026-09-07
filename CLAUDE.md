@@ -26,6 +26,13 @@ If `start` refuses because the port is held by a process devctl didn't start
 (a stale server from a pre-devctl session), kill the PID it prints and re-run.
 `status` flags the same condition.
 
+Always invoke `scripts/devctl.sh` from the repo root (or by absolute path).
+A terminal tool's working directory persists between calls — after a
+`cd apps/api && …`, a relative `scripts/devctl.sh restart api` silently fails
+and the OLD server keeps serving, which looks exactly like "my change didn't
+work". Verify a restart landed by checking the code's new behaviour, not
+just `/healthz`.
+
 ## Database & migrations
 
 `scripts/db-migrate.sh` targets, in order: `--url`, `$DATABASE_URL`,

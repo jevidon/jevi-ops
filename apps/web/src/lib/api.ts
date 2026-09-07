@@ -120,6 +120,8 @@ export interface ProjectDetail {
     domain?: { id: string; name: string } | null;
     company?: { id: string; name: string } | null;
     primary_contact?: { id: string; name: string; email: string | null; role_at_company: string | null } | null;
+    // The asset this work groups under (0049).
+    asset?: { id: string; name: string } | null;
   };
   milestones: Milestone[];
   tasks: Task[];
@@ -168,7 +170,7 @@ export const tasksApi = {
 
 // The Work page's computed map (Addendum 08).
 import type { WorkPayload } from '@jevi-ops/shared';
-export type { WorkPayload, WorkDomain, WorkProjectCard, WorkContentRow, WorkDirect, WorkRollup } from '@jevi-ops/shared';
+export type { WorkPayload, WorkDomain, WorkProjectCard, WorkContentRow, WorkDirect, WorkRollup, WorkAssetCard } from '@jevi-ops/shared';
 
 export const workApi = {
   get: () => api.get<WorkPayload>('/api/work'),
@@ -212,6 +214,8 @@ export interface ProjectCreate {
   engagement_type?: EngagementType;
   kind?: ProjectKind;
   retainer_anchor_day?: number | null;
+  // With asset_id and no domain_id, the server inherits the asset's domain.
+  asset_id?: string | null;
 }
 
 export interface ProjectUpdate extends Partial<ProjectCreate> {
@@ -903,9 +907,23 @@ export interface Asset {
   metadata: Record<string, unknown>;
   notes: string | null;
   lifecycle: AssetLifecycle;
+  // Photos (0049): StoredAttachment[]; [0] is the hero.
+  attachments: Attachment[];
   archived_at: string | null;
   created_at: string;
   updated_at: string;
+}
+
+// A project grouped under an asset, as the asset detail bundle carries it.
+export interface AssetProjectRow {
+  id: string;
+  name: string;
+  status: 'active' | 'paused' | 'done' | 'archived';
+  kind: ProjectKind;
+  color: string | null;
+  target_date: string | null;
+  description: string | null;
+  created_at: string;
 }
 
 export interface AssetListItem extends Asset {
@@ -1030,9 +1048,17 @@ export const assetsApi = {
       `/api/assets${opts?.include_archived ? '?include_archived=true' : ''}`,
     ),
   get: (id: string) =>
-    api.get<{ asset: Asset; readings: MeterReading[]; items: MaintenanceItem[]; today: string }>(
-      `/api/assets/${id}`,
-    ),
+    api.get<{
+      asset: Asset;
+      domain: { id: string; name: string } | null;
+      readings: MeterReading[];
+      items: MaintenanceItem[];
+      projects: AssetProjectRow[];
+      // Sum of logged completion costs this app-tz year.
+      cost_ytd: number;
+      today: string;
+      meter_stale_days: number;
+    }>(`/api/assets/${id}`),
   create: (body: {
     name: string;
     kind?: AssetKind;

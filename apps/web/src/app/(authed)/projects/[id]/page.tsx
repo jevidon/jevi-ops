@@ -133,11 +133,13 @@ export default async function ProjectDetailPage({
 
   return (
     <div>
-      {/* Ancestors only — the header band below names the project itself. */}
+      {/* Ancestors only — the header band below names the project itself.
+          Work grouped under an asset (0049) trails Domain / Asset. */}
       <SetCrumbs
-        trail={project.domain
-          ? [{ label: project.domain.name, href: `/domains/${project.domain.id}` }]
-          : []}
+        trail={[
+          ...(project.domain ? [{ label: project.domain.name, href: `/domains/${project.domain.id}` }] : []),
+          ...(project.asset ? [{ label: project.asset.name, href: `/assets/${project.asset.id}` }] : []),
+        ]}
       />
       <DetailHeader
         crumb={
@@ -341,6 +343,14 @@ export default async function ProjectDetailPage({
             <ChecklistSection projectId={project.id} items={checklist} />
             <RailBlock label="Details">
               <KV k="Engagement" v={isArea ? 'Area' : isRetainer ? 'Retainer' : 'Project'} />
+              {project.asset && (
+                <div className="flex items-baseline justify-between gap-3 py-1.5">
+                  <span className="font-mono text-[10px] uppercase tracking-[0.04em] text-ink-3">Asset</span>
+                  <Link href={`/assets/${project.asset.id}`} className="font-sans text-[13.5px] text-accent hover:text-ink transition-colors">
+                    {project.asset.name}
+                  </Link>
+                </div>
+              )}
               {!isRetainer && (
                 <KV k="Hours" v={`${hoursLogged.toFixed(1)}h${quoted != null ? ` / ${quoted.toFixed(1)}h quoted` : ' logged'}`} />
               )}

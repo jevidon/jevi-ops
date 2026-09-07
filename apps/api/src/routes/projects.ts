@@ -13,6 +13,7 @@ import { getDb } from '../lib/db.js';
 import { clearAttentionForSource } from '../lib/attention.js';
 import {
   activity_log,
+  assets,
   conversations,
   milestones,
   people,
@@ -25,14 +26,16 @@ import {
 export const projectRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', app.requireAuth);
 
-  app.get('/api/projects', async () => {
+  app.get<{ Querystring: { asset_id?: string } }>('/api/projects', async (req) => {
     // Eager-load milestones + domain so the list page can render without a
-    // second query.
+    // second query. ?asset_id narrows to the work grouped under one asset.
     const rows = await getDb().query.projects.findMany({
       with: {
         milestones: true,
         domain: { columns: { id: true, name: true } },
+        asset: { columns: { id: true, name: true } },
       },
+      where: req.query.asset_id ? eq(projects.asset_id, req.query.asset_id) : undefined,
       orderBy: desc(projects.created_at),
     });
     return { projects: rows };
@@ -49,6 +52,7 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
           domain: { columns: { id: true, name: true } },
           company: { columns: { id: true, name: true } },
           primary_contact: { columns: { id: true, name: true, email: true, role_at_company: true } },
+          asset: { columns: { id: true, name: true } },
         },
         where: eq(projects.id, id),
       }),
@@ -173,7 +177,18 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
         details: parsed.error.flatten().fieldErrors,
       });
     }
-    const [row] = await getDb().insert(projects).values(parsed.data).returning();
+    const values = { ...parsed.data };
+    // Work grouped under an asset lives in the asset's domain unless told
+    // otherwise (maintenance-items precedent) — so a project created from
+    // an assigned car's page lands beside the car, not in Inbox.
+    if (values.asset_id && !values.domain_id) {
+      const asset = await getDb().query.assets.findFirst({
+        columns: { domain_id: true },
+        where: eq(assets.id, values.asset_id),
+      });
+      if (asset?.domain_id) values.domain_id = asset.domain_id;
+    }
+    const [row] = await getDb().insert(projects).values(values).returning();
     if (!row) throw app.httpErrors.internalServerError('insert_returned_no_row');
     return reply.code(201).send(row);
   });

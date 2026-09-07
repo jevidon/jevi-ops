@@ -42,10 +42,12 @@ function shapeError(err: unknown): SaveResult {
 function revalidateAll(itemId?: string, assetId?: string) {
   revalidatePath('/'); // attention card + rail tasks
   revalidatePath('/tasks');
+  revalidatePath('/work'); // asset cards carry maintenance counts (0049)
+  revalidatePath('/domains/[id]', 'page');
   revalidatePath('/maintenance');
   revalidatePath('/maintenance/assets');
   if (itemId) revalidatePath(`/maintenance/${itemId}`);
-  if (assetId) revalidatePath(`/maintenance/assets/${assetId}`);
+  if (assetId) revalidatePath(`/assets/${assetId}`);
 }
 
 function optionalNumber(formData: FormData, key: string): number | null {
@@ -258,7 +260,8 @@ export async function createAssetAction(
     return shapeError(err);
   }
   revalidateAll();
-  redirect(`/maintenance/assets/${created.asset.id}`);
+  if (created.asset.domain_id) revalidatePath(`/domains/${created.asset.domain_id}`);
+  redirect(`/assets/${created.asset.id}`);
 }
 
 export async function updateAssetAction(

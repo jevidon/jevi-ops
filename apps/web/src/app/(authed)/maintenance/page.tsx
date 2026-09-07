@@ -134,7 +134,7 @@ function ItemRow({ item, today }: { item: MaintenanceItem; today: string }) {
           </span>
           <span className="mt-1 flex items-center gap-2 flex-wrap">
             {item.asset?.name && (
-              <Link href={`/maintenance/assets/${item.asset.id}`} className="font-sans text-[11px] text-ink-3 hover:text-ink-2">
+              <Link href={`/assets/${item.asset.id}`} className="font-sans text-[11px] text-ink-3 hover:text-ink-2">
                 {item.asset.name}
               </Link>
             )}
