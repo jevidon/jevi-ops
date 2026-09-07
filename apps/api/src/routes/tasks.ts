@@ -6,7 +6,8 @@ import { getAppTz } from '../lib/app-settings.js';
 import { todayInTz } from '../lib/tz.js';
 import { getDb, type Db } from '../lib/db.js';
 import { clearAttentionForSource } from '../lib/attention.js';
-import { milestones, projects, tasks } from '../db/schema.js';
+import { completeMaintenanceItem } from '../lib/maintenance.js';
+import { maintenance_items, milestones, projects, tasks } from '../db/schema.js';
 
 // Tasks CRUD. Auth-gated.
 
@@ -301,6 +302,28 @@ export const taskRoutes: FastifyPluginAsync = async (app) => {
       }
     } catch (err) {
       req.log.warn({ err, taskId: req.params.id }, 'attention reconcile after task update failed');
+    }
+
+    // Checking off a maintenance-generated task completes the maintenance
+    // item behind it (log + roll-forward via the same lib the module's own
+    // complete endpoint uses; the lib's task-close update is a no-op here
+    // since the task is already done). Best-effort — never block the task
+    // response; the item stays completable from /api/maintenance.
+    if (parsed.data.status === 'done' && !rolledOver) {
+      try {
+        const linked = await db.query.maintenance_items.findFirst({
+          columns: { id: true },
+          where: eq(maintenance_items.generated_task_id, req.params.id),
+        });
+        if (linked) {
+          await completeMaintenanceItem(db, linked.id, {
+            completedOn: todayInTz(await getAppTz()),
+            source: 'task',
+          });
+        }
+      } catch (err) {
+        req.log.warn({ err, taskId: req.params.id }, 'maintenance completion after task done failed');
+      }
     }
 
     // Surface the rollover so the client can show a "Next: <date>" hint

@@ -1,5 +1,5 @@
 import type { FastifyPluginAsync } from 'fastify';
-import { and, asc, count, desc, eq, inArray } from 'drizzle-orm';
+import { and, asc, count, desc, eq } from 'drizzle-orm';
 import {
   CompleteMaintenanceSchema,
   CreateAssetSchema,
@@ -16,6 +16,8 @@ import { clearAttentionForSource } from '../lib/attention.js';
 import { getDb } from '../lib/db.js';
 import type { Db } from '../lib/db.js';
 import { completeMaintenanceItem } from '../lib/maintenance.js';
+import { runMaintenanceSweep } from '../lib/maintenance-sweep.js';
+import { latestReadingByAsset } from '../lib/meter-readings.js';
 import { todayInTz } from '../lib/tz.js';
 import { asset_meter_readings, assets, maintenance_items, maintenance_logs } from '../db/schema.js';
 
@@ -26,30 +28,6 @@ import { asset_meter_readings, assets, maintenance_items, maintenance_logs } fro
 // whichever-first over date/meter) live in @jevi-ops/shared/maintenance.
 
 type ItemRow = typeof maintenance_items.$inferSelect;
-
-// Latest reading per asset, one query. Small tables (manual logs), so
-// fetching the candidate rows and reducing in JS beats a DISTINCT ON
-// escape hatch for readability.
-async function latestReadingByAsset(db: Db, assetIds: string[]): Promise<Map<string, number>> {
-  const map = new Map<string, number>();
-  if (assetIds.length === 0) return map;
-  const rows = await db
-    .select({
-      asset_id: asset_meter_readings.asset_id,
-      reading: asset_meter_readings.reading,
-    })
-    .from(asset_meter_readings)
-    .where(inArray(asset_meter_readings.asset_id, assetIds))
-    .orderBy(
-      asc(asset_meter_readings.asset_id),
-      desc(asset_meter_readings.recorded_on),
-      desc(asset_meter_readings.created_at),
-    );
-  for (const r of rows) {
-    if (!map.has(r.asset_id)) map.set(r.asset_id, r.reading);
-  }
-  return map;
-}
 
 function withDueState(
   item: ItemRow,
@@ -262,12 +240,15 @@ export const maintenanceRoutes: FastifyPluginAsync = async (app) => {
         source: 'manual',
       })
       .returning();
-    // A fresh reading can resolve the "meter reading is stale" nag
-    // immediately (rule ships with the awareness build; no-op until then).
+    // A fresh reading resolves the "meter reading is stale" nag
+    // immediately, and can also tip a meter-cadence item into its due
+    // window — run the sweep now so a big odometer jump surfaces today,
+    // not at tomorrow's cron. Both best-effort: never fail the write.
     try {
       await clearAttentionForSource(db, 'asset', asset.id, ['meter_reading_stale']);
-    } catch {
-      // Best-effort only.
+      await runMaintenanceSweep(db);
+    } catch (err) {
+      req.log.warn({ err, assetId: asset.id }, 'post-reading maintenance sweep failed');
     }
     return reply.code(201).send({ reading: row });
   });

@@ -1,11 +1,15 @@
 import { and, desc, eq, inArray, isNotNull, isNull, lt, lte, max } from 'drizzle-orm';
 import type { Db } from './db.js';
+import { maintenanceDueState } from '@jevi-ops/shared';
 import {
   activity_log,
+  asset_meter_readings,
+  assets,
   attention_items,
   companies,
   content_items,
   conversations,
+  maintenance_items,
   people,
   person_facts,
   projects,
@@ -13,6 +17,7 @@ import {
   tasks,
 } from '../db/schema.js';
 import { getAppTz } from './app-settings.js';
+import { latestReadingByAsset } from './meter-readings.js';
 
 // The Attention Engine — ported from upstream jerad-ops v2.0.0 (Addendum 05
 // §10), re-expressed against Drizzle. Modeled on observations.ts: rule
@@ -39,7 +44,9 @@ import { getAppTz } from './app-settings.js';
 
 export interface CandidateItem {
   rule_type: string;
-  source_type: 'person' | 'company' | 'domain' | 'project' | 'conversation' | 'task' | 'content';
+  source_type:
+    | 'person' | 'company' | 'domain' | 'project' | 'conversation' | 'task' | 'content'
+    | 'maintenance_item' | 'asset';
   source_id: string;
   title: string;
   detail: string | null;
@@ -521,6 +528,105 @@ async function ruleConversationFollowup(db: Db, ctx: Ctx): Promise<CandidateItem
   return out;
 }
 
+// ─── Maintenance rules (migration 0047) ──────────────────────────────────
+
+// Due/overdue maintenance items. Mirrors ruleTaskDueSoon's scoring tier so
+// upkeep and deadline work rank comparably; the shared maintenanceDueState
+// is the same predicate the sweep and the API lists use, so an item never
+// shows "due" in one surface and "ok" in another.
+async function ruleMaintenanceDue(db: Db, ctx: Ctx): Promise<CandidateItem[]> {
+  const items = await db.query.maintenance_items.findMany({
+    where: eq(maintenance_items.active, true),
+    with: { asset: { columns: { id: true, name: true, meter_unit: true } } },
+  });
+  const assetIds = [...new Set(items.map((i) => i.asset_id).filter((v): v is string => v != null))];
+  const readings = await latestReadingByAsset(db, assetIds);
+
+  const out: CandidateItem[] = [];
+  for (const m of items) {
+    const latestMeter = m.asset_id ? (readings.get(m.asset_id) ?? null) : null;
+    const state = maintenanceDueState({ todayIso: ctx.todayYmd, latestMeter, item: m });
+    if (state.status === 'ok') continue;
+
+    const name = m.asset ? `${m.name} — ${m.asset.name}` : m.name;
+    const unit = m.asset?.meter_unit ?? '';
+    const detail =
+      state.trigger === 'meter' && state.meter_remaining != null && latestMeter != null
+        ? state.meter_remaining <= 0
+          ? `${latestMeter.toLocaleString('en-US')} of ${m.next_due_meter?.toLocaleString('en-US')} ${unit}`.trim()
+          : `${state.meter_remaining.toLocaleString('en-US')} ${unit} left`.trim()
+        : state.days_until != null
+          ? state.days_until < 0
+            ? `Due ${m.next_due_date}`
+            : inDays(state.days_until)
+          : null;
+
+    out.push({
+      rule_type: 'maintenance_due',
+      source_type: 'maintenance_item',
+      source_id: m.id,
+      title: `${state.status === 'overdue' ? 'Overdue' : 'Due'}: ${name}`,
+      detail,
+      suggested_action: 'Complete maintenance',
+      score: 55 + (state.status === 'due' ? 50 : 0) + (state.status === 'overdue' ? 100 : 0),
+      dedup_key: `maintenance_due:${m.id}:${dayBucket(ctx.todayYmd)}`,
+    });
+  }
+  return out;
+}
+
+// The odometer nag: a metered asset with active meter-cadence items goes
+// dark when readings stop — every meter threshold is unverifiable. >14
+// days without a reading (or none ever) surfaces a low-key prompt.
+// Week-bucketed dedup so a dismiss quiets it for the week, not forever.
+const METER_STALE_DAYS = 14;
+async function ruleMeterReadingStale(db: Db, ctx: Ctx): Promise<CandidateItem[]> {
+  const metered = await db.query.assets.findMany({
+    columns: { id: true, name: true, meter_unit: true },
+    where: and(isNotNull(assets.meter_unit), isNull(assets.archived_at)),
+  });
+  if (metered.length === 0) return [];
+
+  // Only nag for assets where a reading actually gates something.
+  const meterItems = await db.query.maintenance_items.findMany({
+    columns: { asset_id: true },
+    where: and(eq(maintenance_items.active, true), isNotNull(maintenance_items.interval_meter)),
+  });
+  const gated = new Set(meterItems.map((i) => i.asset_id).filter((v): v is string => v != null));
+
+  const relevant = metered.filter((a) => gated.has(a.id));
+  if (relevant.length === 0) return [];
+
+  // Latest reading DATE per asset (the value doesn't matter here).
+  const rows = await db.query.asset_meter_readings.findMany({
+    columns: { asset_id: true, recorded_on: true },
+    where: inArray(asset_meter_readings.asset_id, relevant.map((a) => a.id)),
+    orderBy: [desc(asset_meter_readings.recorded_on)],
+  });
+  const latestOn = new Map<string, string>();
+  for (const r of rows) {
+    if (!latestOn.has(r.asset_id)) latestOn.set(r.asset_id, r.recorded_on);
+  }
+
+  const out: CandidateItem[] = [];
+  for (const a of relevant) {
+    const last = latestOn.get(a.id) ?? null;
+    const age = last ? daysBetween(last, ctx.todayYmd) : null;
+    if (age != null && age <= METER_STALE_DAYS) continue;
+    out.push({
+      rule_type: 'meter_reading_stale',
+      source_type: 'asset',
+      source_id: a.id,
+      title: `Reading needed: ${a.name}`,
+      detail: age != null ? `Last ${a.meter_unit} reading ${age}d ago` : 'No readings yet',
+      suggested_action: 'Log a reading',
+      score: 35,
+      dedup_key: `meter_reading_stale:${a.id}:${isoWeekBucket(ctx.todayYmd)}`,
+    });
+  }
+  return out;
+}
+
 // ─── Rule registry ────────────────────────────────────────────────────────
 
 type RuleFn = (db: Db, ctx: Ctx) => Promise<CandidateItem[]>;
@@ -536,6 +642,8 @@ const RULES: { ruleType: string; fn: RuleFn }[] = [
   { ruleType: 'domain_stale', fn: ruleDomainStale },
   { ruleType: 'company_silent', fn: ruleCompanySilent },
   { ruleType: 'conversation_followup', fn: ruleConversationFollowup },
+  { ruleType: 'maintenance_due', fn: ruleMaintenanceDue },
+  { ruleType: 'meter_reading_stale', fn: ruleMeterReadingStale },
 ];
 // rule_types that share rulePersonFact's fate (see registry note above).
 const RULE_ALIASES: Record<string, string[]> = {
