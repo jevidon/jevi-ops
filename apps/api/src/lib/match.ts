@@ -47,7 +47,7 @@ function score(query: string, target: string): number {
   return (hits / qWords.size) * 0.55;
 }
 
-function best(query: string, candidates: MatchCandidate[]): MatchCandidate | null {
+export function bestMatch(query: string, candidates: MatchCandidate[]): MatchCandidate | null {
   if (!query) return null;
   let bestCandidate: MatchCandidate | null = null;
   let bestScore = 0;
@@ -69,7 +69,7 @@ export async function matchProject(db: Db, query: string | undefined): Promise<s
     where: eq(projects.status, 'active'),
     limit: 100,
   });
-  return best(query, rows.map((r) => ({ id: r.id, label: r.name })))?.id ?? null;
+  return bestMatch(query, rows.map((r) => ({ id: r.id, label: r.name })))?.id ?? null;
 }
 
 export async function matchDomain(db: Db, query: string | undefined): Promise<string | null> {
@@ -78,13 +78,13 @@ export async function matchDomain(db: Db, query: string | undefined): Promise<st
     columns: { id: true, name: true },
     where: eq(stewardship_domains.active, true),
   });
-  return best(query, rows.map((r) => ({ id: r.id, label: r.name })))?.id ?? null;
+  return bestMatch(query, rows.map((r) => ({ id: r.id, label: r.name })))?.id ?? null;
 }
 
 export async function matchPerson(db: Db, query: string | undefined): Promise<string | null> {
   if (!query) return null;
   const rows = await db.query.people.findMany({ columns: { id: true, name: true }, limit: 500 });
-  return best(query, rows.map((r) => ({ id: r.id, label: r.name })))?.id ?? null;
+  return bestMatch(query, rows.map((r) => ({ id: r.id, label: r.name })))?.id ?? null;
 }
 
 export async function matchTask(db: Db, query: string | undefined): Promise<string | null> {
@@ -95,7 +95,7 @@ export async function matchTask(db: Db, query: string | undefined): Promise<stri
     where: eq(tasks.status, 'open'),
     limit: 200,
   });
-  return best(query, rows.map((r) => ({ id: r.id, label: r.title })))?.id ?? null;
+  return bestMatch(query, rows.map((r) => ({ id: r.id, label: r.title })))?.id ?? null;
 }
 
 export async function matchBook(db: Db, query: string | undefined): Promise<string | null> {
@@ -104,7 +104,7 @@ export async function matchBook(db: Db, query: string | undefined): Promise<stri
     columns: { id: true, title: true, author: true },
     limit: 500,
   });
-  return best(query, rows.map((r) => ({
+  return bestMatch(query, rows.map((r) => ({
     id: r.id,
     label: r.author ? `${r.title} ${r.author}` : r.title,
   })))?.id ?? null;
@@ -116,7 +116,7 @@ export async function matchContentItem(db: Db, query: string | undefined): Promi
     columns: { id: true, title: true },
     limit: 200,
   });
-  return best(query, rows.map((r) => ({ id: r.id, label: r.title })))?.id ?? null;
+  return bestMatch(query, rows.map((r) => ({ id: r.id, label: r.title })))?.id ?? null;
 }
 
 /** Fuzzy match against quote text + source_author + source_reference.
@@ -142,7 +142,7 @@ export async function matchQuote(db: Db, query: string | undefined): Promise<str
     ].filter(Boolean) as string[];
     return { id: r.id, label: parts.join(' · ') };
   });
-  return best(query, candidates)?.id ?? null;
+  return bestMatch(query, candidates)?.id ?? null;
 }
 
 /** Fuzzy match a note by title + body excerpt + source_reference.
@@ -158,7 +158,7 @@ export async function matchNote(db: Db, query: string | undefined): Promise<stri
     const parts = [r.title, r.source_reference, r.body.slice(0, 160)].filter(Boolean) as string[];
     return { id: r.id, label: parts.join(' · ') };
   });
-  return best(query, candidates)?.id ?? null;
+  return bestMatch(query, candidates)?.id ?? null;
 }
 
 /** Fuzzy match a journal entry by transcription excerpt. Dates ("yesterday's
@@ -175,7 +175,7 @@ export async function matchJournalEntry(db: Db, query: string | undefined): Prom
     id: r.id,
     label: [r.entry_date, (r.transcription_text ?? '').slice(0, 180)].filter(Boolean).join(' · '),
   }));
-  return best(query, candidates)?.id ?? null;
+  return bestMatch(query, candidates)?.id ?? null;
 }
 
 export async function matchMilestone(
@@ -189,5 +189,5 @@ export async function matchMilestone(
     where: eq(milestones.project_id, projectId),
     limit: 100,
   });
-  return best(query, rows.map((r) => ({ id: r.id, label: r.title })))?.id ?? null;
+  return bestMatch(query, rows.map((r) => ({ id: r.id, label: r.title })))?.id ?? null;
 }

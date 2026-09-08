@@ -1,6 +1,7 @@
-import { eq, gte, not, inArray } from 'drizzle-orm';
-import { chatComplete } from './llm.js';
+import { asc, eq, gte, not, inArray } from 'drizzle-orm';
+import { chatComplete, isLlmConfigured, prefillPrompt, type LlmUsage } from './llm.js';
 import { getAppTz } from './app-settings.js';
+import { bestMatch } from './match.js';
 import type { Db } from './db.js';
 import { content_items, person_interactions, projects, stewardship_domains } from '../db/schema.js';
 
@@ -8,36 +9,63 @@ import { content_items, person_interactions, projects, stewardship_domains } fro
 // context gathering), returns a structured ParseResult.
 
 // ─── Context gathered from the DB and sent with every request ────────────
+//
+// What the model sees is NAMES ONLY. Every *_match field it emits is a
+// phrase the executor resolves by fuzzy name match (lib/match.ts), so
+// row ids in the prompt bought nothing and cost a lot: a UUID is ~36
+// tokens against ~5 for a name, and on a local model prefill is the
+// whole latency story. Ids stay server-side in `ContextIds` and are
+// re-attached to disambiguation candidates after the fact.
+//
+// The lists are sorted so the serialized context is byte-identical
+// between captures while the data is unchanged — that is what lets the
+// server's prompt cache carry the prefix from one request to the next.
 
-interface ParseContext {
-  now_iso: string;
-  today_date: string; // ISO yyyy-mm-dd in Mountain Time
-  active_projects: { id: string; name: string; domain_id?: string | null }[];
-  active_domains: { id: string; name: string }[];
-  recent_people: { id: string; name: string }[];
-  active_content_items: { id: string; title: string; status: string }[];
+export interface ParseContext {
+  /** Active projects with the name of their domain (when assigned). */
+  projects: { name: string; domain?: string }[];
+  domains: string[];
+  /** People interacted with in the last 30 days. */
+  people: string[];
+  /** Content items not yet done. */
+  content_items: { title: string; status: string }[];
 }
 
-async function gatherContext(db: Db): Promise<ParseContext> {
-  const now = new Date();
-  const tz = await getAppTz();
-  const todayDate = new Intl.DateTimeFormat('en-CA', {
-    timeZone: tz,
-    year: 'numeric', month: '2-digit', day: '2-digit',
-  }).format(now);
+/** Name → id maps for everything in `ParseContext`, kept out of the prompt. */
+export interface ContextIds {
+  projects: Map<string, string>;
+  domains: Map<string, string>;
+  people: Map<string, string>;
+  content_items: Map<string, string>;
+}
 
+export interface Clock {
+  now_iso: string;
+  today_date: string; // ISO yyyy-mm-dd in the app timezone
+}
+
+interface Gathered {
+  context: ParseContext;
+  ids: ContextIds;
+}
+
+const byName = (a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name);
+
+async function gatherContext(db: Db): Promise<Gathered> {
   // Last 30 days cutoff for "recent people"
-  const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
 
   const [activeProjects, activeDomains, interactions, activeContent] = await Promise.all([
     db.query.projects.findMany({
       columns: { id: true, name: true, domain_id: true },
       where: eq(projects.status, 'active'),
+      orderBy: asc(projects.name),
       limit: 50,
     }),
     db.query.stewardship_domains.findMany({
       columns: { id: true, name: true },
       where: eq(stewardship_domains.active, true),
+      orderBy: asc(stewardship_domains.name),
     }),
     db.query.person_interactions.findMany({
       columns: { person_id: true },
@@ -48,9 +76,12 @@ async function gatherContext(db: Db): Promise<ParseContext> {
     db.query.content_items.findMany({
       columns: { id: true, title: true, status: true },
       where: not(inArray(content_items.status, ['done'])),
+      orderBy: asc(content_items.title),
       limit: 50,
     }),
   ]);
+
+  const domainName = new Map(activeDomains.map((d) => [d.id, d.name]));
 
   // Dedup people pulled from interactions.
   const peopleMap = new Map<string, { id: string; name: string }>();
@@ -58,15 +89,61 @@ async function gatherContext(db: Db): Promise<ParseContext> {
     const p = row.person;
     if (p?.id) peopleMap.set(p.id, { id: p.id, name: p.name });
   }
+  const people = Array.from(peopleMap.values()).sort(byName);
+
+  const ids: ContextIds = {
+    projects: new Map(activeProjects.map((r) => [r.name, r.id])),
+    domains: new Map(activeDomains.map((r) => [r.name, r.id])),
+    people: new Map(people.map((r) => [r.name, r.id])),
+    content_items: new Map(activeContent.map((r) => [r.title, r.id])),
+  };
 
   return {
-    now_iso: now.toISOString(),
-    today_date: todayDate,
-    active_projects: activeProjects,
-    active_domains: activeDomains,
-    recent_people: Array.from(peopleMap.values()),
-    active_content_items: activeContent,
+    context: {
+      projects: activeProjects.map((r) => {
+        const domain = r.domain_id ? domainName.get(r.domain_id) : undefined;
+        return domain ? { name: r.name, domain } : { name: r.name };
+      }),
+      domains: activeDomains.map((r) => r.name),
+      people: people.map((r) => r.name),
+      content_items: activeContent.map((r) => ({ title: r.title, status: r.status })),
+    },
+    ids,
   };
+}
+
+async function clock(): Promise<Clock> {
+  const now = new Date();
+  const tz = await getAppTz();
+  const today_date = new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(now);
+  return { now_iso: now.toISOString(), today_date };
+}
+
+// ─── User message layout ─────────────────────────────────────────────────
+//
+// Ordered for prefix caching: the static system prompt, then the context
+// (stable while the DB is unchanged), and only then the two things that
+// differ on every call — the clock and the transcript. The warm-up sends
+// the prefix through </context>; the real call appends the rest, so the
+// server re-processes only a few dozen tokens. Compact JSON: whitespace
+// is tokens.
+
+/** The cache-stable head of the user message: everything through </context>. */
+export function contextPrefix(context: ParseContext): string {
+  return ['<context>', JSON.stringify(context), '</context>'].join('\n');
+}
+
+export function buildUserMessage(context: ParseContext, clk: Clock, transcript: string): string {
+  return [
+    contextPrefix(context),
+    `<now>${JSON.stringify(clk)}</now>`,
+    '<transcript>',
+    transcript,
+    '</transcript>',
+  ].join('\n');
 }
 
 // ─── System prompt (static — cached via prompt caching) ──────────────────
@@ -114,7 +191,9 @@ Action types you may produce (use the exact "action" string for each):
   - "Feature yesterday's journal entry" → {..., target_kind:"journal", target_match:"yesterday's entry", weight:2}
 
 The *_match fields are short fuzzy phrases (e.g. "the Reviews plugin", "Randy", "Mere Christianity", \
-"that Cal Newport quote about focus"). The backend resolves them to IDs against the context below.
+"that Cal Newport quote about focus"). The backend resolves them by name. The <context> block lists \
+what exists: active projects (each with its domain), domains, recently seen people, and in-progress \
+content items — by name only. Prefer those exact names in *_match fields when the user clearly means one of them.
 
 # Notes & Quotes routing (Addendum 02 §4)
 
@@ -170,14 +249,14 @@ fences, no preamble, no trailing prose. The object is exactly one of these \
 three shapes:
 
   { "actions": [ ...action objects... ] }
-  { "needs_disambiguation": true, "field": "<field-name>", "candidates": [ {"id": "...", "label": "..."} ] }
+  { "needs_disambiguation": true, "field": "<field-name>", "candidates": [ {"label": "<exact name from context>"} ] }
   { "error": "<reason>", "transcript": "<original transcript>" }
 
 Rules:
 1. Output rule is non-negotiable: respond with one JSON object and nothing else. \
    No \`\`\`json fences, no explanation, no "Here is the JSON:".
 2. A single utterance can produce multiple actions — return an array in "actions".
-3. Resolve relative dates to ISO yyyy-mm-dd in Mountain Time using "today_date" from context. \
+3. Resolve relative dates to ISO yyyy-mm-dd in Mountain Time using "today_date" from the <now> block. \
    "tomorrow" → next day, "Friday" → upcoming Friday, "next week" → 7 days from today.
 4. For calendar events: convert times to ISO 8601 with -07:00 (MST) or -06:00 (MDT) offset based on date.
 5. If a match is genuinely ambiguous (transcript could mean multiple distinct projects/people), \
@@ -213,37 +292,108 @@ export type ParseResult =
   | { kind: 'disambiguation'; field: string; candidates: { id: string; label: string }[] }
   | { kind: 'error'; error: string; transcript: string };
 
+// ─── Disambiguation candidates → ids ────────────────────────────────────
+
+// The model names candidates; ids never entered the prompt. Re-attach them
+// here: exact name first, then the same fuzzy scorer the executor uses.
+// `field` narrows the lookup to the matching list when it can. A label we
+// can't place keeps itself as its id — the UI only displays candidates.
+const FIELD_LISTS: Record<string, keyof ContextIds> = {
+  project_match: 'projects',
+  domain_match: 'domains',
+  person_match: 'people',
+  item_match: 'content_items',
+};
+
+export function resolveCandidates(
+  field: string,
+  raw: unknown,
+  ids: ContextIds,
+): { id: string; label: string }[] {
+  if (!Array.isArray(raw)) return [];
+  const listKey = FIELD_LISTS[field];
+  const pools: Map<string, string>[] = listKey
+    ? [ids[listKey]]
+    : [ids.projects, ids.domains, ids.people, ids.content_items];
+  const out: { id: string; label: string }[] = [];
+  for (const c of raw) {
+    const label =
+      typeof c === 'string' ? c : typeof c === 'object' && c !== null ? String((c as { label?: unknown }).label ?? '') : '';
+    if (!label) continue;
+    let id: string | null = null;
+    for (const pool of pools) {
+      const exact = [...pool.entries()].find(([name]) => name.toLowerCase() === label.toLowerCase());
+      if (exact) { id = exact[1]; break; }
+    }
+    if (!id) {
+      const all = pools.flatMap((pool) => [...pool.entries()].map(([name, pid]) => ({ id: pid, label: name })));
+      id = bestMatch(label, all)?.id ?? null;
+    }
+    out.push({ id: id ?? label, label });
+  }
+  return out;
+}
+
+// ─── Warm-up ─────────────────────────────────────────────────────────────
+
+// Push the system prompt + context through the server's prompt cache
+// while the user is still recording (the client pings /api/capture/warm on
+// record start) or while the audio is with the STT server (the audio route
+// fires it before transcribing). One flight at a time; a repeat within the
+// window for the same context is a no-op — the cache already holds it.
+const WARM_TTL_MS = 20_000;
+let warm: { key: string; at: number; done: Promise<LlmUsage | null> } | null = null;
+
+/** Test hook: forget the last warm-up so the next call goes out again. */
+export function resetParserWarmup(): void {
+  warm = null;
+}
+
+export async function warmParser(db: Db): Promise<LlmUsage | null> {
+  if (!(await isLlmConfigured())) return null;
+  const { context } = await gatherContext(db);
+  const key = contextPrefix(context);
+  if (warm && warm.key === key && Date.now() - warm.at < WARM_TTL_MS) return warm.done;
+  const done = prefillPrompt({
+    system: SYSTEM_PROMPT,
+    messages: [{ role: 'user', content: key }],
+    jsonMode: true,
+    effort: 'low',
+  }).catch(() => null); // best effort — the real call still works cold
+  warm = { key, at: Date.now(), done };
+  return done;
+}
+
 // ─── Main entry point ────────────────────────────────────────────────────
+
+export interface ParseOptions {
+  /** Structured log sink (a Fastify request logger fits). */
+  log?: { info: (obj: Record<string, unknown>, msg: string) => void };
+}
 
 export async function parseTranscript(
   transcript: string,
   db: Db,
+  opts: ParseOptions = {},
 ): Promise<ParseResult> {
-  const context = await gatherContext(db);
+  const [{ context, ids }, clk] = await Promise.all([gatherContext(db), clock()]);
 
   // Low effort + JSON mode: parsing is well-scoped, doesn't need deep
-  // reasoning. The system prompt is static (providers with prompt caching
-  // cache it); per-request context rides in the user message.
+  // reasoning (and on hybrid-reasoning local models `low` switches
+  // thinking off). The system prompt is static and the context is
+  // cache-stable; see buildUserMessage for the ordering.
+  const started = Date.now();
   const response = await chatComplete({
     system: SYSTEM_PROMPT,
-    messages: [
-      {
-        role: 'user',
-        content: [
-          '<context>',
-          JSON.stringify(context, null, 2),
-          '</context>',
-          '',
-          '<transcript>',
-          transcript,
-          '</transcript>',
-        ].join('\n'),
-      },
-    ],
+    messages: [{ role: 'user', content: buildUserMessage(context, clk, transcript) }],
     jsonMode: true,
     maxTokens: 2048,
     effort: 'low',
   });
+  opts.log?.info(
+    { ...response.usage, elapsed_ms: Date.now() - started, transcript_chars: transcript.length },
+    'parser llm call',
+  );
 
   if (!response.text) {
     return { kind: 'error', error: 'no_text_in_response', transcript };
@@ -270,11 +420,8 @@ export async function parseTranscript(
     return { kind: 'actions', actions: p.actions as ParsedAction[] };
   }
   if (p.needs_disambiguation === true) {
-    return {
-      kind: 'disambiguation',
-      field: String(p.field ?? ''),
-      candidates: (p.candidates as { id: string; label: string }[]) ?? [],
-    };
+    const field = String(p.field ?? '');
+    return { kind: 'disambiguation', field, candidates: resolveCandidates(field, p.candidates, ids) };
   }
   if (typeof p.error === 'string') {
     return { kind: 'error', error: p.error, transcript };

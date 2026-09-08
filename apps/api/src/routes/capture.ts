@@ -3,7 +3,7 @@ import {
   VoiceCaptureRequestSchema,
   type CaptureSource,
 } from '@jevi-ops/shared/schemas';
-import { parseTranscript } from '../lib/parser.js';
+import { parseTranscript, warmParser } from '../lib/parser.js';
 import { executeActions } from '../lib/executor.js';
 import { isLlmConfigured } from '../lib/llm.js';
 import { transcribeAudio, isSttConfigured } from '../lib/stt.js';
@@ -23,7 +23,7 @@ async function runPipeline(
 ) {
   let result;
   try {
-    result = await parseTranscript(transcript, getDb());
+    result = await parseTranscript(transcript, getDb(), { log: req.log });
   } catch (err) {
     req.log.error({ err }, 'parser failed');
     return reply.code(502).send({
@@ -130,6 +130,11 @@ export const captureRoutes: FastifyPluginAsync = async (app) => {
       'voice audio received (audio path)',
     );
 
+    // Prime the LLM's prompt cache while the audio is with the STT server —
+    // by the time the transcript is back, only the transcript itself is left
+    // to prefill. Fire-and-forget; warmParser never rejects.
+    void warmParser(getDb());
+
     let transcript: string;
     try {
       transcript = await transcribeAudio(buffer, filename, mimeType);
@@ -154,6 +159,20 @@ export const captureRoutes: FastifyPluginAsync = async (app) => {
       'stt transcript',
     );
     return runPipeline(req, reply, transcript);
+  });
+
+  // Warm the parser's prompt cache. The client calls this the moment a
+  // recording starts (or the capture portal opens), so the system prompt +
+  // context prefill overlaps with the user talking instead of following
+  // it. Returns immediately; the prefill runs in the background.
+  app.post('/api/capture/warm', async (req, reply) => {
+    if (!(await isLlmConfigured())) {
+      return reply.code(503).send({ error: 'llm_not_configured' });
+    }
+    void warmParser(getDb()).then((usage) => {
+      if (usage) req.log.info(usage, 'parser prompt cache warmed');
+    });
+    return reply.code(202).send({ status: 'warming' });
   });
 
   // Transcribe-only: same Whisper path, no parser or executor. Used by the

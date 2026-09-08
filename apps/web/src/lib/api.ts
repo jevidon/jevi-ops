@@ -400,6 +400,10 @@ export const captureApi = {
       body: formData,
       json: false,
     }),
+
+  // Prime the parser's LLM prompt cache — fired when a recording starts so
+  // the model's prefill overlaps with the user talking. 202 immediately.
+  warm: () => api.post<{ status: string }>('/api/capture/warm'),
 };
 
 // ─── Image uploads ──────────────────────────────────────────────────────
