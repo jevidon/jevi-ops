@@ -61,8 +61,9 @@ describe('doc save — optimistic concurrency + revisions', () => {
     // Same body, right version: nothing changes, no new revision.
     const same = await req('PATCH', `/api/assets/${asset.id}`, { doc_md: '# Outback\n\n- [ ] roof rack', doc_version: 2 });
     expect(same.json().asset.doc_version).toBe(2);
-    // No version = unconditional (imports).
-    const forced = await req('PATCH', `/api/assets/${asset.id}`, { doc_md: 'imported' });
+    // No version is refused; a deliberate overwrite says so (imports).
+    expect((await req('PATCH', `/api/assets/${asset.id}`, { doc_md: 'imported' })).statusCode).toBe(400);
+    const forced = await req('PATCH', `/api/assets/${asset.id}`, { doc_md: 'imported', doc_force: true });
     expect(forced.json().asset.doc_version).toBe(3);
     // Empty string clears.
     const cleared = await req('PATCH', `/api/assets/${asset.id}`, { doc_md: '', doc_version: 3 });
@@ -82,8 +83,9 @@ describe('doc save — optimistic concurrency + revisions', () => {
 
   it('a conflict rolls the whole PATCH back — the rename beside a stale doc does not land', async () => {
     const created = (await req('POST', '/api/projects', { name: 'Roof rack', domain_id: domainId, doc_md: 'v1 body' })).json();
-    expect(created.doc_version).toBe(1); // a create seeds the body without a revision
+    expect(created.doc_version).toBe(1); // a create seeds the body; the first edit snapshots it into history
     await req('PATCH', `/api/projects/${created.id}`, { doc_md: 'agent wrote this', doc_version: 1 });
+    expect((await req('GET', `/api/docs/project/${created.id}/revisions`)).json().revisions.map((r: { body: string }) => r.body)).toEqual(['agent wrote this', 'v1 body']);
     const stale = await req('PATCH', `/api/projects/${created.id}`, { name: 'Roof rack (renamed)', doc_md: 'mine', doc_version: 1 });
     expect(stale.statusCode).toBe(409);
     const row = await getDb().query.projects.findFirst({ where: eq(projects.id, created.id) });

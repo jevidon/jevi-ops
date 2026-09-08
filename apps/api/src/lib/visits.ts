@@ -27,21 +27,28 @@ import {
 
 // Service visits (0051) — the engine. A visit is ONE event: the odometer is
 // recorded once (a single reading), every line's completion links to it
-// and to the visit, and the whole thing lands in one transaction with the
-// asset row locked, so a burst of retries or a concurrent sweep can't
-// interleave. Each line goes through completeMaintenanceItem — the same
-// evidence rules, the same historical-entry semantics, the same task
-// closing — so nothing about a visit is a second code path for "done".
+// and to the visit, and the whole thing lands in one transaction. Each
+// line goes through completeMaintenanceItem — the same evidence rules, the
+// same historical-entry semantics, the same task closing — so nothing
+// about a visit is a second code path for "done".
+//
+// LOCK ORDER — every command here takes rows in the same order, so two of
+// them can never form a cycle:  asset  →  visit  →  items (ascending id).
+// The asset lock is the visit's serialisation point (its single reading);
+// item locks follow inside completeMaintenanceItem / lockItem, always in
+// ascending item id.
 //
 // Money: the visit's `total` is what the invoice said; a line's `cost` is
-// the allocated part. spend is invoice-grounded (visit totals + loose
-// completions' costs); line costs are for reasoning about one item.
+// the allocated part. Spend is stated in the household currency (visit
+// totals in it + loose completions' costs); an invoice in another
+// currency is listed apart, never converted or silently added.
 
 export type VisitRow = typeof maintenance_visits.$inferSelect;
 
 export interface VisitLine {
   itemId: string;
   skipped?: boolean;
+  skipReason?: string | null;
   cost?: number | null;
   notes?: string | null;
   issuedUntil?: string | null;
@@ -62,6 +69,8 @@ export interface CompleteVisitInput {
   provider?: string | null;
   invoiceNumber?: string | null;
   currency?: string | null;
+  // The household currency — what a visit without one is in.
+  defaultCurrency: string;
   total?: number | null;
   notes?: string | null;
   attachments?: StoredAttachment[] | null;
@@ -92,8 +101,13 @@ export class VisitError extends Error {
   }
 }
 
-async function lockAsset(tx: Tx, assetId: string) {
+export async function lockAsset(tx: Tx, assetId: string) {
   const [row] = await tx.select().from(assets).where(eq(assets.id, assetId)).for('update');
+  return row ?? null;
+}
+
+async function lockVisit(tx: Tx, visitId: string): Promise<VisitRow | null> {
+  const [row] = await tx.select().from(maintenance_visits).where(eq(maintenance_visits.id, visitId)).for('update');
   return row ?? null;
 }
 
@@ -109,36 +123,52 @@ async function itemsOnAsset(tx: Tx, assetId: string, itemIds: string[]) {
   return map;
 }
 
+// A retry reads the existing result. The key must belong to THIS visit
+// (when completing a plan) or to a visit on this asset (when logging one).
+async function existingVisitFor(tx: Tx, input: Pick<CompleteVisitInput, 'assetId' | 'visitId' | 'eventKey'>): Promise<CompleteVisitResult | null> {
+  if (!input.eventKey) return null;
+  const [existing] = await tx.select().from(maintenance_visits).where(eq(maintenance_visits.event_key, input.eventKey));
+  if (!existing) return null;
+  if (existing.asset_id !== input.assetId) {
+    throw new MaintenanceConflict('event_key_conflict', 'This event_key already identifies a visit on a different asset.');
+  }
+  if (input.visitId && existing.id !== input.visitId) {
+    throw new MaintenanceConflict('event_key_conflict', 'This event_key already identifies a different visit.');
+  }
+  const logs = await tx.select().from(maintenance_logs).where(eq(maintenance_logs.visit_id, existing.id));
+  const reading = existing.reading_id
+    ? ((await tx.select().from(asset_meter_readings).where(eq(asset_meter_readings.id, existing.reading_id)))[0] ?? null)
+    : null;
+  return {
+    visit: existing,
+    reading,
+    lines: logs.map((l) => ({ item_id: l.item_id, log_id: l.id, logged: false, historical: false })),
+    logged: false,
+  };
+}
+
 export async function completeVisit(db: DbOrTx, input: CompleteVisitInput): Promise<CompleteVisitResult> {
   const ownTx = !isTx(db);
   const result = await inTransaction(db, async (tx) => {
+    // asset → visit → items.
     const asset = await lockAsset(tx, input.assetId);
     if (!asset) throw new VisitError('visit_not_found', 'Asset not found.');
     const eventKey = input.eventKey ?? randomUUID();
 
-    // Retry / double-tap: the visit already exists. Return it as it is.
-    if (input.eventKey) {
-      const [existing] = await tx.select().from(maintenance_visits).where(eq(maintenance_visits.event_key, input.eventKey));
-      if (existing) {
-        if (existing.asset_id !== asset.id) {
-          throw new MaintenanceConflict('event_key_conflict', 'This event_key already identifies a visit on a different asset.');
-        }
-        const logs = await tx.select().from(maintenance_logs).where(eq(maintenance_logs.visit_id, existing.id));
-        const reading = existing.reading_id
-          ? ((await tx.select().from(asset_meter_readings).where(eq(asset_meter_readings.id, existing.reading_id)))[0] ?? null)
-          : null;
-        return {
-          visit: existing,
-          reading,
-          lines: logs.map((l) => ({ item_id: l.item_id, log_id: l.id, logged: false, historical: false })),
-          logged: false,
-        };
-      }
+    const replay = await existingVisitFor(tx, input);
+    if (replay) return replay;
+
+    let planned: VisitRow | null = null;
+    if (input.visitId) {
+      planned = await lockVisit(tx, input.visitId);
+      if (!planned || planned.asset_id !== asset.id) throw new VisitError('visit_not_found', 'Visit not found.');
+      if (planned.status !== 'planned') throw new VisitError('visit_not_planned', 'This visit is already recorded.');
     }
 
-    const active = input.lines.filter((l) => !l.skipped);
+    const lines = [...input.lines].sort((a, b) => a.itemId.localeCompare(b.itemId));
+    const active = lines.filter((l) => !l.skipped);
     if (active.length === 0) throw new VisitError('no_lines', 'A visit needs at least one line that was done.');
-    const items = await itemsOnAsset(tx, asset.id, input.lines.map((l) => l.itemId));
+    const items = await itemsOnAsset(tx, asset.id, lines.map((l) => l.itemId));
 
     // Evidence first, for every line, before anything is written.
     for (const line of active) {
@@ -179,7 +209,7 @@ export async function completeVisit(db: DbOrTx, input: CompleteVisitInput): Prom
       reading_id: reading?.id ?? null,
       provider: input.provider ?? null,
       invoice_number: input.invoiceNumber ?? null,
-      currency: input.currency ?? null,
+      currency: input.currency ?? input.defaultCurrency,
       total: input.total ?? null,
       notes: input.notes ?? null,
       attachments: input.attachments ?? [],
@@ -188,21 +218,53 @@ export async function completeVisit(db: DbOrTx, input: CompleteVisitInput): Prom
       run_id: input.runId ?? null,
     };
     let visit: VisitRow;
-    if (input.visitId) {
-      const [planned] = await tx.select().from(maintenance_visits).where(eq(maintenance_visits.id, input.visitId)).for('update');
-      if (!planned || planned.asset_id !== asset.id) throw new VisitError('visit_not_found', 'Visit not found.');
-      if (planned.status !== 'planned') throw new VisitError('visit_not_planned', 'This visit is already recorded.');
+    if (planned) {
       const [row] = await tx.update(maintenance_visits).set(facts).where(eq(maintenance_visits.id, planned.id)).returning();
       visit = row!;
-      // The plan's lines served their purpose; the logs are the record.
-      await tx.delete(maintenance_visit_items).where(eq(maintenance_visit_items.visit_id, planned.id));
     } else {
       const [row] = await tx.insert(maintenance_visits).values({ asset_id: asset.id, ...facts }).returning();
       visit = row!;
     }
 
-    // Each line is a completion — the one code path for "done".
-    const lines: CompleteVisitResult['lines'] = [];
+    // The lines are the account of the visit: what was planned and done,
+    // what was skipped and why. Planned rows keep their instructions.
+    const plannedRows = planned
+      ? await tx.select().from(maintenance_visit_items).where(eq(maintenance_visit_items.visit_id, visit.id))
+      : [];
+    const plannedById = new Map(plannedRows.map((r) => [r.item_id, r]));
+    let position = plannedRows.length;
+    for (const line of lines) {
+      const outcome = line.skipped ? 'skipped' : 'done';
+      const existingRow = plannedById.get(line.itemId);
+      if (existingRow) {
+        await tx
+          .update(maintenance_visit_items)
+          .set({ outcome, skip_reason: line.skipped ? (line.skipReason ?? null) : null })
+          .where(and(eq(maintenance_visit_items.visit_id, visit.id), eq(maintenance_visit_items.item_id, line.itemId)));
+      } else {
+        await tx.insert(maintenance_visit_items).values({
+          visit_id: visit.id,
+          item_id: line.itemId,
+          notes: null,
+          position: position++,
+          outcome,
+          skip_reason: line.skipped ? (line.skipReason ?? null) : null,
+        });
+      }
+    }
+    // A planned line the completion did not mention at all was skipped
+    // without a word.
+    for (const row of plannedRows) {
+      if (!lines.some((l) => l.itemId === row.item_id)) {
+        await tx
+          .update(maintenance_visit_items)
+          .set({ outcome: 'skipped' })
+          .where(and(eq(maintenance_visit_items.visit_id, visit.id), eq(maintenance_visit_items.item_id, row.item_id)));
+      }
+    }
+
+    // Each done line is a completion — the one code path for "done".
+    const outcomes: CompleteVisitResult['lines'] = [];
     for (const line of active) {
       const res = await completeMaintenanceItem(tx, line.itemId, {
         completedOn: input.visitedOn,
@@ -223,9 +285,9 @@ export async function completeVisit(db: DbOrTx, input: CompleteVisitInput): Prom
         nextReviewMeter: line.nextReviewMeter ?? null,
       });
       if (!res) throw new VisitError('item_not_on_asset', `Item ${line.itemId} vanished.`);
-      lines.push({ item_id: line.itemId, log_id: res.log.id, logged: res.logged, historical: res.historical });
+      outcomes.push({ item_id: line.itemId, log_id: res.log.id, logged: res.logged, historical: res.historical });
     }
-    return { visit, reading, lines, logged: true };
+    return { visit, reading, lines: outcomes, logged: true };
   });
 
   if (ownTx && result.logged) {
@@ -236,17 +298,21 @@ export async function completeVisit(db: DbOrTx, input: CompleteVisitInput): Prom
   return result;
 }
 
-// Undo a done visit: every line's completion comes out (schedules re-derive
-// from what remains), the visit's single reading is voided, the visit row
-// goes. A planned visit is simply deleted.
+// Undo a done visit: the visit's single reading is voided FIRST, then every
+// line's completion comes out and its schedule re-derives from what
+// remains — so a baseline with no mileage can't borrow the reading that is
+// on its way out. A planned visit is simply deleted.
 export async function deleteVisit(db: DbOrTx, visitId: string, ctx: ScheduleContext): Promise<{ deleted: boolean; logs_removed: number }> {
   return inTransaction(db, async (tx) => {
-    const [visit] = await tx.select().from(maintenance_visits).where(eq(maintenance_visits.id, visitId)).for('update');
+    const [peek] = await tx.select({ asset_id: maintenance_visits.asset_id }).from(maintenance_visits).where(eq(maintenance_visits.id, visitId));
+    if (!peek) return { deleted: false, logs_removed: 0 };
+    await lockAsset(tx, peek.asset_id);
+    const visit = await lockVisit(tx, visitId);
     if (!visit) return { deleted: false, logs_removed: 0 };
-    await lockAsset(tx, visit.asset_id);
     let removed = 0;
     if (visit.status === 'done') {
-      const logs = await tx.select().from(maintenance_logs).where(eq(maintenance_logs.visit_id, visit.id));
+      if (visit.reading_id) await voidReading(tx, visit.asset_id, visit.reading_id);
+      const logs = await tx.select().from(maintenance_logs).where(eq(maintenance_logs.visit_id, visit.id)).orderBy(asc(maintenance_logs.item_id));
       for (const log of logs) {
         const item = await lockItem(tx, log.item_id);
         const wasLatest = item ? await isLatestLog(tx, item.id, log.id) : false;
@@ -254,7 +320,6 @@ export async function deleteVisit(db: DbOrTx, visitId: string, ctx: ScheduleCont
         removed += 1;
         if (item && wasLatest) await rederiveAndReconcile(tx, item, ctx);
       }
-      if (visit.reading_id) await voidReading(tx, visit.asset_id, visit.reading_id);
     }
     await tx.delete(maintenance_visits).where(eq(maintenance_visits.id, visit.id));
     return { deleted: true, logs_removed: removed };
@@ -263,14 +328,15 @@ export async function deleteVisit(db: DbOrTx, visitId: string, ctx: ScheduleCont
 
 // Move a done visit's evidence: the date and/or the odometer. The single
 // reading and every line's log move together, and each affected schedule
-// re-derives when that log is its latest evidence.
+// re-derives when that log is its latest evidence. The caller holds the
+// asset and visit locks (in that order).
 export async function syncVisitEvidence(
   tx: Tx,
   visit: VisitRow,
   change: { visitedOn?: string; meter?: number | null; allowDecrease?: boolean; actor: string },
   ctx: ScheduleContext,
 ): Promise<VisitRow> {
-  const asset = await lockAsset(tx, visit.asset_id);
+  const [asset] = await tx.select().from(assets).where(eq(assets.id, visit.asset_id));
   if (!asset) throw new VisitError('visit_not_found', 'Asset not found.');
   const visitedOn = change.visitedOn ?? visit.visited_on!;
   const meterTouched = change.meter !== undefined;
@@ -307,7 +373,7 @@ export async function syncVisitEvidence(
     }
   }
 
-  const logs = await tx.select().from(maintenance_logs).where(eq(maintenance_logs.visit_id, visit.id));
+  const logs = await tx.select().from(maintenance_logs).where(eq(maintenance_logs.visit_id, visit.id)).orderBy(asc(maintenance_logs.item_id));
   for (const log of logs) {
     const item = await lockItem(tx, log.item_id);
     if (!item) continue;
@@ -329,7 +395,7 @@ export async function syncVisitEvidence(
 }
 
 // The asset's visits, planned first (soonest plan first), then done newest
-// first — each with its lines: the plan's items, or the completions.
+// first — each with its lines (plan + outcomes) and its completions.
 export async function listVisits(db: DbOrTx, assetId: string) {
   const rows = await db.query.maintenance_visits.findMany({
     where: eq(maintenance_visits.asset_id, assetId),
@@ -344,17 +410,70 @@ export async function listVisits(db: DbOrTx, assetId: string) {
   return [...planned, ...done];
 }
 
-// Invoice-grounded spend for a year: visit totals (an invoice is the
-// truth), plus the costs of completions that were not part of a visit.
-export async function spendForYear(db: DbOrTx, assetId: string, yearStart: string): Promise<number> {
+export interface SpendSummary {
+  // The household currency every figure below is stated in.
+  currency: string;
+  // Invoice-grounded: done visits' totals in the household currency + the
+  // costs of completions that were not part of a visit.
+  total: number;
+  // The allocated line costs across all completions (for reasoning about
+  // one item over time; visit lines' costs are in the visit's currency).
+  lines_total: number;
+  // Invoices in other currencies, grouped — reported, never converted.
+  foreign: Array<{ currency: string; total: number; visits: number }>;
+  // Work without a price is not free: how much the total leaves out.
+  unpriced: { visits: number; completions: number };
+}
+
+export async function spendSummary(db: DbOrTx, assetId: string, yearStart: string, currency: string): Promise<SpendSummary> {
   const visits = await db
-    .select({ total: maintenance_visits.total })
+    .select({ total: maintenance_visits.total, currency: maintenance_visits.currency })
     .from(maintenance_visits)
     .where(and(eq(maintenance_visits.asset_id, assetId), eq(maintenance_visits.status, 'done'), sql`${maintenance_visits.visited_on} >= ${yearStart}`));
   const loose = await db
     .select({ cost: maintenance_logs.cost })
     .from(maintenance_logs)
     .innerJoin(maintenance_items, eq(maintenance_items.id, maintenance_logs.item_id))
-    .where(and(eq(maintenance_items.asset_id, assetId), isNull(maintenance_logs.visit_id), sql`${maintenance_logs.completed_on} >= ${yearStart}`));
-  return visits.reduce((s, v) => s + (v.total ?? 0), 0) + loose.reduce((s, l) => s + (l.cost ?? 0), 0);
+    .where(
+      and(
+        eq(maintenance_items.asset_id, assetId),
+        isNull(maintenance_logs.visit_id),
+        eq(maintenance_logs.is_baseline, false),
+        sql`${maintenance_logs.completed_on} >= ${yearStart}`,
+      ),
+    );
+  const lines = await db
+    .select({ total: sql<string>`coalesce(sum(${maintenance_logs.cost}), 0)` })
+    .from(maintenance_logs)
+    .innerJoin(maintenance_items, eq(maintenance_items.id, maintenance_logs.item_id))
+    .where(and(eq(maintenance_items.asset_id, assetId), sql`${maintenance_logs.completed_on} >= ${yearStart}`));
+
+  let total = 0;
+  const foreign = new Map<string, { total: number; visits: number }>();
+  const unpriced = { visits: 0, completions: 0 };
+  for (const v of visits) {
+    if (v.total == null) {
+      unpriced.visits += 1;
+      continue;
+    }
+    const cur = v.currency ?? currency;
+    if (cur === currency) total += v.total;
+    else {
+      const f = foreign.get(cur) ?? { total: 0, visits: 0 };
+      f.total += v.total;
+      f.visits += 1;
+      foreign.set(cur, f);
+    }
+  }
+  for (const l of loose) {
+    if (l.cost == null) unpriced.completions += 1;
+    else total += l.cost;
+  }
+  return {
+    currency,
+    total,
+    lines_total: Number(lines[0]?.total ?? 0),
+    foreign: [...foreign.entries()].map(([cur, f]) => ({ currency: cur, ...f })).sort((a, b) => a.currency.localeCompare(b.currency)),
+    unpriced,
+  };
 }

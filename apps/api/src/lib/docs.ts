@@ -1,4 +1,4 @@
-import { desc, and, eq, sql } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import type { DocEntityType } from '@jevi-ops/shared';
 import type { DbOrTx, Tx } from './maintenance-tx.js';
 import { assets, doc_revisions, projects, stewardship_domains } from '../db/schema.js';
@@ -6,10 +6,14 @@ import { assets, doc_revisions, projects, stewardship_domains } from '../db/sche
 // The markdown overview document (0050) — one save path for the three
 // entities that carry one. Optimistic concurrency: the writer sends the
 // doc_version it read; under a row lock the current version must match or
-// the save is refused with the current body (DocConflict → 409). A save
-// that changes nothing bumps nothing. Every accepted save writes a
-// doc_revisions row with the new version and body, so the history is the
-// doc's own and an edit is never a loss.
+// the save is refused with the current body (DocConflict → 409). A write
+// that omits the version is refused too (DocVersionRequired → 400) — the
+// only unconditional path is an explicit `force`, for imports that must
+// land regardless. A save that changes nothing bumps nothing. Every
+// accepted save writes a doc_revisions row with the new version and body,
+// and the body it replaces is snapshotted first if history doesn't have it
+// yet (a document seeded at creation has no revision until then) — so no
+// version of the text is ever lost.
 
 const TABLES = {
   asset: assets,
@@ -24,12 +28,20 @@ export class DocConflict extends Error {
   }
 }
 
+export class DocVersionRequired extends Error {
+  constructor() {
+    super('Send the doc_version you read (or doc_force: true for a deliberate overwrite).');
+    this.name = 'DocVersionRequired';
+  }
+}
+
 export interface SaveDocInput {
   entityType: DocEntityType;
   id: string;
   body: string | null;
-  // The version the writer read; undefined = unconditional (imports).
+  // The version the writer read. Required unless `force`.
   expectedVersion?: number | null;
+  force?: boolean;
   actor?: string | null;
 }
 
@@ -40,6 +52,7 @@ export interface SaveDocResult {
 }
 
 export async function saveDoc(tx: Tx, input: SaveDocInput): Promise<SaveDocResult | null> {
+  if (input.expectedVersion == null && !input.force) throw new DocVersionRequired();
   const table = TABLES[input.entityType];
   const [current] = await tx
     .select({ doc_md: table.doc_md, doc_version: table.doc_version })
@@ -48,13 +61,24 @@ export async function saveDoc(tx: Tx, input: SaveDocInput): Promise<SaveDocResul
     .for('update');
   if (!current) return null;
 
-  if (input.expectedVersion != null && input.expectedVersion !== current.doc_version) {
+  if (!input.force && input.expectedVersion !== current.doc_version) {
     throw new DocConflict({ doc_md: current.doc_md, doc_version: current.doc_version });
   }
   const body = input.body === '' ? null : input.body;
   if (body === current.doc_md) {
     return { doc_md: current.doc_md, doc_version: current.doc_version, changed: false };
   }
+
+  // The body being replaced must be restorable: snapshot it under its own
+  // version when history doesn't have it (creation-seeded text, or a row
+  // that predates revisions). Idempotent on (entity, id, version).
+  if (current.doc_md != null) {
+    await tx
+      .insert(doc_revisions)
+      .values({ entity_type: input.entityType, entity_id: input.id, version: current.doc_version, body: current.doc_md, actor: null })
+      .onConflictDoNothing();
+  }
+
   const nextVersion = current.doc_version + 1;
   await tx
     .update(table)
@@ -91,5 +115,4 @@ export async function deleteDocRevisions(db: DbOrTx, entityType: DocEntityType, 
   await db
     .delete(doc_revisions)
     .where(and(eq(doc_revisions.entity_type, entityType), eq(doc_revisions.entity_id, id)));
-  void sql;
 }

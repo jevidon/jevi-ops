@@ -19,7 +19,7 @@ import {
 import { getAppSettings } from '../lib/app-settings.js';
 import { clearAttentionForSource } from '../lib/attention.js';
 import { getDb } from '../lib/db.js';
-import { DocConflict, deleteDocRevisions, saveDoc } from '../lib/docs.js';
+import { DocConflict, DocVersionRequired, deleteDocRevisions, saveDoc } from '../lib/docs.js';
 import {
   MaintenanceConflict,
   MaintenanceNeedsDetails,
@@ -46,7 +46,7 @@ import {
   type LatestReading,
 } from '../lib/meter-readings.js';
 import { todayInTz } from '../lib/tz.js';
-import { listVisits, spendForYear } from '../lib/visits.js';
+import { listVisits, spendSummary } from '../lib/visits.js';
 import {
   assets, attention_items, asset_meter_readings, maintenance_items, maintenance_logs, maintenance_visits, projects, tasks,
   type StoredAttachment,
@@ -110,9 +110,9 @@ function jsonEqual(a: unknown, b: unknown): boolean {
 type AssetRow = typeof assets.$inferSelect;
 type ItemWithAsset = ItemRow & { asset?: Pick<AssetRow, 'id' | 'name' | 'kind' | 'meter_unit' | 'domain_id' | 'lifecycle'> | null };
 
-async function policyContext(): Promise<{ today: string; staleDays: number }> {
+async function policyContext(): Promise<{ today: string; staleDays: number; currency: string }> {
   const s = await getAppSettings();
-  return { today: todayInTz(s.timezone), staleDays: s.meter_stale_days };
+  return { today: todayInTz(s.timezone), staleDays: s.meter_stale_days, currency: s.currency };
 }
 
 function withDueState(
@@ -261,7 +261,7 @@ export const maintenanceRoutes: FastifyPluginAsync = async (app) => {
     // uses — never derived from the paginated history above.
     const latest = (await latestReadingRowByAsset(db, [asset.id])).get(asset.id) ?? null;
     const withState = items.map((i) => withDueState(i, ctx, latest)).sort(dueSort);
-    const [visits, spendYtd] = await Promise.all([listVisits(db, asset.id), spendForYear(db, asset.id, yearStart)]);
+    const [visits, spend] = await Promise.all([listVisits(db, asset.id), spendSummary(db, asset.id, yearStart, ctx.currency)]);
     const { domain, ...assetRow } = asset;
     return {
       asset: assetRow,
@@ -274,8 +274,10 @@ export const maintenanceRoutes: FastifyPluginAsync = async (app) => {
       visits,
       // Allocated line costs across all completions this year…
       cost_ytd: Number(costRow?.total ?? 0),
-      // …versus invoice-grounded spend: visit totals + loose completions.
-      spend_ytd: spendYtd,
+      // …versus invoice-grounded spend in the household currency (0052),
+      // with foreign invoices and unpriced work reported apart.
+      spend,
+      spend_ytd: spend.total,
       today: ctx.today,
       meter_stale_days: ctx.staleDays,
     };
@@ -296,6 +298,7 @@ export const maintenanceRoutes: FastifyPluginAsync = async (app) => {
         meter_unit: parsed.data.meter_unit ?? null,
         metadata: parsed.data.metadata ?? {},
         notes: parsed.data.notes ?? null,
+        doc_md: parsed.data.doc_md || null,
       })
       .returning();
     return reply.code(201).send({ asset: row });
@@ -328,6 +331,9 @@ export const maintenanceRoutes: FastifyPluginAsync = async (app) => {
     } catch (err) {
       if (err instanceof DocConflict) {
         return reply.code(409).send({ error: 'doc_conflict', ...err.current, message: err.message });
+      }
+      if (err instanceof DocVersionRequired) {
+        return reply.code(400).send({ error: 'doc_version_required', message: err.message });
       }
       throw err;
     }
@@ -370,11 +376,32 @@ export const maintenanceRoutes: FastifyPluginAsync = async (app) => {
         }
       }
 
-      const { attachments, metadata_patch, doc_md, doc_version, ...rest } = d;
+      const { attachments, attachments_patch, metadata_patch, doc_md, doc_version, doc_force, ...rest } = d;
       const update: Partial<typeof assets.$inferInsert> = { ...rest };
       // Zod's Attachment and the persisted StoredAttachment are the same shape
       // spelled twice (notes route precedent) — cast at the boundary.
       if (attachments) update.attachments = attachments as StoredAttachment[];
+      // Photo operations against the CURRENT array (under the lock): an
+      // upload finishing late appends to what is there now, never to the
+      // array it started from.
+      if (attachments_patch) {
+        let arr: StoredAttachment[] = [...((update.attachments as StoredAttachment[] | undefined) ?? existing.attachments ?? [])];
+        const have = new Set(arr.map((a) => a.storage_path));
+        for (const a of attachments_patch.add ?? []) {
+          if (have.has(a.storage_path)) continue;
+          arr.push(a as StoredAttachment);
+          have.add(a.storage_path);
+        }
+        if (attachments_patch.remove?.length) {
+          const gone = new Set(attachments_patch.remove);
+          arr = arr.filter((a) => !gone.has(a.storage_path));
+        }
+        if (attachments_patch.hero) {
+          const i = arr.findIndex((a) => a.storage_path === attachments_patch.hero);
+          if (i > 0) arr = [arr[i]!, ...arr.slice(0, i), ...arr.slice(i + 1)];
+        }
+        update.attachments = arr;
+      }
 
       if (metadata_patch) {
         const base: Record<string, unknown> = { ...(rest.metadata ?? existing.metadata ?? {}) };
@@ -410,7 +437,7 @@ export const maintenanceRoutes: FastifyPluginAsync = async (app) => {
       // stale version — a DocConflict thrown here rolls the whole PATCH
       // back and reaches the client as 409 doc_conflict.
       if (doc_md !== undefined) {
-        const saved = await saveDoc(tx, { entityType: 'asset', id: existing.id, body: doc_md, expectedVersion: doc_version ?? null, actor });
+        const saved = await saveDoc(tx, { entityType: 'asset', id: existing.id, body: doc_md, expectedVersion: doc_version ?? null, force: doc_force, actor });
         if (saved) updated = { ...updated, doc_md: saved.doc_md, doc_version: saved.doc_version };
       }
 
@@ -943,11 +970,22 @@ export const maintenanceRoutes: FastifyPluginAsync = async (app) => {
     const db = getDb();
     const ctx = await policyContext();
     const { actor } = provenance(req);
-    let result: { item: ItemRow; log: typeof maintenance_logs.$inferSelect } | null;
+    let result: { item: ItemRow; log: typeof maintenance_logs.$inferSelect } | { error: 'edit_the_visit' } | null;
     try {
       result = await db.transaction(async (tx) => {
         const item = await lockItem(tx, req.params.id);
         if (!item) return null;
+        const [current] = await tx
+          .select()
+          .from(maintenance_logs)
+          .where(and(eq(maintenance_logs.id, req.params.logId), eq(maintenance_logs.item_id, item.id)));
+        if (!current) return null;
+        // A completion done at a visit (0051) stands on the visit's single
+        // reading with its siblings: its date and meter are the VISIT's to
+        // change. Notes and the allocated cost stay line-specific.
+        if (current.visit_id && (parsed.data.meter_at_completion !== undefined || parsed.data.completed_on !== undefined)) {
+          return { error: 'edit_the_visit' as const };
+        }
         const before = await latestLog(tx, item.id);
         const { allow_decrease, ...logPatch } = parsed.data;
         const [log] = await tx
@@ -1002,6 +1040,12 @@ export const maintenanceRoutes: FastifyPluginAsync = async (app) => {
       throw err;
     }
     if (!result) return reply.code(404).send({ error: 'not_found' });
+    if ('error' in result) {
+      return reply.code(409).send({
+        error: 'edit_the_visit',
+        message: 'This completion was done at a service visit. Change the date or odometer on the visit — every line and its reading move together.',
+      });
+    }
     return result;
   });
 

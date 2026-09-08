@@ -17,12 +17,15 @@ export const docFields = {
   doc_version: z.number().int().positive().optional(),
 };
 
-// On an update: `doc_md` is the new body (null clears it); `doc_version`
-// is the version the writer last saw. Omit `doc_version` for an
-// unconditional write (imports).
+// On an update: `doc_md` is the new body (null clears it) and `doc_version`
+// is the version the writer read — REQUIRED: a write that omits it is
+// refused (400 doc_version_required), so no client bypasses conflict
+// detection by leaving the field out. `doc_force: true` is the explicit,
+// deliberate exception (an import that must land regardless).
 export const docUpdateFields = {
   doc_md: z.string().max(200_000).nullable().optional(),
   doc_version: z.number().int().positive().optional(),
+  doc_force: z.boolean().optional(),
 };
 
 export const DocRevisionSchema = z.object({

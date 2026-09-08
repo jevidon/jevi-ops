@@ -14,9 +14,13 @@ import { adminUrl, devUrl } from './db-url.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const DB = 'jeviops_upgrade';
-const MIGRATIONS = ['0048_maintenance_hardening.sql', '0049_asset_area.sql', '0050_docs_ideas.sql', '0051_service_visits.sql'].map((f) =>
-  resolve(ROOT, 'infrastructure/migrations', f),
-);
+const MIGRATIONS = [
+  '0048_maintenance_hardening.sql',
+  '0049_asset_area.sql',
+  '0050_docs_ideas.sql',
+  '0051_service_visits.sql',
+  '0052_currency_visit_outcomes.sql',
+].map((f) => resolve(ROOT, 'infrastructure/migrations', f));
 
 function upgradeUrl(): string {
   const u = new URL(devUrl());
@@ -125,6 +129,13 @@ describe('0047 → 0048 → 0049', () => {
     const [v] = await sql`insert into maintenance_visits (asset_id, status, planned_on) values (${car!.id}, 'planned', '2026-10-01') returning id`;
     await sql`insert into maintenance_visit_items (visit_id, item_id) values (${v!.id}, ${seedOnly!.id})`;
     await expect(sql`insert into maintenance_visits (asset_id, status) values (${car!.id}, 'done')`).rejects.toThrow(); // done needs a date
+
+    // 0052: household currency + line outcomes.
+    const [settings0052] = await sql`select currency from app_settings limit 1`;
+    expect(settings0052!.currency).toBe('USD');
+    await expect(sql`update app_settings set currency = 'nzd'`).rejects.toThrow(); // upper-case ISO only
+    await sql`update maintenance_visit_items set outcome = 'skipped', skip_reason = 'no time' where visit_id = ${v!.id}`;
+    await expect(sql`update maintenance_visit_items set outcome = 'maybe' where visit_id = ${v!.id}`).rejects.toThrow();
 
     // The (item, day) unique is gone: two same-day services are allowed.
     await sql`insert into maintenance_logs (item_id, completed_on, source, event_key) values (${withLog!.id}, '2026-03-01', 'manual', 'a'), (${withLog!.id}, '2026-03-01', 'manual', 'b')`;

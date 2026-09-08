@@ -1082,6 +1082,7 @@ export type VisitStatus = 'planned' | 'done';
 export interface VisitLineInput {
   item_id: string;
   skipped?: boolean;
+  skip_reason?: string | null;
   cost?: number | null;
   notes?: string | null;
   issued_until?: string | null;
@@ -1117,10 +1118,37 @@ export interface Visit {
   run_id?: string | null;
   created_at: string;
   updated_at: string;
-  // A planned visit's lines (cleared on completion)…
-  lines: Array<{ visit_id: string; item_id: string; notes: string | null; position: number; item: VisitItemRef | null }>;
+  // The lines: the plan (and, once recorded, each line's outcome and any
+  // skip reason — planned instructions are kept)…
+  lines: Array<{
+    visit_id: string;
+    item_id: string;
+    notes: string | null;
+    position: number;
+    outcome: 'done' | 'skipped' | null;
+    skip_reason: string | null;
+    item: VisitItemRef | null;
+  }>;
   // …and a done visit's completions.
   logs: Array<MaintenanceLog & { item: VisitItemRef | null }>;
+}
+
+// Spend in the household currency (0052): invoice-grounded, with foreign
+// invoices and unpriced work reported apart — never converted or hidden.
+export interface SpendSummary {
+  currency: string;
+  total: number;
+  lines_total: number;
+  foreign: Array<{ currency: string; total: number; visits: number }>;
+  unpriced: { visits: number; completions: number };
+}
+
+export function formatMoney(amount: number, currency: string): string {
+  try {
+    return new Intl.NumberFormat('en', { style: 'currency', currency, maximumFractionDigits: 0 }).format(amount);
+  } catch {
+    return `${currency} ${amount.toLocaleString('en-US')}`;
+  }
 }
 
 export interface CompleteVisitBody {
@@ -1190,7 +1218,8 @@ export const assetsApi = {
       visits: Visit[];
       // Allocated line costs across all completions this app-tz year…
       cost_ytd: number;
-      // …versus invoice-grounded spend: visit totals + loose completions.
+      // …versus invoice-grounded spend in the household currency (0052).
+      spend: SpendSummary;
       spend_ytd: number;
       today: string;
       meter_stale_days: number;
@@ -1215,6 +1244,8 @@ export const assetsApi = {
       lifecycle: AssetLifecycle;
       archived_at: string | null;
       attachments: Attachment[];
+      // Photo operations against the current array (add / remove / hero).
+      attachments_patch: { add?: Attachment[]; remove?: string[]; hero?: string };
       doc_md: string | null;
       doc_version: number;
     }>,
@@ -1865,6 +1896,8 @@ export interface AppSettings {
   maintenance_module_enabled: boolean;
   // Reading-staleness policy (0048): days before the reading nag fires.
   meter_stale_days?: number;
+  // Household currency (0052), ISO 4217.
+  currency?: string;
   // Briefing panel visibility/order (migration 0044). Null → registry
   // defaults; resolved by mergePanelConfig in the panel registry.
   briefing_panels?: Array<{ id: string; enabled: boolean }> | null;

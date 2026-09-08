@@ -224,6 +224,25 @@ export async function setMeterStaleDaysAction(formData: FormData): Promise<SyncR
   return { ok: true, message: `Readings expected every ${raw} days.` };
 }
 
+// Settings → Maintenance → household currency (0052). Spend totals are
+// stated in it; visits default to it; foreign invoices are listed apart.
+export async function setCurrencyAction(formData: FormData): Promise<SyncResult> {
+  const raw = String(formData.get('currency') ?? '').trim().toUpperCase();
+  if (!/^[A-Z]{3}$/.test(raw)) return { ok: false, message: 'Use a three-letter ISO 4217 code, like NZD or USD.' };
+  try {
+    await settingsApi.updateApp({ currency: raw });
+  } catch (err) {
+    if (err instanceof ApiError) {
+      const body = err.body as { error?: string } | null;
+      return { ok: false, message: body?.error ?? `HTTP ${err.status}` };
+    }
+    return { ok: false, message: (err as Error).message };
+  }
+  revalidatePath('/settings');
+  revalidatePath('/assets/[id]', 'page');
+  return { ok: true, message: `Spend is stated in ${raw}.` };
+}
+
 export async function disconnectGoogleAction(): Promise<SyncResult> {
   try {
     await googleApi.disconnect();

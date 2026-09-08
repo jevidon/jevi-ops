@@ -107,6 +107,9 @@ export const CreateAssetSchema = z.object({
   meter_unit: z.string().min(1).nullable().optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
   notes: nullableString(),
+  // The overview document, seeded at creation (0050); its first edit
+  // snapshots this text into history.
+  doc_md: z.string().max(200_000).nullable().optional(),
 });
 
 // A facts edit as a PATCH with per-key compare-and-set. `set` writes keys,
@@ -123,9 +126,22 @@ export const MetadataPatchSchema = z.object({
 });
 export type MetadataPatch = z.infer<typeof MetadataPatchSchema>;
 
+// Photo operations against the CURRENT array, applied under the row lock:
+// add appends (duplicates by storage_path ignored), remove drops, hero
+// moves one to the front. Whole-array `attachments` stays for imports;
+// the gallery uses this so an upload finishing late can't resurrect a
+// removed photo or undo a hero choice made meanwhile.
+export const AttachmentsPatchSchema = z.object({
+  add: z.array(AttachmentSchema).optional(),
+  remove: z.array(z.string().min(1)).optional(),
+  hero: z.string().min(1).optional(),
+});
+export type AttachmentsPatch = z.infer<typeof AttachmentsPatchSchema>;
+
 export const UpdateAssetSchema = CreateAssetSchema.partial().extend({
   lifecycle: AssetLifecycleSchema.optional(),
   attachments: z.array(AttachmentSchema).optional(),
+  attachments_patch: AttachmentsPatchSchema.optional(),
   // Archive/unarchive goes through the same PATCH (routines precedent).
   archived_at: z.string().datetime({ offset: true }).nullable().optional(),
   // Preferred over whole-object `metadata` (which stays for imports and is

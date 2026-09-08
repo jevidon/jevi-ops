@@ -125,6 +125,13 @@ migrations on top — so a migration is tested on a populated database, not
 only via the clean `schema-selfhost.sql` bootstrap. When you add a
 migration, add it to that test's list.
 
+The web app has its own small Vitest suite (`apps/web/src/**/*.test.tsx`,
+jsdom + Testing Library, no database) for behaviour only a DOM can
+exercise — editor state during an in-flight save, navigation guards. Root
+`pnpm test` runs both suites. Never run `next build` beside the dev server
+(it clobbers the dev `.next` and pages 500 until `rm -rf apps/web/.next`
+and a web restart); stop the servers first, build, then start them again.
+
 ## Gotchas
 
 - App timezone is a DB setting (default `America/Denver`), not the machine's.

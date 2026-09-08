@@ -75,6 +75,7 @@ export function VisitForm({
       <input type="hidden" name="asset_id" value={assetId} />
       {visitId && <input type="hidden" name="visit_id" value={visitId} />}
       <input type="hidden" name="item_ids" value={JSON.stringify(items.map((i) => i.id))} />
+      {visitId && <input type="hidden" name="planned_ids" value={JSON.stringify(preselected)} />}
       <input type="hidden" name="attachments" value={JSON.stringify(attachments)} />
       <input type="hidden" name="event_key" value={key ? `web:${key}` : ''} />
 
@@ -122,6 +123,12 @@ export function VisitForm({
                       </span>
                     )}
                   </label>
+                  {!on && visitId && preselected.includes(item.id) && (
+                    <label className="mt-2 ml-7 flex flex-col gap-1 max-w-[420px]">
+                      <span className={labelCls}>Skipped — why? (kept on the visit; the item stays due)</span>
+                      <input type="text" name={`skip_reason_${item.id}`} placeholder="no time · part on order · not needed yet" className={inputCls} />
+                    </label>
+                  )}
                   {on && (
                     <div className="mt-2 ml-7 flex flex-wrap items-end gap-3">
                       {item.policy === 'expiry' && (

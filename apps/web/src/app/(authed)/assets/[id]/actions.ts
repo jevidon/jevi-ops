@@ -118,9 +118,11 @@ export async function completeVisitAction(
     return Number.isFinite(n) ? n : null;
   };
   let itemIds: string[] = [];
+  let plannedIds: string[] = [];
   let attachments: Attachment[] = [];
   try {
     itemIds = JSON.parse(String(formData.get('item_ids') ?? '[]'));
+    plannedIds = JSON.parse(String(formData.get('planned_ids') ?? '[]'));
     attachments = JSON.parse(String(formData.get('attachments') ?? '[]'));
   } catch {
     return { ok: false, error: 'Could not read the form.' };
@@ -138,6 +140,11 @@ export async function completeVisitAction(
       next_review_meter: num(`next_review_meter_${id}`),
     }));
   if (lines.length === 0) return { ok: false, error: 'Tick at least one item that was done.' };
+  // A planned line left unticked was skipped: it stays due, and the visit
+  // keeps the line with the reason.
+  for (const id of plannedIds) {
+    if (formData.get(`done_${id}`) !== 'on') lines.push({ item_id: id, skipped: true, skip_reason: str(`skip_reason_${id}`) });
+  }
   const eventKey = str('event_key');
   const body = {
     ...(str('visited_on') ? { visited_on: str('visited_on')! } : {}),
@@ -165,20 +172,28 @@ export async function completeVisitAction(
   redirect(`/assets/${assetId}#visits`);
 }
 
-// Photos (0050): the attachments array is the whole state — order is the
-// hero choice ([0]) and membership is what's kept.
-export async function saveAssetPhotosAction(input: {
+// Photos (0050): operations against the server's current array — add,
+// remove, set hero ([0]) — never a whole-array save, so a late upload or
+// another tab can't overwrite a removal or a hero choice made meanwhile.
+export async function patchAssetPhotosAction(input: {
   assetId: string;
-  attachments: Attachment[];
-}): Promise<SaveResult> {
+  add?: Attachment[];
+  remove?: string[];
+  hero?: string;
+}): Promise<{ ok: true; attachments: Attachment[] } | { ok: false; error: string }> {
   if (!input.assetId) return { ok: false, error: 'Missing asset.' };
+  let attachments: Attachment[];
   try {
-    await assetsApi.update(input.assetId, { attachments: input.attachments });
+    const res = await assetsApi.update(input.assetId, {
+      attachments_patch: { add: input.add, remove: input.remove, hero: input.hero },
+    });
+    attachments = res.asset.attachments ?? [];
   } catch (err) {
-    return shapeError(err);
+    const shaped = shapeError(err);
+    return { ok: false, error: shaped.ok ? 'Could not save the photos.' : shaped.error };
   }
   revalidateAsset(input.assetId, []);
-  return { ok: true, message: 'Photos saved.' };
+  return { ok: true, attachments };
 }
 
 // Facts, saved as a PATCH the API applies with per-key compare-and-set.

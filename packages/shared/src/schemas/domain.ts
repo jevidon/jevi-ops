@@ -61,6 +61,9 @@ export const CreateDomainSchema = z.object({
   name: z.string().trim().min(1),
   description: z.string().nullable().optional(),
   expected_cadence: z.string().nullable().optional(),
+  // The overview document, seeded at creation (0050); its first edit
+  // snapshots this text into history.
+  doc_md: z.string().max(200_000).nullable().optional(),
 });
 export type CreateDomain = z.infer<typeof CreateDomainSchema>;
 

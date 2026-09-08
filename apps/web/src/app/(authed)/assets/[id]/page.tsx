@@ -7,7 +7,7 @@ import {
 } from '@/components/detail/DetailShell';
 import { EditDrawer } from '@/components/detail/EditDrawer';
 import {
-  ApiError, assetsApi, domainsApi, workApi,
+  ApiError, assetsApi, domainsApi, formatMoney, workApi,
   type AssetProjectRow, type MaintenanceItem, type WorkAssetCard, type WorkProjectCard,
 } from '@/lib/api';
 import { factValue, maintenanceUrgency, type Urgency } from '@jevi-ops/shared';
@@ -64,7 +64,8 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
     if (detailRes.reason instanceof ApiError && detailRes.reason.status === 404) notFound();
     throw detailRes.reason;
   }
-  const { asset, domain, latest_reading: latest, readings, items, projects, visits, cost_ytd, spend_ytd, today, meter_stale_days } = detailRes.value;
+  const { asset, domain, latest_reading: latest, readings, items, projects, visits, spend, today, meter_stale_days } = detailRes.value;
+  const money = (amount: number, currency?: string | null) => formatMoney(amount, currency ?? spend.currency);
   const plannedVisits = visits.filter((v) => v.status === 'planned');
   const doneVisits = visits.filter((v) => v.status === 'done');
   const domains: DomainOption[] =
@@ -229,8 +230,15 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
         />
         <Stat
           label={`Spend · ${year}`}
-          value={spend_ytd > 0 ? `$${spend_ytd.toLocaleString('en-US')}` : '—'}
-          sub={cost_ytd > 0 && cost_ytd !== spend_ytd ? `invoices + loose work · $${cost_ytd.toLocaleString('en-US')} in lines` : 'invoices + loose work'}
+          value={spend.total > 0 ? money(spend.total) : '—'}
+          tone={spend.unpriced.visits + spend.unpriced.completions > 0 || spend.foreign.length > 0 ? 'warn' : undefined}
+          sub={[
+            `${spend.currency} · invoices + loose work`,
+            ...spend.foreign.map((f) => `${money(f.total, f.currency)} in ${f.visits} ${f.visits === 1 ? 'invoice' : 'invoices'} not converted`),
+            spend.unpriced.visits + spend.unpriced.completions > 0
+              ? `${spend.unpriced.visits + spend.unpriced.completions} unpriced`
+              : null,
+          ].filter(Boolean).join(' · ')}
         />
       </StatStrip>
 
@@ -374,11 +382,14 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
                     <span className="font-mono text-[12px] tabular-nums text-ink">{v.visited_on}</span>
                     {v.meter != null && unit && <span className="font-mono text-[11px] tabular-nums text-ink-3">{v.meter.toLocaleString('en-US')} {unit}</span>}
                     {v.provider && <span className="font-sans text-[13px] text-ink-2">{v.provider}</span>}
-                    {v.total != null && (
+                    {v.total != null ? (
                       <span className="font-mono text-[11px] tabular-nums text-ink">
-                        {v.currency ? `${v.currency} ` : '$'}{v.total.toLocaleString('en-US')}
+                        {money(v.total, v.currency)}
+                        {v.currency && v.currency !== spend.currency ? <span className="text-ink-4"> · not converted</span> : null}
                         {v.invoice_number ? <span className="text-ink-4"> · #{v.invoice_number}</span> : null}
                       </span>
+                    ) : (
+                      <span className="font-mono text-[9.5px] uppercase tracking-[0.06em] text-ink-4">unpriced</span>
                     )}
                     {v.attachments.length > 0 && <span className="font-mono text-[9.5px] uppercase tracking-[0.06em] text-ink-4">{v.attachments.length} photo{v.attachments.length === 1 ? '' : 's'}</span>}
                     <span className="ml-auto">
@@ -386,8 +397,17 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
                     </span>
                   </div>
                   <p className="mt-1 font-sans text-[12.5px] text-ink-2">
-                    {v.logs.map((l) => `${l.item?.name ?? '?'}${l.cost != null ? ` ($${l.cost.toLocaleString('en-US')})` : ''}`).join(' · ')}
+                    {v.logs.map((l) => `${l.item?.name ?? '?'}${l.cost != null ? ` (${money(l.cost, v.currency)})` : ''}`).join(' · ')}
                   </p>
+                  {v.lines.some((l) => l.outcome === 'skipped') && (
+                    <p className="mt-0.5 font-sans text-[12px] text-ink-3">
+                      <span className="font-mono text-[9.5px] uppercase tracking-[0.06em] mr-1.5">skipped</span>
+                      {v.lines
+                        .filter((l) => l.outcome === 'skipped')
+                        .map((l) => `${l.item?.name ?? '?'}${l.skip_reason ? ` — ${l.skip_reason}` : ''}`)
+                        .join(' · ')}
+                    </p>
+                  )}
                   {v.notes && <p className="mt-0.5 font-sans text-[12px] text-ink-3">{v.notes}</p>}
                 </div>
               ))}

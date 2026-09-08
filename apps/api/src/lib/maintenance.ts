@@ -39,10 +39,13 @@ import {
 //     completion is evidence (it appends), but it is not "today's work
 //     done": the schedule — including a manually pinned deadline — the
 //     generated task, and attention are not touched at all.
-//   * IDEMPOTENT retries. A repeat with the same event_key finds the existing
-//     log and still re-derives the schedule — a retry after a partial
-//     failure converges instead of silently no-op'ing. The same key on a
-//     different item is a conflict, never a second event.
+//   * IDEMPOTENT retries. A repeat with the same event_key is a READ of the
+//     existing result: the log comes back with logged:false and nothing
+//     else runs — no re-derivation, no task closing. Everything a completion
+//     does happens in one transaction, so there is no partial state to
+//     repair; and a delayed retry must never touch whatever happened since
+//     (a new occurrence's task, a manually pinned deadline). The same key
+//     on a different item is a conflict, never a second event.
 //   * A completion's meter is a reading, validated like any other reading
 //     (no going backwards without allow_decrease).
 
@@ -281,16 +284,16 @@ export async function completeMaintenanceItem(
         log = { ...log, reading_id: reading.id };
       }
     } else {
-      // Retry / double-tap: the event already exists. Fall through and
-      // re-derive so a partial earlier attempt converges — unless the key
-      // belongs to another item, which is a client bug, not a retry.
+      // Retry / double-tap: the event already exists. Return it as it is —
+      // no side effects replay (see header) — unless the key belongs to
+      // another item, which is a client bug, not a retry.
       const [existing] = await tx.select().from(maintenance_logs).where(eq(maintenance_logs.event_key, eventKey));
       if (!existing) throw new Error('maintenance event conflict without a matching log');
       if (existing.item_id !== item.id) {
         throw new MaintenanceConflict('event_key_conflict', 'This event_key already identifies a completion on a different item.');
       }
-      log = existing;
-      logged = false;
+      const latestNow = await latestLog(tx, item.id);
+      return { item, log: existing, logged: false, historical: latestNow != null && latestNow.id !== existing.id };
     }
 
     // Current state comes from the LATEST applicable evidence, whatever was
@@ -313,10 +316,25 @@ export async function completeMaintenanceItem(
     return { item: updated ?? item, log, logged, historical };
   });
 
-  if (result && ownTx && !result.historical) {
+  if (result && ownTx && result.logged && !result.historical) {
     await clearMaintenanceAttention(db as Db, itemId);
   }
   return result;
+}
+
+// Is a generated task still the machine's — nothing of the person's on it?
+// Notes, filing under a project or milestone, a changed title, or subtasks
+// beneath it (which a delete would cascade away) all make it theirs, and
+// theirs is never deleted by reconciliation: it is unlinked or retargeted.
+export async function isUntouchedTask(
+  tx: Tx,
+  task: Pick<typeof tasks.$inferSelect, 'id' | 'title' | 'notes' | 'project_id' | 'milestone_id'>,
+  expectedTitles: string[],
+): Promise<boolean> {
+  if (task.notes?.trim() || task.project_id || task.milestone_id) return false;
+  if (!expectedTitles.includes(task.title)) return false;
+  const [child] = await tx.select({ id: tasks.id }).from(tasks).where(eq(tasks.parent_task_id, task.id)).limit(1);
+  return !child;
 }
 
 // Live-clear this item's attention. Best-effort, after commit — attention
@@ -440,11 +458,7 @@ export async function reconcileItemTask(
   });
   const inWindow = state.status !== 'ok';
   const generatedTitle = maintenanceTaskTitle(item, asset);
-  const untouched =
-    !live.notes &&
-    !live.project_id &&
-    !live.milestone_id &&
-    (live.title === generatedTitle || (!!opts.previousTitle && live.title === opts.previousTitle));
+  const untouched = await isUntouchedTask(tx, live, [generatedTitle, ...(opts.previousTitle ? [opts.previousTitle] : [])]);
 
   if (!inWindow && untouched) {
     await tx.delete(tasks).where(eq(tasks.id, live.id));
@@ -498,25 +512,41 @@ export async function reconcileItemTask(
 }
 
 // Lifecycle reconciliation: when an item is deactivated/deleted or its asset
-// leaves 'active', the generated work it spawned must go with it — an open
-// task for a sold car is noise. Deletes open/waiting generated tasks
-// (they're machine-made; nothing is lost), clears links, and removes live
-// attention. Runs in the caller's transaction.
-export async function reconcileGeneratedWork(tx: Tx, itemIds: string[]): Promise<{ tasks_removed: number }> {
-  if (itemIds.length === 0) return { tasks_removed: 0 };
+// leaves 'active', the generated work it spawned stops being wanted — an
+// open task for a sold car is noise. An UNTOUCHED generated task is
+// deleted (machine-made; nothing is lost). A task the person enriched — a
+// booking note, a quote reference, subtasks, filing under a project — is
+// KEPT: unlinked from the item and released from its occurrence key, so it
+// lives on as an ordinary task with everything they wrote. Live attention
+// is removed either way. Runs in the caller's transaction.
+export async function reconcileGeneratedWork(tx: Tx, itemIds: string[]): Promise<{ tasks_removed: number; tasks_kept: number }> {
+  if (itemIds.length === 0) return { tasks_removed: 0, tasks_kept: 0 };
   const rows = await tx
-    .select({ id: maintenance_items.id, task_id: maintenance_items.generated_task_id })
+    .select({
+      id: maintenance_items.id,
+      name: maintenance_items.name,
+      task_id: maintenance_items.generated_task_id,
+      asset_name: assets.name,
+    })
     .from(maintenance_items)
+    .leftJoin(assets, eq(assets.id, maintenance_items.asset_id))
     .where(inArray(maintenance_items.id, itemIds));
-  const taskIds = rows.map((r) => r.task_id).filter((v): v is string => v != null);
   let removed = 0;
-  if (taskIds.length > 0) {
-    const deleted = await tx
-      .delete(tasks)
-      .where(and(inArray(tasks.id, taskIds), inArray(tasks.status, ['open', 'waiting'])))
-      .returning({ id: tasks.id });
-    removed = deleted.length;
-    await tx.update(maintenance_items).set({ generated_task_id: null }).where(inArray(maintenance_items.id, itemIds));
+  let kept = 0;
+  for (const row of rows) {
+    if (!row.task_id) continue;
+    const [task] = await tx.select().from(tasks).where(eq(tasks.id, row.task_id));
+    if (task && task.status !== 'done') {
+      const title = maintenanceTaskTitle({ name: row.name }, row.asset_name ? { name: row.asset_name } : null);
+      if (await isUntouchedTask(tx, task, [title])) {
+        await tx.delete(tasks).where(eq(tasks.id, task.id));
+        removed += 1;
+      } else {
+        await tx.update(tasks).set({ source_ref: null }).where(eq(tasks.id, task.id));
+        kept += 1;
+      }
+    }
+    await tx.update(maintenance_items).set({ generated_task_id: null }).where(eq(maintenance_items.id, row.id));
   }
   await tx
     .delete(attention_items)
@@ -527,7 +557,7 @@ export async function reconcileGeneratedWork(tx: Tx, itemIds: string[]): Promise
         inArray(attention_items.status, ['active', 'snoozed']),
       ),
     );
-  return { tasks_removed: removed };
+  return { tasks_removed: removed, tasks_kept: kept };
 }
 
 // Where an item's generated task lands: its own domain, else its asset's,

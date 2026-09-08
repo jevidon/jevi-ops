@@ -724,6 +724,9 @@ create table if not exists app_settings (
   -- Reading-staleness policy (migration 0048): days without a meter reading
   -- before a metered asset with meter-cadence items gets the reading nag.
   meter_stale_days integer not null default 14 check (meter_stale_days > 0),
+  -- Household currency (0052): spend totals are stated in it; foreign
+  -- invoices are listed apart, never converted.
+  currency text not null default 'USD' check (currency ~ '^[A-Z]{3}$'),
   -- Briefing panel visibility/order (migration 0044): ordered array of
   -- {id, enabled}. Null → registry defaults (web mergePanelConfig).
   briefing_panels jsonb,
@@ -1443,6 +1446,9 @@ create table if not exists maintenance_visit_items (
   item_id uuid not null references maintenance_items(id) on delete cascade,
   notes text,
   position integer not null default 0,
+  -- Null while planned; done or skipped once recorded (0052).
+  outcome text check (outcome is null or outcome in ('done','skipped')),
+  skip_reason text,
   primary key (visit_id, item_id)
 );
 

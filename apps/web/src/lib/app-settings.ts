@@ -20,6 +20,8 @@ interface WebAppSettings {
   maintenance_module_enabled: boolean;
   // Reading-staleness policy (0048): days before the reading nag fires.
   meter_stale_days: number;
+  // Household currency (0052), ISO 4217.
+  currency: string;
   // Briefing panel visibility/order (migration 0044); null → registry
   // defaults. Projected here deliberately — this interface drops unknown
   // fields, so forgetting this line silently loses the config.
@@ -52,6 +54,7 @@ export const getAppSettings = cache(async (): Promise<WebAppSettings> => {
       // Default on: maintenance is core home-ops.
       maintenance_module_enabled: settings.maintenance_module_enabled ?? true,
       meter_stale_days: settings.meter_stale_days ?? 14,
+      currency: settings.currency ?? 'USD',
       briefing_panels: settings.briefing_panels ?? null,
       agenda_image_url: settings.agenda_image_url ?? null,
       agenda_data_url: settings.agenda_data_url ?? null,
@@ -64,6 +67,7 @@ export const getAppSettings = cache(async (): Promise<WebAppSettings> => {
       rule_module_enabled: false,
       maintenance_module_enabled: true,
       meter_stale_days: 14,
+      currency: 'USD',
       briefing_panels: null,
       agenda_image_url: null,
       agenda_data_url: null,

@@ -35,9 +35,11 @@ export function DocPanel({
         initialBody={current.body}
         initialVersion={current.version}
         promote={promote}
-        onSaved={(b, v) => {
+        onSaved={(b, v, keepEditing) => {
           setCurrent({ body: b, version: v });
-          setEditing(false);
+          // The draft moved on during the save: the editor stays open on
+          // the newer text rather than closing over it.
+          if (!keepEditing) setEditing(false);
         }}
         onCancel={() => setEditing(false)}
       />

@@ -21,7 +21,9 @@ export type VisitStatus = z.infer<typeof VisitStatusSchema>;
 export const VisitLineInputSchema = z.object({
   item_id: z.string().uuid(),
   // A planned line the workshop did not get to: stays due, task stays open.
+  // The line is kept on the visit with outcome 'skipped' and the reason.
   skipped: z.boolean().optional(),
+  skip_reason: nullableString(),
   cost: nullableNonNeg(),
   notes: nullableString(),
   issued_until: nullableDate(),

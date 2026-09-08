@@ -6,13 +6,13 @@ import { getDb } from '../lib/db.js';
 import { MaintenanceConflict, MaintenanceNeedsDetails } from '../lib/maintenance.js';
 import { runMaintenanceSweep } from '../lib/maintenance-sweep.js';
 import { ReadingRejected } from '../lib/meter-readings.js';
-import { todayInTz } from '../lib/tz.js';
-import { VisitError, completeVisit, deleteVisit, listVisits, syncVisitEvidence, type VisitLine } from '../lib/visits.js';
+import { VisitError, completeVisit, deleteVisit, listVisits, lockAsset, syncVisitEvidence, type VisitLine } from '../lib/visits.js';
 import { assets, maintenance_items, maintenance_visit_items, maintenance_visits, type StoredAttachment } from '../db/schema.js';
 
 // Service visits (0051). Planned = a saved work order; done = the record
-// (one reading, N completions, one invoice) — see lib/visits.ts. Provenance
-// follows the credential like every other maintenance write.
+// (one reading, N completions, one invoice) — see lib/visits.ts, including
+// the lock order every write here follows (asset → visit → items).
+// Provenance follows the credential like every other maintenance write.
 
 function provenance(req: FastifyRequest, declared?: 'agent' | 'import'): { source: 'manual' | 'agent' | 'import'; actor: string } {
   const actor = req.authMethod === 'api_token' ? req.user!.email : `session:${req.user!.email}`;
@@ -41,10 +41,24 @@ function sendVisitError(reply: FastifyReply, err: unknown): boolean {
   return false;
 }
 
-function toLines(lines: Array<{ item_id: string; skipped?: boolean; cost?: number | null; notes?: string | null; issued_until?: string | null; purchased_to?: number | null; finding?: string | null; next_review_on?: string | null; next_review_meter?: number | null }>): VisitLine[] {
+type LineWire = {
+  item_id: string;
+  skipped?: boolean;
+  skip_reason?: string | null;
+  cost?: number | null;
+  notes?: string | null;
+  issued_until?: string | null;
+  purchased_to?: number | null;
+  finding?: string | null;
+  next_review_on?: string | null;
+  next_review_meter?: number | null;
+};
+
+function toLines(lines: LineWire[]): VisitLine[] {
   return lines.map((l) => ({
     itemId: l.item_id,
     skipped: l.skipped,
+    skipReason: l.skip_reason ?? null,
     cost: l.cost ?? null,
     notes: l.notes ?? null,
     issuedUntil: l.issued_until ?? null,
@@ -60,7 +74,17 @@ export const visitRoutes: FastifyPluginAsync = async (app) => {
 
   async function ctx() {
     const s = await getAppSettings();
-    return { today: todayInTz(s.timezone), staleDays: s.meter_stale_days };
+    return { today: todayInTz(s.timezone), staleDays: s.meter_stale_days, currency: s.currency };
+  }
+
+  async function visitPayload(assetId: string, visitId: string, logged: boolean) {
+    const all = await listVisits(getDb(), assetId);
+    const visit = all.find((v) => v.id === visitId) ?? null;
+    return {
+      visit,
+      lines: (visit?.logs ?? []).map((l) => ({ item_id: l.item_id, log_id: l.id, logged: false, historical: false })),
+      logged,
+    };
   }
 
   app.get<{ Params: { id: string } }>('/api/assets/:id/visits', async (req, reply) => {
@@ -87,7 +111,7 @@ export const visitRoutes: FastifyPluginAsync = async (app) => {
     const db = getDb();
     const asset = await db.query.assets.findFirst({ where: eq(assets.id, req.params.id) });
     if (!asset) return reply.code(404).send({ error: 'not_found' });
-    const { today } = await ctx();
+    const c = await ctx();
     const d = parsed.data;
 
     if (d.status === 'planned') {
@@ -109,19 +133,20 @@ export const visitRoutes: FastifyPluginAsync = async (app) => {
       return reply.code(201).send({ visit: all.find((v) => v.id === visit.id) ?? visit });
     }
 
-    const visitedOn = d.visited_on ?? today;
-    if (visitedOn > today) return reply.code(400).send({ error: 'future_completion', message: 'A visit cannot be dated in the future.' });
+    const visitedOn = d.visited_on ?? c.today;
+    if (visitedOn > c.today) return reply.code(400).send({ error: 'future_completion', message: 'A visit cannot be dated in the future.' });
     const { source, actor } = provenance(req, d.source);
     try {
       const result = await completeVisit(db, {
         assetId: asset.id,
         visitedOn,
-        today,
+        today: c.today,
         meter: d.meter ?? null,
         allowDecrease: d.allow_decrease,
         provider: d.provider ?? null,
         invoiceNumber: d.invoice_number ?? null,
         currency: d.currency ?? null,
+        defaultCurrency: c.currency,
         total: d.total ?? null,
         notes: d.notes ?? null,
         attachments: (d.attachments as StoredAttachment[] | undefined) ?? null,
@@ -131,8 +156,7 @@ export const visitRoutes: FastifyPluginAsync = async (app) => {
         actor,
         lines: toLines(d.lines),
       });
-      const all = await listVisits(db, asset.id);
-      return reply.code(result.logged ? 201 : 200).send({ visit: all.find((v) => v.id === result.visit.id) ?? result.visit, lines: result.lines, logged: result.logged });
+      return reply.code(result.logged ? 201 : 200).send(await visitPayload(asset.id, result.visit.id, result.logged));
     } catch (err) {
       if (sendVisitError(reply, err)) return reply;
       throw err;
@@ -140,7 +164,10 @@ export const visitRoutes: FastifyPluginAsync = async (app) => {
   });
 
   // Complete a planned visit: the plan's lines by default, with the day's
-  // evidence per line; a line the workshop skipped stays due.
+  // evidence per line; a line the workshop skipped stays due. A retry of
+  // the request that already recorded this plan reads the existing result
+  // — checked before the status, which would otherwise mistake it for a
+  // second attempt.
   app.post<{ Params: { id: string } }>('/api/visits/:id/complete', async (req, reply) => {
     const parsed = CompleteVisitSchema.safeParse(req.body ?? {});
     if (!parsed.success) {
@@ -149,23 +176,27 @@ export const visitRoutes: FastifyPluginAsync = async (app) => {
     const db = getDb();
     const planned = await db.query.maintenance_visits.findFirst({ where: eq(maintenance_visits.id, req.params.id) });
     if (!planned) return reply.code(404).send({ error: 'not_found' });
-    if (planned.status !== 'planned') return reply.code(409).send({ error: 'visit_not_planned', message: 'This visit is already recorded.' });
-    const { today } = await ctx();
+    const c = await ctx();
     const d = parsed.data;
-    const visitedOn = d.visited_on ?? today;
-    if (visitedOn > today) return reply.code(400).send({ error: 'future_completion', message: 'A visit cannot be dated in the future.' });
+    if (d.event_key && planned.status === 'done' && planned.event_key === d.event_key) {
+      return reply.code(200).send(await visitPayload(planned.asset_id, planned.id, false));
+    }
+    if (planned.status !== 'planned') return reply.code(409).send({ error: 'visit_not_planned', message: 'This visit is already recorded.' });
+    const visitedOn = d.visited_on ?? c.today;
+    if (visitedOn > c.today) return reply.code(400).send({ error: 'future_completion', message: 'A visit cannot be dated in the future.' });
     const { source, actor } = provenance(req, d.source);
     try {
       const result = await completeVisit(db, {
         assetId: planned.asset_id,
         visitId: planned.id,
         visitedOn,
-        today,
+        today: c.today,
         meter: d.meter ?? null,
         allowDecrease: d.allow_decrease,
         provider: d.provider ?? planned.provider,
         invoiceNumber: d.invoice_number ?? null,
         currency: d.currency ?? null,
+        defaultCurrency: c.currency,
         total: d.total ?? null,
         notes: d.notes ?? planned.notes,
         attachments: (d.attachments as StoredAttachment[] | undefined) ?? null,
@@ -175,8 +206,7 @@ export const visitRoutes: FastifyPluginAsync = async (app) => {
         actor,
         lines: toLines(d.lines),
       });
-      const all = await listVisits(db, planned.asset_id);
-      return reply.code(result.logged ? 201 : 200).send({ visit: all.find((v) => v.id === result.visit.id) ?? result.visit, lines: result.lines, logged: result.logged });
+      return reply.code(result.logged ? 201 : 200).send(await visitPayload(planned.asset_id, result.visit.id, result.logged));
     } catch (err) {
       if (sendVisitError(reply, err)) return reply;
       throw err;
@@ -194,6 +224,10 @@ export const visitRoutes: FastifyPluginAsync = async (app) => {
     const { actor } = provenance(req);
     try {
       const visit = await db.transaction(async (tx) => {
+        // asset → visit (the documented order; see lib/visits.ts).
+        const [peek] = await tx.select({ asset_id: maintenance_visits.asset_id }).from(maintenance_visits).where(eq(maintenance_visits.id, req.params.id));
+        if (!peek) return null;
+        await lockAsset(tx, peek.asset_id);
         const [existing] = await tx.select().from(maintenance_visits).where(eq(maintenance_visits.id, req.params.id)).for('update');
         if (!existing) return null;
         const facts: Partial<typeof maintenance_visits.$inferInsert> = {};
@@ -242,8 +276,8 @@ export const visitRoutes: FastifyPluginAsync = async (app) => {
     }
   });
 
-  // Planned: delete the plan. Done: undo the whole visit — every line's
-  // completion comes out, the single reading is voided.
+  // Planned: delete the plan. Done: undo the whole visit — the single
+  // reading is voided first, then every line's completion comes out.
   app.delete<{ Params: { id: string } }>('/api/visits/:id', async (req, reply) => {
     const db = getDb();
     const c = await ctx();
@@ -252,3 +286,5 @@ export const visitRoutes: FastifyPluginAsync = async (app) => {
     return result;
   });
 };
+
+import { todayInTz } from '../lib/tz.js';

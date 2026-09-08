@@ -11,7 +11,7 @@ import {
 import { getAppTz } from '../lib/app-settings.js';
 import { getDb } from '../lib/db.js';
 import { clearAttentionForSource } from '../lib/attention.js';
-import { DocConflict, deleteDocRevisions, saveDoc } from '../lib/docs.js';
+import { DocConflict, DocVersionRequired, deleteDocRevisions, saveDoc } from '../lib/docs.js';
 import {
   activity_log,
   assets,
@@ -202,7 +202,7 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
         details: parsed.error.flatten().fieldErrors,
       });
     }
-    const { doc_md, doc_version, ...patch } = parsed.data;
+    const { doc_md, doc_version, doc_force, ...patch } = parsed.data;
     const update: Partial<typeof projects.$inferInsert> = { ...patch };
     // Status flips stamp / clear completed_at so analytics never see a
     // stale finish on a project that's back in flight. Mirrors the
@@ -241,12 +241,15 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
           : await tx.select().from(projects).where(eq(projects.id, req.params.id));
         if (!r) return undefined;
         if (doc_md === undefined) return r;
-        const saved = await saveDoc(tx, { entityType: 'project', id: r.id, body: doc_md, expectedVersion: doc_version ?? null, actor });
+        const saved = await saveDoc(tx, { entityType: 'project', id: r.id, body: doc_md, expectedVersion: doc_version ?? null, force: doc_force, actor });
         return saved ? { ...r, doc_md: saved.doc_md, doc_version: saved.doc_version } : r;
       });
     } catch (err) {
       if (err instanceof DocConflict) {
         return reply.code(409).send({ error: 'doc_conflict', ...err.current, message: err.message });
+      }
+      if (err instanceof DocVersionRequired) {
+        return reply.code(400).send({ error: 'doc_version_required', message: err.message });
       }
       throw err;
     }

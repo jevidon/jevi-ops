@@ -63,6 +63,9 @@ export const AppSettingsSchema = z.object({
   // Reading-staleness policy (0048): days without a meter reading before
   // the reading nag fires.
   meter_stale_days: z.number().int().positive(),
+  // Household currency (0052), ISO 4217. Spend totals are stated in it;
+  // foreign-currency invoices are listed apart, never converted.
+  currency: z.string().regex(/^[A-Z]{3}$/),
   briefing_panels: BriefingPanelConfigSchema.nullable(),
   // Frame panel image URL (migration 0045); null hides the panel.
   agenda_image_url: z.string().nullable(),
@@ -89,6 +92,7 @@ export const UpdateAppSettingsSchema = z.object({
   rule_module_enabled: z.boolean().optional(),
   maintenance_module_enabled: z.boolean().optional(),
   meter_stale_days: z.number().int().positive().max(365).optional(),
+  currency: z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/, 'Use a three-letter ISO 4217 code.').optional(),
   briefing_panels: BriefingPanelConfigSchema.nullable().optional(),
   agenda_image_url: ClearableUrl.optional(),
   agenda_data_url: ClearableUrl.optional(),

@@ -132,7 +132,7 @@ export default async function SettingsPage({
       </SettingsSection>
 
       <SettingsSection title="Maintenance">
-        <MaintenanceSettingsForm meterStaleDays={webSettings.meter_stale_days} />
+        <MaintenanceSettingsForm meterStaleDays={webSettings.meter_stale_days} currency={webSettings.currency} />
       </SettingsSection>
 
       <SettingsSection title="Agenda · panels">

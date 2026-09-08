@@ -49,7 +49,6 @@ describe('a done visit', () => {
       meter: 100500,
       provider: 'Toyota Botany',
       invoice_number: 'INV-77',
-      currency: 'nzd',
       total: 420,
       notes: 'rattle is the heat shield',
       lines: [
@@ -60,7 +59,7 @@ describe('a done visit', () => {
     expect(res.statusCode).toBe(201);
     const visit = res.json().visit;
     expect(visit.status).toBe('done');
-    expect(visit.currency).toBe('NZD');
+    expect(visit.currency).toBe('USD'); // the household currency, by default
     expect(visit.logs).toHaveLength(2);
 
     // One reading, shared by both lines and the visit.
@@ -81,6 +80,7 @@ describe('a done visit', () => {
 
     const bundle = (await req('GET', `/api/assets/${asset.id}`)).json();
     expect(bundle.spend_ytd).toBe(420); // the invoice
+    expect(bundle.spend.currency).toBe('USD');
     expect(bundle.cost_ytd).toBe(245); // the allocated lines
     expect(bundle.visits[0].logs.map((l: { item: { name: string } }) => l.item.name).sort()).toEqual(['Oil', 'WoF']);
   });
@@ -144,9 +144,13 @@ describe('a planned visit', () => {
     expect(done.statusCode).toBe(201);
     expect(done.json().visit.status).toBe('done');
     expect(done.json().visit.provider).toBe('Toyota Botany'); // carried from the plan
-    expect(done.json().visit.lines).toHaveLength(0); // the plan's lines are cleared…
-    expect(done.json().visit.logs).toHaveLength(1); // …the logs are the record
-    expect(await getDb().select().from(maintenance_visit_items).where(eq(maintenance_visit_items.visit_id, plan.json().visit.id))).toHaveLength(0);
+    // The plan's lines stay, each with its outcome; the logs are the record of the work.
+    expect(done.json().visit.lines.map((l: { item: { name: string }; outcome: string; notes: string | null }) => [l.item.name, l.outcome, l.notes])).toEqual([
+      ['Oil', 'done', 'ask about the rattle'],
+      ['WoF', 'skipped', null],
+    ]);
+    expect(done.json().visit.logs).toHaveLength(1);
+    expect(await getDb().select().from(maintenance_visit_items).where(eq(maintenance_visit_items.visit_id, plan.json().visit.id))).toHaveLength(2);
     const skipped = await getItem(wof.id);
     expect(skipped.last_completed_on).toBeNull();
     expect((await getTask(skipped.generated_task_id!))?.status).toBe('open');

@@ -882,6 +882,8 @@ export const app_settings = pgTable("app_settings", {
 	// Reading-staleness policy (0048): days without a meter reading before
 	// a metered asset with meter-cadence items gets the reading nag.
 	meter_stale_days: integer().default(14).notNull(),
+	// Household currency (0052): spend totals are stated in it.
+	currency: text().default('USD').notNull(),
 	// Briefing panel visibility/order (migration 0044): ordered {id, enabled}
 	// array. Null → registry defaults (resolved web-side by mergePanelConfig).
 	briefing_panels: jsonb().$type<Array<{ id: string; enabled: boolean }> | null>(),
@@ -892,6 +894,7 @@ export const app_settings = pgTable("app_settings", {
 	updated_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [
 	check("app_settings_id_check", sql`id`),
+	check("app_settings_currency_check", sql`currency ~ '^[A-Z]{3}$'::text`),
 ]);
 
 // Tomorrow's Focus (migration 0037) — one optional pointer per day at a
@@ -1440,8 +1443,12 @@ export const maintenance_visit_items = pgTable("maintenance_visit_items", {
 	item_id: uuid().notNull(),
 	notes: text(),
 	position: integer().default(0).notNull(),
+	// Null while planned; done or skipped once recorded (0052).
+	outcome: text(),
+	skip_reason: text(),
 }, (table) => [
 	primaryKey({ columns: [table.visit_id, table.item_id], name: "maintenance_visit_items_pkey" }),
+	check("maintenance_visit_items_outcome_check", sql`(outcome IS NULL) OR (outcome = ANY (ARRAY['done'::text, 'skipped'::text]))`),
 	foreignKey({
 			columns: [table.visit_id],
 			foreignColumns: [maintenance_visits.id],
