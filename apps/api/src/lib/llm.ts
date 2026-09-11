@@ -1,7 +1,9 @@
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
-import { env } from './env.js';
+import { activeIntegration, resolveIntegration } from './settings-config.js';
 import { getAppSettings } from './app-settings.js';
+import { integrationFetch, safeProviderError } from './integration-fetch.js';
+import { SettingsError } from './settings-crypto.js';
 
 // Neutral chat-completion surface consumed by the voice parser and the chat
 // tool loop. Two adapters:
@@ -64,46 +66,23 @@ export interface ChatCompleteOptions {
   effort?: 'low' | 'medium' | 'high';
 }
 
-interface ResolvedLlmConfig {
+export interface ResolvedLlmConfig {
   provider: 'openai_compatible' | 'anthropic';
   baseUrl: string | null;
   model: string | null;
   apiKey: string | null;
 }
-
 async function resolveConfig(): Promise<ResolvedLlmConfig> {
-  const s = await getAppSettings();
-  const provider = s.llm_provider ?? env.LLM_PROVIDER;
-  if (provider === 'anthropic') {
-    return {
-      provider,
-      baseUrl: null,
-      model: s.llm_model ?? env.ANTHROPIC_MODEL,
-      apiKey: s.llm_api_key ?? env.ANTHROPIC_API_KEY ?? null,
-    };
-  }
-  return {
-    provider: 'openai_compatible',
-    baseUrl: s.llm_base_url ?? env.LLM_BASE_URL ?? null,
-    model: s.llm_model ?? env.LLM_MODEL ?? null,
-    apiKey: s.llm_api_key ?? env.LLM_API_KEY ?? null,
-  };
+  return await activeIntegration('llm') as ResolvedLlmConfig;
 }
-
 export async function isLlmConfigured(): Promise<boolean> {
-  const cfg = await resolveConfig();
-  if (cfg.provider === 'anthropic') return Boolean(cfg.apiKey);
-  return Boolean(cfg.baseUrl && cfg.model);
+  try { return resolveIntegration(await getAppSettings(), 'llm').configured; } catch { return false; }
 }
-
-/** Human-readable summary for healthz / integrations-status. Never leaks keys. */
 export async function llmDescription(): Promise<string> {
-  const cfg = await resolveConfig();
-  if (cfg.provider === 'anthropic') {
-    return cfg.apiKey ? `anthropic · ${cfg.model}` : 'anthropic · API key missing';
-  }
-  if (!cfg.baseUrl || !cfg.model) return 'openai_compatible · base URL/model not set';
-  return `openai_compatible · ${cfg.baseUrl} · ${cfg.model}`;
+  try {
+    const cfg = resolveIntegration(await getAppSettings(), 'llm');
+    return `${cfg.provider} · ${cfg.baseUrl ?? 'endpoint missing'} · ${cfg.model ?? 'model missing'} · ${cfg.credential.state}`;
+  } catch { return 'LLM settings unavailable'; }
 }
 
 // Clients are cheap to construct but cache by config so steady-state calls
@@ -118,6 +97,7 @@ function openAiClient(cfg: ResolvedLlmConfig): OpenAI {
     baseURL: cfg.baseUrl!,
     // Local servers usually ignore the key but the SDK requires one.
     apiKey: cfg.apiKey ?? 'none',
+    fetch: integrationFetch as unknown as NonNullable<ConstructorParameters<typeof OpenAI>[0]>['fetch'], maxRetries: 0, timeout: 60_000,
   });
   cachedOpenAi = { key, client };
   return client;
@@ -126,7 +106,7 @@ function openAiClient(cfg: ResolvedLlmConfig): OpenAI {
 function anthropicClient(cfg: ResolvedLlmConfig): Anthropic {
   const key = cfg.apiKey ?? '';
   if (cachedAnthropic?.key === key) return cachedAnthropic.client;
-  const client = new Anthropic({ apiKey: key });
+  const client = new Anthropic({ apiKey: key, fetch: integrationFetch, maxRetries: 0, timeout: 60_000 });
   cachedAnthropic = { key, client };
   return client;
 }
@@ -322,15 +302,19 @@ async function completeAnthropic(cfg: ResolvedLlmConfig, opts: ChatCompleteOptio
 // ─── Entry point ─────────────────────────────────────────────────────────
 
 export async function chatComplete(opts: ChatCompleteOptions): Promise<LlmResult> {
-  const cfg = await resolveConfig();
+  return chatCompleteWithConfig(await resolveConfig(), opts);
+}
+
+/** Candidate checks use the same adapter and resolver as ordinary requests. */
+export async function chatCompleteWithConfig(cfg: ResolvedLlmConfig, opts: ChatCompleteOptions): Promise<LlmResult> {
   if (cfg.provider === 'anthropic') {
     if (!cfg.apiKey) throw new Error('LLM provider is anthropic but no API key is configured.');
-    return completeAnthropic(cfg, opts);
+    try { return await completeAnthropic(cfg, opts); } catch (error) { throw new SettingsError(safeProviderError(error), 502); }
   }
   if (!cfg.baseUrl || !cfg.model) {
     throw new Error('LLM base URL/model not configured. Set them in Settings or via LLM_BASE_URL / LLM_MODEL.');
   }
-  return completeOpenAi(cfg, opts);
+  try { return await completeOpenAi(cfg, opts); } catch (error) { throw new SettingsError(safeProviderError(error), 502); }
 }
 
 /**
@@ -352,6 +336,8 @@ export async function prefillPrompt(opts: ChatCompleteOptions): Promise<LlmUsage
   const cfg = await resolveConfig();
   if (cfg.provider !== 'openai_compatible' || !cfg.baseUrl || !cfg.model) return null;
   const client = openAiClient(cfg);
-  const res = await client.chat.completions.create(openAiBody(cfg, { ...opts, maxTokens: 1 }));
-  return openAiUsage(res) ?? {};
+  try {
+    const res = await client.chat.completions.create(openAiBody(cfg, { ...opts, maxTokens: 1 }));
+    return openAiUsage(res) ?? {};
+  } catch (error) { throw new SettingsError(safeProviderError(error), 502); }
 }

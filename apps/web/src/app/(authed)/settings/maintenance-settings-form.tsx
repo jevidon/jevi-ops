@@ -23,7 +23,7 @@ function SaveButton() {
   );
 }
 
-export function MaintenanceSettingsForm({ meterStaleDays, currency }: { meterStaleDays: number; currency: string }) {
+export function MaintenanceSettingsForm({ meterStaleDays, currency, revision }: { meterStaleDays: number; currency: string; revision: number }) {
   const [staleState, staleAction] = useActionState<SyncResult | null, FormData>(
     async (_prev, formData) => setMeterStaleDaysAction(formData),
     null,
@@ -35,6 +35,7 @@ export function MaintenanceSettingsForm({ meterStaleDays, currency }: { meterSta
   return (
     <div className="flex flex-col gap-4 py-2">
       <form action={staleAction} className="flex flex-col gap-2">
+      <input type="hidden" name="expected_revision" value={revision} />
         <div className="flex items-end justify-between gap-4">
           <label className="flex flex-col gap-1 min-w-0">
             <span className="font-sans text-[14px] text-ink">Reading nag</span>
@@ -62,6 +63,7 @@ export function MaintenanceSettingsForm({ meterStaleDays, currency }: { meterSta
       </form>
 
       <form action={currencyAction} className="flex flex-col gap-2 pt-4 border-t border-line/60">
+      <input type="hidden" name="expected_revision" value={revision} />
         <div className="flex items-end justify-between gap-4">
           <label className="flex flex-col gap-1 min-w-0">
             <span className="font-sans text-[14px] text-ink">Household currency</span>

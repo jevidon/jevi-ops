@@ -32,6 +32,9 @@ const { version } = JSON.parse(readFileSync(path.join(here, 'package.json'), 'ut
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // An isolated output permits validation alongside a running development
+  // server without replacing its .next files. Production retains .next.
+  distDir: process.env.JEVI_NEXT_DIST_DIR || '.next',
   reactStrictMode: true,
   transpilePackages: ['@jevi-ops/shared'],
 

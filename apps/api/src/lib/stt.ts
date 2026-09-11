@@ -1,6 +1,8 @@
 import OpenAI from 'openai';
 import { toFile } from 'openai/uploads';
-import { env } from './env.js';
+import { activeIntegration, resolveIntegration } from './settings-config.js';
+import { integrationFetch, safeProviderError } from './integration-fetch.js';
+import { SettingsError } from './settings-crypto.js';
 import { getAppSettings } from './app-settings.js';
 
 // Speech-to-text via any OpenAI-compatible /v1/audio/transcriptions server:
@@ -17,32 +19,25 @@ interface ResolvedSttConfig {
 const OPENAI_CLOUD = 'https://api.openai.com/v1';
 
 async function resolveConfig(): Promise<ResolvedSttConfig> {
-  const s = await getAppSettings();
-  return {
-    baseUrl: s.stt_base_url ?? env.STT_BASE_URL ?? OPENAI_CLOUD,
-    apiKey: env.STT_API_KEY ?? null,
-    model: s.stt_model ?? env.STT_MODEL,
-  };
+  const cfg = await activeIntegration('stt');
+  if (!cfg.configured) throw new Error('stt_not_configured');
+  return { baseUrl: cfg.baseUrl!, model: cfg.model!, apiKey: cfg.apiKey };
 }
-
 export async function isSttConfigured(): Promise<boolean> {
-  const cfg = await resolveConfig();
-  // A local server needs no key; OpenAI cloud does.
-  if (cfg.baseUrl === OPENAI_CLOUD) return Boolean(cfg.apiKey);
-  return Boolean(cfg.baseUrl);
+  try { return resolveIntegration(await getAppSettings(), 'stt').configured; } catch { return false; }
 }
-
 export async function sttDescription(): Promise<string> {
-  const cfg = await resolveConfig();
-  if (cfg.baseUrl === OPENAI_CLOUD && !cfg.apiKey) return 'OpenAI cloud · API key missing';
-  return `${cfg.baseUrl} · ${cfg.model}`;
+  try {
+    const cfg = resolveIntegration(await getAppSettings(), 'stt');
+    return `${cfg.baseUrl ?? 'endpoint missing'} · ${cfg.model ?? 'model missing'} · ${cfg.credential.state}`;
+  } catch { return 'STT settings unavailable'; }
 }
 
 let cached: { key: string; client: OpenAI } | null = null;
 function client(cfg: ResolvedSttConfig): OpenAI {
   const key = `${cfg.baseUrl}|${cfg.apiKey ?? ''}`;
   if (cached?.key === key) return cached.client;
-  const c = new OpenAI({ baseURL: cfg.baseUrl, apiKey: cfg.apiKey ?? 'none' });
+  const c = new OpenAI({ baseURL: cfg.baseUrl, apiKey: cfg.apiKey ?? 'none', fetch: integrationFetch as unknown as NonNullable<ConstructorParameters<typeof OpenAI>[0]>['fetch'], maxRetries: 0, timeout: 60_000 });
   cached = { key, client: c };
   return c;
 }
@@ -68,7 +63,7 @@ export async function transcribeAudio(
     // English-only for now. Drop this if multilingual capture becomes a need.
     language: 'en',
     response_format: 'text',
-  });
+  }).catch((error: unknown) => { throw new SettingsError(safeProviderError(error), 502); });
   // With response_format: 'text', the result is a plain string.
   return typeof result === 'string' ? result.trim() : '';
 }

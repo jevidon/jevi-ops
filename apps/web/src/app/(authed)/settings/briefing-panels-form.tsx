@@ -27,7 +27,7 @@ type Config = Array<{ id: string; enabled: boolean }>;
 
 const toConfig = (rows: PanelRow[]): Config => rows.map((r) => ({ id: r.id, enabled: r.enabled }));
 
-export function BriefingPanelsForm({ rows }: { rows: PanelRow[] }) {
+export function BriefingPanelsForm({ rows, revision }: { rows: PanelRow[]; revision: number }) {
   const [state, formAction] = useActionState<SyncResult | null, FormData>(
     async (_prev, formData) => updateBriefingPanelsAction(formData),
     null,
@@ -41,6 +41,7 @@ export function BriefingPanelsForm({ rows }: { rows: PanelRow[] }) {
     startTransition(() => {
       applyRows(next);
       const fd = new FormData();
+      fd.set('expected_revision', String(revision));
       fd.set('config', JSON.stringify(toConfig(next)));
       formAction(fd);
     });

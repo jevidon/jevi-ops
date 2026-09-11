@@ -6,6 +6,10 @@ export const TEST_DB_NAME = 'jeviops_test';
 
 export function devUrl(): string {
   if (!env.DATABASE_URL) throw new Error('DATABASE_URL is not set — the tests need the dev Postgres (docker compose)');
+  const target = new URL(env.DATABASE_URL);
+  if (!['localhost', '127.0.0.1', '[::1]', '::1'].includes(target.hostname) || target.port !== '54329') {
+    throw new Error('Integration tests require the local disposable development Postgres on port 54329; refusing database creation/drop on another host.');
+  }
   return env.DATABASE_URL;
 }
 

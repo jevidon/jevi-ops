@@ -1,5 +1,6 @@
-import { env } from './env.js';
-import { getAppSettings, getAppTz } from './app-settings.js';
+import { activeIntegration } from './settings-config.js';
+import { integrationFetch } from './integration-fetch.js';
+import { getAppTz } from './app-settings.js';
 
 // Immich client — journal "photos from this day". Immich runs as its own
 // app (see infrastructure/DEPENDENCIES.md §4); we call its HTTP API
@@ -18,20 +19,17 @@ interface ResolvedImmich {
 }
 
 async function resolveConfig(): Promise<ResolvedImmich | null> {
-  const s = await getAppSettings();
-  const baseUrl = (s.immich_base_url ?? env.IMMICH_BASE_URL ?? '').replace(/\/$/, '');
-  const apiKey = s.immich_api_key ?? env.IMMICH_API_KEY ?? '';
-  if (!baseUrl || !apiKey) return null;
-  return { baseUrl, apiKey };
+  const cfg = await activeIntegration('immich');
+  if (!cfg.configured || !cfg.baseUrl || !cfg.apiKey) return null;
+  return { baseUrl: cfg.baseUrl, apiKey: cfg.apiKey };
 }
 
 export async function isImmichConfigured(): Promise<boolean> {
-  return (await resolveConfig()) !== null;
+  try { return (await resolveConfig()) !== null; } catch { return false; }
 }
 
 export async function immichDescription(): Promise<string> {
-  const cfg = await resolveConfig();
-  return cfg ? cfg.baseUrl : 'base URL / API key not set';
+  try { const cfg = await resolveConfig(); return cfg ? cfg.baseUrl : 'base URL / API key not set'; } catch { return 'Immich credential unavailable'; }
 }
 
 export interface ImmichCandidate {
@@ -50,7 +48,7 @@ export async function assetsForDate(date: string): Promise<ImmichCandidate[]> {
   const dayStart = zonedMidnightUtc(date, tz);
   const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
 
-  const res = await fetch(`${cfg.baseUrl}/api/search/metadata`, {
+  const res = await integrationFetch(`${cfg.baseUrl}/api/search/metadata`, {
     method: 'POST',
     headers: {
       'x-api-key': cfg.apiKey,
@@ -84,7 +82,7 @@ export async function assetsForDate(date: string): Promise<ImmichCandidate[]> {
 export async function fetchThumbnail(assetId: string): Promise<{ bytes: Buffer; contentType: string }> {
   const cfg = await resolveConfig();
   if (!cfg) throw new Error('immich_not_configured');
-  const res = await fetch(
+  const res = await integrationFetch(
     `${cfg.baseUrl}/api/assets/${encodeURIComponent(assetId)}/thumbnail?size=preview`,
     { headers: { 'x-api-key': cfg.apiKey }, signal: AbortSignal.timeout(10_000) },
   );
@@ -108,7 +106,7 @@ export interface ImmichAssetInfo {
 export async function fetchAssetInfo(assetId: string): Promise<ImmichAssetInfo> {
   const cfg = await resolveConfig();
   if (!cfg) throw new Error('immich_not_configured');
-  const res = await fetch(`${cfg.baseUrl}/api/assets/${encodeURIComponent(assetId)}`, {
+  const res = await integrationFetch(`${cfg.baseUrl}/api/assets/${encodeURIComponent(assetId)}`, {
     headers: { 'x-api-key': cfg.apiKey, Accept: 'application/json' },
     signal: AbortSignal.timeout(10_000),
   });

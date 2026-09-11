@@ -2,71 +2,39 @@ import { eq } from 'drizzle-orm';
 import { getDb } from './db.js';
 import { app_settings } from '../db/schema.js';
 
-// App-wide settings loader with a process-lifetime cache. The settings
-// table is a single row that changes essentially never, so we read it
-// once per process and refresh only when an admin update succeeds.
-// Falls back to a hardcoded default if the row hasn't been created
-// yet (pre-migration boot) or if the read fails.
+// Internal settings only. Public callers must use publicSettings(). Read
+// the indexed singleton afresh so another process or a credential rotation
+// cannot leave stale active configuration in a lifetime cache. Concurrent
+// reads share one in-flight query. Database errors fail closed.
 
 const DEFAULT_TIMEZONE = 'America/Denver';
 
 export interface AppSettings {
+  revision: number;
+  credential_settings: Record<string, unknown>;
+  capability_tests: Record<string, unknown>;
   timezone: string;
   llm_provider: 'openai_compatible' | 'anthropic' | null;
   llm_base_url: string | null;
   llm_model: string | null;
+  /** Quarantined legacy plaintext, used ONLY by the migration command. */
   llm_api_key: string | null;
   stt_base_url: string | null;
   stt_model: string | null;
   immich_base_url: string | null;
   immich_api_key: string | null;
-  // Module feature flags (migration 0036). Defaults mirror the column
-  // defaults so a pre-migration boot fails safe (health/rule hidden,
-  // routines visible).
   health_module_enabled: boolean;
   routines_module_enabled: boolean;
   rule_module_enabled: boolean;
-  // Maintenance module (migration 0047). Default on — core home-ops.
   maintenance_module_enabled: boolean;
-  // Reading-staleness policy (0048): days before the reading nag fires.
   meter_stale_days: number;
-  // Household currency (0052), ISO 4217: spend totals are stated in it.
   currency: string;
-  // Briefing panel visibility/order (migration 0044); null → registry
-  // defaults. This interface is an explicit projection — a new column
-  // MUST be added here and in load() or GET /api/settings/app silently
-  // drops it while PATCH persists it (write-only settings bug).
   briefing_panels: Array<{ id: string; enabled: boolean }> | null;
-  // Frame panel image URL (migration 0045); null hides the panel.
   agenda_image_url: string | null;
-  // Weather panel data-bundle URL (migration 0046); null hides the panel.
   agenda_data_url: string | null;
 }
 
-const DEFAULTS: AppSettings = {
-  timezone: DEFAULT_TIMEZONE,
-  llm_provider: null,
-  llm_base_url: null,
-  llm_model: null,
-  llm_api_key: null,
-  stt_base_url: null,
-  stt_model: null,
-  immich_base_url: null,
-  immich_api_key: null,
-  health_module_enabled: false,
-  routines_module_enabled: true,
-  rule_module_enabled: false,
-  maintenance_module_enabled: true,
-  meter_stale_days: 14,
-  currency: 'USD',
-  briefing_panels: null,
-  agenda_image_url: null,
-  agenda_data_url: null,
-};
-
-// In-memory cache. Reset by invalidateAppSettings() when /api/settings/app
-// PATCH succeeds. This is the single API process, so drift isn't a concern.
-let cache: AppSettings | null = null;
+// Concurrent reads may share one query. Mutations invalidate this handle.
 let inflight: Promise<AppSettings> | null = null;
 
 async function load(): Promise<AppSettings> {
@@ -74,8 +42,11 @@ async function load(): Promise<AppSettings> {
     const row = await getDb().query.app_settings.findFirst({
       where: eq(app_settings.id, true),
     });
-    if (!row) return { ...DEFAULTS };
+    if (!row) throw new Error('settings_unavailable');
     return {
+      revision: row.revision,
+      credential_settings: row.credential_settings,
+      capability_tests: row.capability_tests,
       timezone: row.timezone ?? DEFAULT_TIMEZONE,
       llm_provider: (row.llm_provider as AppSettings['llm_provider']) ?? null,
       llm_base_url: row.llm_base_url ?? null,
@@ -96,20 +67,16 @@ async function load(): Promise<AppSettings> {
       agenda_data_url: row.agenda_data_url ?? null,
     };
   } catch {
-    // Pre-migration or transient DB error — keep the app running with
-    // the defaults. Callers don't need to handle this case.
-    return { ...DEFAULTS };
+    throw new Error('settings_unavailable');
   }
 }
 
 export async function getAppSettings(): Promise<AppSettings> {
-  if (cache) return cache;
   if (inflight) return inflight;
   inflight = load().then((s) => {
-    cache = s;
     inflight = null;
     return s;
-  });
+  }).catch((error: unknown) => { inflight = null; throw error; });
   return inflight;
 }
 
@@ -119,6 +86,5 @@ export async function getAppTz(): Promise<string> {
 }
 
 export function invalidateAppSettings(): void {
-  cache = null;
   inflight = null;
 }

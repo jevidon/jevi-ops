@@ -58,7 +58,12 @@ export default async function SettingsPage({
     }];
   });
 
+  const missingCredential = { source: 'none' as const, configured: false, state: 'missing' as const, endpoint: null, allow_insecure: false };
   let appSettings: AppSettings = {
+    revision: 0, credentials: { llm: missingCredential, stt: missingCredential, immich: missingCredential }, capabilities: {},
+    llm_provider: null, llm_base_url: null, llm_model: null, stt_base_url: null, stt_model: null, immich_base_url: null,
+    meter_stale_days: webSettings.meter_stale_days, currency: webSettings.currency,
+    briefing_panels: null, agenda_image_url: null, agenda_data_url: null,
     timezone: tz,
     health_module_enabled: healthEnabled,
     routines_module_enabled: routinesEnabled,
@@ -119,11 +124,11 @@ export default async function SettingsPage({
       </SettingsSection>
 
       <SettingsSection title="Timezone">
-        <TimezoneForm current={tz} />
+        <TimezoneForm revision={appSettings.revision} current={tz} />
       </SettingsSection>
 
       <SettingsSection title="Modules">
-        <ModulesForm
+        <ModulesForm revision={appSettings.revision}
           healthEnabled={healthEnabled}
           routinesEnabled={routinesEnabled}
           ruleEnabled={ruleEnabled}
@@ -132,11 +137,11 @@ export default async function SettingsPage({
       </SettingsSection>
 
       <SettingsSection title="Maintenance">
-        <MaintenanceSettingsForm meterStaleDays={webSettings.meter_stale_days} currency={webSettings.currency} />
+        <MaintenanceSettingsForm revision={appSettings.revision} meterStaleDays={webSettings.meter_stale_days} currency={webSettings.currency} />
       </SettingsSection>
 
       <SettingsSection title="Agenda · panels">
-        <FrameUrlForm
+        <FrameUrlForm revision={appSettings.revision}
           current={webSettings.agenda_image_url}
           currentData={webSettings.agenda_data_url}
         />
@@ -144,7 +149,7 @@ export default async function SettingsPage({
           Show, hide, and reorder the panels on the home screen. Columns are
           fixed per panel; order applies within each column.
         </p>
-        <BriefingPanelsForm rows={panelRows} />
+        <BriefingPanelsForm revision={appSettings.revision} rows={panelRows} />
       </SettingsSection>
 
       <SettingsSection title="AI · language model, transcription, photos">

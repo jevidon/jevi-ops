@@ -862,6 +862,9 @@ export const captured_data = pgTable("captured_data", {
 ]);
 
 export const app_settings = pgTable("app_settings", {
+	revision: integer().default(1).notNull(),
+	credential_settings: jsonb().$type<Record<string, unknown>>().default({}).notNull(),
+	capability_tests: jsonb().$type<Record<string, unknown>>().default({}).notNull(),
 	id: boolean().default(true).primaryKey().notNull(),
 	timezone: text().default('America/Denver').notNull(),
 	llm_provider: text(),
@@ -894,6 +897,9 @@ export const app_settings = pgTable("app_settings", {
 	updated_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [
 	check("app_settings_id_check", sql`id`),
+	check("app_settings_revision_check", sql`revision > 0`),
+	check("app_settings_credential_settings_check", sql`jsonb_typeof(credential_settings) = 'object'`),
+	check("app_settings_capability_tests_check", sql`jsonb_typeof(capability_tests) = 'object'`),
 	check("app_settings_currency_check", sql`currency ~ '^[A-Z]{3}$'::text`),
 ]);
 

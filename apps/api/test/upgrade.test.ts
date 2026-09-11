@@ -20,6 +20,7 @@ const MIGRATIONS = [
   '0050_docs_ideas.sql',
   '0051_service_visits.sql',
   '0052_currency_visit_outcomes.sql',
+  '0053_safe_settings.sql',
 ].map((f) => resolve(ROOT, 'infrastructure/migrations', f));
 
 function upgradeUrl(): string {

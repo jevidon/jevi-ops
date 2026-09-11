@@ -12,9 +12,11 @@ import type { SyncResult } from './actions';
 export function FrameUrlForm({
   current,
   currentData,
+  revision,
 }: {
   current: string | null;
   currentData: string | null;
+  revision: number;
 }) {
   const [state, formAction, pending] = useActionState<SyncResult | null, FormData>(
     async (_prev, formData) => updateFrameUrlAction(formData),
@@ -27,6 +29,7 @@ export function FrameUrlForm({
 
   return (
     <form action={formAction} className="flex flex-col gap-2 mb-4 pb-4 border-b border-line">
+      <input type="hidden" name="expected_revision" value={revision} />
       <label className="flex flex-col gap-1">
         <span className="eyebrow">Frame image URL</span>
         <input

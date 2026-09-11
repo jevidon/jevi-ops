@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { apiPublicUrl } from '@/lib/server-env';
-import { authApi, calendarApi, googleApi, settingsApi, ApiError, type UpdateAppSettingsBody } from '@/lib/api';
+import { authApi, calendarApi, googleApi, settingsApi, ApiError, type UpdateAppSettingsBody, type AppSettings, type CandidateSettingsTest } from '@/lib/api';
 import { BriefingPanelConfigSchema } from '@jevi-ops/shared/schemas';
 import { requireUser } from '@/lib/auth';
 import { signOAuthBridgeToken } from '@/lib/oauth-bridge';
@@ -11,6 +11,7 @@ import { signOAuthBridgeToken } from '@/lib/oauth-bridge';
 export interface SyncResult {
   ok: boolean;
   message: string;
+  settings?: AppSettings;
 }
 
 export async function syncCalendarAction(): Promise<SyncResult> {
@@ -77,7 +78,7 @@ export async function updateTimezoneAction(formData: FormData): Promise<SyncResu
     return { ok: false, message: `"${tz}" isn't a valid IANA timezone.` };
   }
   try {
-    await settingsApi.updateApp({ timezone: tz });
+    await settingsApi.updateApp({ expected_revision: Number(formData.get('expected_revision')), timezone: tz });
   } catch (err) {
     if (err instanceof ApiError) {
       const body = err.body as { error?: string } | null;
@@ -103,7 +104,7 @@ export async function updateFrameUrlAction(formData: FormData): Promise<SyncResu
     }
   }
   try {
-    await settingsApi.updateApp({
+    await settingsApi.updateApp({ expected_revision: Number(formData.get('expected_revision')),
       agenda_image_url: url || null,
       agenda_data_url: dataUrl || null,
     });
@@ -124,7 +125,7 @@ export async function updateFrameUrlAction(formData: FormData): Promise<SyncResu
 export async function toggleHealthModuleAction(formData: FormData): Promise<SyncResult> {
   const enabled = formData.get('enabled') === 'true';
   try {
-    await settingsApi.updateApp({ health_module_enabled: enabled });
+    await settingsApi.updateApp({ expected_revision: Number(formData.get('expected_revision')), health_module_enabled: enabled });
   } catch (err) {
     if (err instanceof ApiError) {
       const body = err.body as { error?: string } | null;
@@ -145,7 +146,7 @@ export async function toggleHealthModuleAction(formData: FormData): Promise<Sync
 export async function toggleRoutinesModuleAction(formData: FormData): Promise<SyncResult> {
   const enabled = formData.get('enabled') === 'true';
   try {
-    await settingsApi.updateApp({ routines_module_enabled: enabled });
+    await settingsApi.updateApp({ expected_revision: Number(formData.get('expected_revision')), routines_module_enabled: enabled });
   } catch (err) {
     if (err instanceof ApiError) {
       const body = err.body as { error?: string } | null;
@@ -166,7 +167,7 @@ export async function toggleRoutinesModuleAction(formData: FormData): Promise<Sy
 export async function toggleRuleModuleAction(formData: FormData): Promise<SyncResult> {
   const enabled = formData.get('enabled') === 'true';
   try {
-    await settingsApi.updateApp({ rule_module_enabled: enabled });
+    await settingsApi.updateApp({ expected_revision: Number(formData.get('expected_revision')), rule_module_enabled: enabled });
   } catch (err) {
     if (err instanceof ApiError) {
       const body = err.body as { error?: string } | null;
@@ -187,7 +188,7 @@ export async function toggleRuleModuleAction(formData: FormData): Promise<SyncRe
 export async function toggleMaintenanceModuleAction(formData: FormData): Promise<SyncResult> {
   const enabled = formData.get('enabled') === 'true';
   try {
-    await settingsApi.updateApp({ maintenance_module_enabled: enabled });
+    await settingsApi.updateApp({ expected_revision: Number(formData.get('expected_revision')), maintenance_module_enabled: enabled });
   } catch (err) {
     if (err instanceof ApiError) {
       const body = err.body as { error?: string } | null;
@@ -211,7 +212,7 @@ export async function setMeterStaleDaysAction(formData: FormData): Promise<SyncR
     return { ok: false, message: 'Enter a whole number of days between 1 and 365.' };
   }
   try {
-    await settingsApi.updateApp({ meter_stale_days: raw });
+    await settingsApi.updateApp({ expected_revision: Number(formData.get('expected_revision')), meter_stale_days: raw });
   } catch (err) {
     if (err instanceof ApiError) {
       const body = err.body as { error?: string } | null;
@@ -230,7 +231,7 @@ export async function setCurrencyAction(formData: FormData): Promise<SyncResult>
   const raw = String(formData.get('currency') ?? '').trim().toUpperCase();
   if (!/^[A-Z]{3}$/.test(raw)) return { ok: false, message: 'Use a three-letter ISO 4217 code, like NZD or USD.' };
   try {
-    await settingsApi.updateApp({ currency: raw });
+    await settingsApi.updateApp({ expected_revision: Number(formData.get('expected_revision')), currency: raw });
   } catch (err) {
     if (err instanceof ApiError) {
       const body = err.body as { error?: string } | null;
@@ -262,39 +263,46 @@ export async function disconnectGoogleAction(): Promise<SyncResult> {
 function errMessage(err: unknown): string {
   if (err instanceof ApiError) {
     const body = err.body as { error?: string; message?: string } | null;
+    if (body?.error === 'settings_revision_conflict') return 'Settings changed since this form loaded. Reload and review before saving again.';
     return body?.message ?? body?.error ?? `HTTP ${err.status}`;
   }
-  return (err as Error).message;
+  return 'Request failed. Please retry.';
 }
 
 export async function updateIntegrationSettingsAction(
   body: UpdateAppSettingsBody,
 ): Promise<SyncResult> {
   try {
-    await settingsApi.updateApp(body);
+    const settings = await settingsApi.updateApp(body);
+    revalidatePath('/settings');
+    return { ok: true, message: 'Saved. Readiness requires a successful test for this configuration.', settings };
   } catch (err) {
     return { ok: false, message: errMessage(err) };
   }
-  revalidatePath('/settings');
-  return { ok: true, message: 'Saved.' };
+
 }
 
-export async function testLlmAction(): Promise<SyncResult> {
+export async function testLlmAction(body: CandidateSettingsTest = {}): Promise<SyncResult> {
   try {
-    const res = await settingsApi.testLlm();
+    const res = await settingsApi.testLlm(body);
     return { ok: true, message: `OK · ${res.detail} · ${res.latency_ms}ms` };
   } catch (err) {
     return { ok: false, message: errMessage(err) };
   }
 }
 
-export async function testSttAction(): Promise<SyncResult> {
+export async function testSttAction(body: CandidateSettingsTest = {}): Promise<SyncResult> {
   try {
-    const res = await settingsApi.testStt();
+    const res = await settingsApi.testStt(body);
     return { ok: true, message: `OK · ${res.detail} · ${res.latency_ms}ms` };
   } catch (err) {
     return { ok: false, message: errMessage(err) };
   }
+}
+
+export async function testImmichAction(body: CandidateSettingsTest = {}): Promise<SyncResult> {
+  try { const res = await settingsApi.testImmich(body); return { ok: true, message: `${res.detail} ${res.latency_ms}ms` }; }
+  catch (err) { return { ok: false, message: errMessage(err) }; }
 }
 
 // ─── API tokens (agents / devices) ───────────────────────────────────────
@@ -338,7 +346,7 @@ export async function updateBriefingPanelsAction(formData: FormData): Promise<Sy
   const parsed = BriefingPanelConfigSchema.safeParse(raw);
   if (!parsed.success) return { ok: false, message: 'Malformed panel config.' };
   try {
-    await settingsApi.updateApp({ briefing_panels: parsed.data });
+    await settingsApi.updateApp({ expected_revision: Number(formData.get('expected_revision')), briefing_panels: parsed.data });
   } catch (err) {
     return { ok: false, message: errMessage(err) };
   }

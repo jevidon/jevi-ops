@@ -66,6 +66,11 @@ pnpm dev:web    # :3000
 Open <http://localhost:3000> → sign in → `/today`. Point the LLM at your
 server in **Settings → AI** (or via `LLM_BASE_URL`/`LLM_MODEL` in `.env`).
 
+Credentials saved through Settings require an external encryption keyring.
+Follow [credential migration, backup and rotation](docs/SETTINGS-CREDENTIALS.md)
+before enabling managed credentials on an existing installation. Environment
+credentials and manual mode remain available without saving a key in the database.
+
 ## Deploying to the NAS
 
 See [`infrastructure/docker/README.md`](infrastructure/docker/README.md)
