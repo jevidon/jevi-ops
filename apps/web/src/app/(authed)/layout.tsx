@@ -13,6 +13,7 @@ import { TimezoneProvider } from '@/components/TimezoneProvider';
 import { requireUser } from '@/lib/auth';
 import { notificationsApi, attentionApi, ApiError } from '@/lib/api';
 import { getAppTimezone, getFeatureFlag } from '@/lib/app-settings';
+import { SetupEntry } from '@/components/onboarding/SetupEntry';
 
 // Every page inside the (authed) group requires a signed-in user — checked
 // in middleware AND here as defense-in-depth.
@@ -91,6 +92,7 @@ export default async function AuthedLayout({ children }: { children: React.React
             className="flex-1 lg:pb-12 mx-auto w-full lg:max-w-[1120px] lg:px-10"
             style={{ paddingBottom: 'calc(5rem + env(safe-area-inset-bottom))' }}
           >
+            <SetupEntry />
             {children}
           </main>
           <NotificationBell unread={unreadNotifications} />

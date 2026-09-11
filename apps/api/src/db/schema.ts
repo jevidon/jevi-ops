@@ -1,6 +1,10 @@
 import { pgTable, index, uniqueIndex, foreignKey, primaryKey, check, uuid, text, numeric, date, timestamp, unique, jsonb, boolean, integer, real, time, smallint, bigint } from "drizzle-orm/pg-core"
 import { sql } from "drizzle-orm"
 
+export * from './onboarding-schema.js';
+export * from './source-schema.js';
+export * from './knowledge-schema.js';
+
 // ─── Typed jsonb payload shapes ────────────────────────────────────────────
 // Stored as jsonb in Postgres; the app reads/writes them with these shapes.
 // StoredAttachment is the persisted attachment record (originally written by
@@ -1367,6 +1371,7 @@ export const maintenance_logs = pgTable("maintenance_logs", {
 	visit_id: uuid(),
 	// Seed evidence entered at item creation; editable, not deletable.
 	is_baseline: boolean().default(false).notNull(),
+	historical_only: boolean().default(false).notNull(),
 	// Policy-specific completion facts.
 	issued_until: date(),
 	purchased_to: numeric({ mode: 'number' }),
@@ -1395,6 +1400,7 @@ export const maintenance_logs = pgTable("maintenance_logs", {
 		}).onDelete("set null"),
 	check("maintenance_logs_meter_at_completion_check", sql`meter_at_completion >= (0)::numeric`),
 	check("maintenance_logs_cost_check", sql`cost >= (0)::numeric`),
+	check("maintenance_logs_history_not_baseline", sql`not (historical_only and is_baseline)`),
 	check("maintenance_logs_source_check", sql`source = ANY (ARRAY['manual'::text, 'task'::text, 'agent'::text, 'import'::text])`),
 ]);
 

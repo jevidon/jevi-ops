@@ -1,7 +1,9 @@
 import { Cron } from 'croner';
 import type { FastifyBaseLogger } from 'fastify';
 import { getDb, isDatabaseConfigured } from './db.js';
-import { getAppTz } from './app-settings.js';
+import { getAppSettings, getAppTz } from './app-settings.js';
+import { todayInTz } from './tz.js';
+import { processKnowledgeTransitions } from './knowledge.js';
 import { isPushoverConfigured } from './pushover.js';
 import { runReminders } from './reminders.js';
 import { runRoutineReminders, runRoutineMissed } from './routine-reminders.js';
@@ -29,6 +31,7 @@ interface Job {
   handler: () => Promise<unknown>;
   /** Skip (quietly) unless these hold. */
   needsPushover?: boolean;
+  catchUpOnStart?: boolean;
 }
 
 // The job table, built separately from starting the crons so a test can
@@ -36,6 +39,14 @@ interface Job {
 // exactly how the maintenance sweep went unscheduled in 0047).
 export function buildJobs(log: FastifyBaseLogger): Job[] {
   return [
+    {
+      name: 'knowledge-transitions', pattern: '* * * * *', catchUpOnStart: true,
+      handler: async () => {
+        const settings = await getAppSettings();
+        const result = await processKnowledgeTransitions(getDb(), { today: todayInTz(settings.timezone), staleDays: settings.meter_stale_days });
+        if (result.examined) log.info({ event: 'knowledge_transitions', ...result }, 'approved knowledge transitions checked');
+      },
+    },
     {
       // Task reminders + routine reminders + missed sweep piggyback on one
       // per-minute tick — all three queries are cheap and independent.
@@ -123,6 +134,12 @@ export async function startScheduler(log: FastifyBaseLogger): Promise<() => void
   // reschedule; document in Settings UI if that ever bites.
   const tz = await getAppTz();
   const jobs = buildJobs(log);
+  // Pending rows survive missed ticks and restarts. Finish catch-up before
+  // starting the cron so this process cannot overlap its own activation run.
+  if (isDatabaseConfigured()) for (const job of jobs.filter((entry) => entry.catchUpOnStart)) {
+    try { await job.handler(); }
+    catch (err) { log.error({ err, job: job.name }, 'scheduled catch-up failed'); }
+  }
 
   const crons = jobs.map((job) =>
     new Cron(job.pattern, { timezone: tz, protect: true, name: job.name }, async () => {

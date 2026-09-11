@@ -4,6 +4,17 @@ import { useActionState, useState } from 'react';
 import { useFormStatus } from 'react-dom';
 import { ASSET_PROFILE_KEYS, ASSET_PROFILE_LABELS, type AssetProfileKey } from '@jevi-ops/shared';
 import { saveAssetFactsAction, type SaveResult } from './actions';
+import { ReadableValues } from '@/components/onboarding/ChangeReview';
+
+const guidedVehicleKeys = new Set(['vehicle_preferences', 'vehicle_answer_states', 'vehicle_ownership_evidence', 'installed_equipment', 'known_issues']);
+const vehicleLabels: Record<string, string> = { vehicle_preferences: 'Preferences', vehicle_answer_states: 'Information coverage', vehicle_ownership_evidence: 'Ownership evidence', installed_equipment: 'Installed equipment', known_issues: 'Known issues' };
+const vehicleValues: Record<string, string> = { service_provider: 'Use a service provider', simple_checks: 'Do simple checks', some_diy: 'Do some work myself', mostly_diy: 'Do most work myself', actively_planning: 'Actively planning', maybe_later: 'Maybe later', none_now: 'None now', not_asked: 'Not yet asked', not_applicable: 'Not applicable', service_reminders: 'Service reminders', maintain_records: 'Maintain records', learn_maintenance: 'Understand maintenance', plan_improvements: 'Plan improvements', state: 'Current state', history: 'History and documents', tracking: 'Dates and responsibilities' };
+function readableVehicleValue(value: unknown): unknown {
+  if (typeof value === 'string') return vehicleValues[value] ?? value;
+  if (Array.isArray(value)) return value.map(readableVehicleValue);
+  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, readableVehicleValue(item)]));
+  return value;
+}
 
 // The Facts rail: the asset's metadata as labelled key/value rows, with
 // provenance when a fact carries it (source · observed date · verified),
@@ -30,7 +41,7 @@ export interface FactRow {
 }
 
 function labelFor(key: string): string {
-  return (ASSET_PROFILE_LABELS as Record<string, string>)[key] ?? key.replace(/_/g, ' ');
+  return vehicleLabels[key] ?? (ASSET_PROFILE_LABELS as Record<string, string>)[key] ?? key.replace(/_/g, ' ');
 }
 
 function SaveButton() {
@@ -72,16 +83,18 @@ export function FactsEditor({ assetId, initial }: { assetId: string; initial: Fa
           initial.map((f) => (
             <div key={f.key} className="flex items-baseline justify-between gap-3 py-1.5 border-b border-line/60 last:border-b-0">
               <span className="font-mono text-[10px] uppercase tracking-[0.04em] text-ink-3 shrink-0">{labelFor(f.key)}</span>
-              <span className="text-right min-w-0">
-                <span className={`font-sans text-[13px] text-ink break-words ${f.structured ? 'font-mono text-[11px]' : ''}`}>{f.value}</span>
+              <div className="text-right min-w-0">
+                {f.structured && guidedVehicleKeys.has(f.key)
+                  ? <div className="text-left"><ReadableValues value={readableVehicleValue(f.raw)} /></div>
+                  : <span className={`font-sans text-[13px] text-ink break-words ${f.structured ? 'font-mono text-[11px]' : ''}`}>{f.value}</span>}
                 {(f.source || f.observed_on || f.verified || f.structured) && (
                   <span className="block font-mono text-[9px] text-ink-4">
                     {f.structured
-                      ? 'structured · edit via API'
+                      ? guidedVehicleKeys.has(f.key) ? 'Update through Complete vehicle details' : 'structured · edit via API'
                       : [f.verified ? '✓ verified' : null, f.source, f.observed_on].filter(Boolean).join(' · ')}
                   </span>
                 )}
-              </span>
+              </div>
             </div>
           ))
         )}
@@ -144,7 +157,7 @@ export function FactsEditor({ assetId, initial }: { assetId: string; initial: Fa
       </button>
       {structured.length > 0 && (
         <p className="font-mono text-[9px] uppercase tracking-[0.06em] text-ink-4">
-          Not editable here: {structured.map((f) => labelFor(f.key)).join(', ')} (structured — edit via API).
+          Separate records: {structured.map((f) => labelFor(f.key)).join(', ')}. Use Complete vehicle details for vehicle information.
         </p>
       )}
       <div className="flex items-center gap-3 mt-1">

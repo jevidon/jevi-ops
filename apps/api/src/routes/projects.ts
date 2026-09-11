@@ -9,6 +9,7 @@ import {
   UpdateProjectChecklistItemSchema,
 } from '@jevi-ops/shared/schemas';
 import { getAppTz } from '../lib/app-settings.js';
+import { createProject } from '../lib/structure-commands.js';
 import { getDb } from '../lib/db.js';
 import { clearAttentionForSource } from '../lib/attention.js';
 import { DocConflict, DocVersionRequired, deleteDocRevisions, saveDoc } from '../lib/docs.js';
@@ -178,19 +179,7 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
         details: parsed.error.flatten().fieldErrors,
       });
     }
-    const values = { ...parsed.data };
-    // Work grouped under an asset lives in the asset's domain unless told
-    // otherwise (maintenance-items precedent) — so a project created from
-    // an assigned car's page lands beside the car, not in Inbox.
-    if (values.asset_id && !values.domain_id) {
-      const asset = await getDb().query.assets.findFirst({
-        columns: { domain_id: true },
-        where: eq(assets.id, values.asset_id),
-      });
-      if (asset?.domain_id) values.domain_id = asset.domain_id;
-    }
-    const [row] = await getDb().insert(projects).values(values).returning();
-    if (!row) throw app.httpErrors.internalServerError('insert_returned_no_row');
+    const row = await createProject(getDb(), parsed.data);
     return reply.code(201).send(row);
   });
 

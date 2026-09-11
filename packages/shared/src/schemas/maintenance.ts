@@ -334,6 +334,7 @@ export const MaintenanceLogSchema = z.object({
   run_id: nullableString(),
   reading_id: z.string().uuid().nullable().optional(),
   is_baseline: z.boolean(),
+  historical_only: z.boolean().default(false),
   issued_until: nullableDate(),
   purchased_to: nullableNonNeg(),
   finding: nullableString(),

@@ -23,6 +23,7 @@ export default async function globalSetup(): Promise<void> {
   try {
     await test.file(resolve(ROOT, 'infrastructure/schema-selfhost.sql'));
     await test.file(resolve(ROOT, 'infrastructure/seed.sql'));
+    await test.file(resolve(ROOT, 'apps/api/test/fixtures/domains.sql'));
   } finally {
     await test.end();
   }

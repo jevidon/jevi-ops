@@ -54,17 +54,35 @@ ln -sf ../../.env apps/web/.env.local
 docker compose -f infrastructure/docker/compose.dev.yml up -d
 psql postgresql://jevi:jevi@localhost:54329/jeviops -f infrastructure/schema-selfhost.sql
 psql postgresql://jevi:jevi@localhost:54329/jeviops -f infrastructure/seed.sql
+scripts/db-migrate.sh --baseline   # only after successful fresh bootstrap
 
 # Your user
 pnpm --filter @jevi-ops/api exec tsx scripts/create-user.ts --email you@example.com
+scripts/setup-preflight.sh         # read-only installation readiness report
 
-# Two terminals
-pnpm dev:api    # :3001
-pnpm dev:web    # :3000
+# Background API and web servers
+scripts/devctl.sh start
 ```
 
 Open <http://localhost:3000> → sign in → `/today`. Point the LLM at your
 server in **Settings → AI** (or via `LLM_BASE_URL`/`LLM_MODEL` in `.env`).
+
+Fresh bootstrap seeds only required system records, including Inbox. Choose
+your own domains during setup or create them manually. `infrastructure/seed-demo.sql`
+is optional original-owner demonstration data; it is never run automatically.
+Existing installations retain their domains when upgrading.
+
+For existing databases, run `scripts/db-migrate.sh --status`, then apply pending
+migrations with `scripts/db-migrate.sh`; do not bootstrap over existing data or
+baseline pending migrations. Guided setup is available at `/onboarding` and
+in Settings. Existing owners opt in; a fresh installation offers setup after sign-in.
+
+Private source files require `PRIVATE_SOURCES_DIR`, separate from public photo
+uploads. Compose mounts a separate private volume, or the configured
+`PRIVATE_SOURCES_DIR_HOST`. Back up that directory with Postgres; its raw files
+cannot be reconstructed from database references. Text and link evidence stays
+in Postgres. Owner cleanup retains accepted evidence and removes unreferenced
+files or abandoned draft sources only after a 30-day grace period.
 
 Credentials saved through Settings require an external encryption keyring.
 Follow [credential migration, backup and rotation](docs/SETTINGS-CREDENTIALS.md)

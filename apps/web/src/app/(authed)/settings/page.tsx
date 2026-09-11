@@ -107,6 +107,7 @@ export default async function SettingsPage({
   return (
     <div>
       <ScreenHeader eyebrow="Account" title="Settings" meta="Integrations · sync" />
+      <div className="px-5 py-4"><Link className="underline" href="/onboarding">Start or resume workspace setup</Link><p className="text-sm text-ink-3">Review your setup choices or add a vehicle. Existing records are preserved.</p></div>
       <div className="hairline" />
 
       {banner && (

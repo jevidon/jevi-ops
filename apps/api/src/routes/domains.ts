@@ -2,6 +2,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import { asc, eq } from 'drizzle-orm';
 import { CreateDomainSchema, UpdateDomainSchema } from '@jevi-ops/shared/schemas';
 import { DocConflict, DocVersionRequired, saveDoc } from '../lib/docs.js';
+import { createDomain } from '../lib/structure-commands.js';
 import { getDb } from '../lib/db.js';
 import { clearAttentionForSource } from '../lib/attention.js';
 import { composeDomainIllustration } from '../lib/illustration.js';
@@ -41,16 +42,7 @@ export const domainRoutes: FastifyPluginAsync = async (app) => {
         details: parsed.error.flatten().fieldErrors,
       });
     }
-    const [row] = await getDb()
-      .insert(stewardship_domains)
-      .values({
-        name: parsed.data.name,
-        description: parsed.data.description ?? null,
-        expected_cadence: parsed.data.expected_cadence ?? null,
-        doc_md: parsed.data.doc_md || null,
-      })
-      .returning();
-    if (!row) throw app.httpErrors.internalServerError('insert_returned_no_row');
+    const row = await createDomain(getDb(), parsed.data);
     return reply.code(201).send(row);
   });
 
