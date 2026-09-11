@@ -17,6 +17,8 @@ const proposal: ResearchProposal = { id: 'proposal-1', asset_id: 'asset-1', job_
 const job = { id: 'job-1', asset_id: 'asset-1', request: { question: 'What is known about this vehicle?', max_attempts: 3 }, status: 'succeeded', attempts: 1, failure_reason: null, last_checked_at: '2026-09-11T01:00:00Z' } as ResearchJob;
 const policy: MonitoringPolicy = { id: 'policy-1', revision: 4, config: { name: 'Vehicle rules', asset_ids: ['asset-1'], worker_id: worker.id, enabled: false, question: 'Check the published rule', allowed_domains: ['example.org'], cadence_hours: 720, budget: { timeout_seconds: 300, max_sources: 5, max_requests: 20 }, scope: { categories: ['regulatory'], rule_ids: [] }, notifications: 'meaningful_changes' }, next_due_at: '2026-09-12T00:00:00Z', retry_after_at: null, last_attempt_at: '2026-09-11T01:00:00Z', last_successful_at: null, last_outcome: 'failed', failure_count: 1, monitoring_state: 'paused', connection_state: 'configured_not_tested' };
 beforeEach(() => {
+  // A self-hosted HTTP origin exposes getRandomValues but not randomUUID.
+  vi.stubGlobal('crypto', { getRandomValues: globalThis.crypto.getRandomValues.bind(globalThis.crypto) });
   vi.mocked(actions.loadAssetResearchAction).mockResolvedValue({ ok: true, value: { workers: [worker], jobs: [], proposals: [] } });
   vi.mocked(actions.loadResearchWorkersAction).mockResolvedValue({ ok: true, value: { workers: [worker], tokens: [] } });
   vi.mocked(actions.loadMonitoringPoliciesAction).mockResolvedValue({ ok: true, value: { policies: [] } });
@@ -24,7 +26,7 @@ beforeEach(() => {
   vi.mocked(actions.researchJobDetailAction).mockResolvedValue({ ok: true, value: { job, result: null, proposals: [], history: [] } });
   vi.mocked(actions.monitoringDetailAction).mockResolvedValue({ ok: true, value: { policy, runs: [], signals: [], notifications: [] } });
 });
-afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.resetAllMocks(); });
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); vi.resetAllMocks(); });
 
 describe('bounded owner research', () => {
   it('preserves the scope and operation key across a connection retry', async () => {

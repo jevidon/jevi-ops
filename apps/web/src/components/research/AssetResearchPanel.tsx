@@ -1,5 +1,6 @@
 'use client';
 
+import { createClientId } from '../../lib/client-id';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import type { ResearchJobInput } from '@jevi-ops/shared';
@@ -59,7 +60,7 @@ export function AssetResearchPanel({ assetId, lifecycle = 'active' }: { assetId:
     {lifecycle !== 'active' && <p>Research is paused for this {lifecycle} vehicle. Its existing records and results remain available.</p>}
     <div className="flex flex-wrap gap-2"><button type="button" className={button} onClick={() => setShowRequest((open) => !open)}>{showRequest ? 'Hide request form' : 'Request vehicle research'}</button><button type="button" className={button} onClick={() => { void refresh(); if (selectedJob.current) void inspect(selectedJob.current); }}>Refresh research status</button></div>
     {showRequest && <form className="space-y-3 rounded border border-line p-4" onChange={changed} onSubmit={async (event) => {
-      event.preventDefault(); if (busy) return; setBusy(true); setError(null); requestKey.current ??= crypto.randomUUID();
+      event.preventDefault(); if (busy) return; setBusy(true); setError(null); requestKey.current ??= createClientId();
       try { const result = await requestVehicleResearchAction({ operation_key: requestKey.current, asset_id: assetId, task_type: taskType, question,
         allowed_domains: domains.split(/[\s,]+/).filter(Boolean).map((domain) => domain.toLowerCase()), ...(workerId ? { worker_id: workerId } : {}),
         budget: { timeout_seconds: timeout, max_sources: maxSources, max_requests: maxRequests }, max_attempts: maxAttempts });
@@ -127,7 +128,7 @@ function ProposalReview({ initialProposal, assetId, onEvidence, onChanged }: { i
     <button type="button" className={button} onClick={() => void onEvidence()}>Inspect result and evidence</button>
     {proposal.status === 'pending_review' && <><button type="button" className={button} disabled={busy} onClick={async () => { setBusy(true); setError(null); try {
       await onEvidence(); const result = await previewResearchProposalAction(proposal.id);
-      if (result.ok) { setProposal(result.value.proposal); key.current = crypto.randomUUID(); setReviewed(true); } else { setError(result.error); setReviewed(false); }
+      if (result.ok) { setProposal(result.value.proposal); key.current = createClientId(); setReviewed(true); } else { setError(result.error); setReviewed(false); }
     } finally { setBusy(false); } }}>Preview concrete changes</button>
       {reviewed && proposal.preview && proposal.fingerprint && <section className="space-y-3"><h4 className="font-semibold">Reviewed changes</h4><ChangeReview changes={changes} />
         <button type="button" className={button} disabled={busy} onClick={async () => { setBusy(true); setError(null); try {

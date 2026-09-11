@@ -1,5 +1,6 @@
 'use client';
 
+import { createClientId } from '../../lib/client-id';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import type { MonitoringPolicyConfig } from '@jevi-ops/shared';
@@ -71,7 +72,7 @@ function PolicyEditor({ assetId, existing, workers, choices, onClose, onSaved }:
   const [conflict, setConflict] = useState(false);
   const creationKey = useRef<string | null>(null);
   const change = (patch: Partial<MonitoringPolicyConfig>) => setConfig((current) => ({ ...current, ...patch }));
-  return <form className="space-y-3 rounded border border-line p-4" aria-label="Monitoring policy editor" onChange={() => { creationKey.current = null; }} onSubmit={async (event) => { event.preventDefault(); if (busy) return; setBusy(true); setError(null); creationKey.current ??= crypto.randomUUID(); try {
+  return <form className="space-y-3 rounded border border-line p-4" aria-label="Monitoring policy editor" onChange={() => { creationKey.current = null; }} onSubmit={async (event) => { event.preventDefault(); if (busy) return; setBusy(true); setError(null); creationKey.current ??= createClientId(); try {
     const result = await saveMonitoringPolicyAction({ ...config, allowed_domains: domains.split(/[\s,]+/).filter(Boolean).map((domain) => domain.toLowerCase()), ...(!existing ? { creation_key: creationKey.current } : {}) }, existing ? { id: existing.id, revision: existing.revision } : undefined);
     if (result.ok) await onSaved(); else { setError(result.error); setConflict(result.code === 'monitoring_conflict'); }
   } finally { setBusy(false); } }}><fieldset disabled={busy} className="space-y-3"><legend className="font-semibold">{existing ? 'Edit monitoring scope' : 'Create a paused monitoring policy'}</legend>
@@ -101,7 +102,7 @@ function SignalForm({ policy, onSaved }: { policy: MonitoringPolicy; onSaved(): 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const key = useRef<string | null>(null);
-  return <details><summary>Request a review or report a change</summary><form className="space-y-3 pt-3" onChange={() => { key.current = null; }} onSubmit={async (event) => { event.preventDefault(); if (busy) return; setBusy(true); setError(null); key.current ??= crypto.randomUUID(); try { const result = await signalMonitoringAction(policy.id, { operation_key: key.current, kind, reason }); if (result.ok) { setReason(''); key.current = null; await onSaved(); } else setError(result.error); } finally { setBusy(false); } }}>
+  return <details><summary>Request a review or report a change</summary><form className="space-y-3 pt-3" onChange={() => { key.current = null; }} onSubmit={async (event) => { event.preventDefault(); if (busy) return; setBusy(true); setError(null); key.current ??= createClientId(); try { const result = await signalMonitoringAction(policy.id, { operation_key: key.current, kind, reason }); if (result.ok) { setReason(''); key.current = null; await onSaved(); } else setError(result.error); } finally { setBusy(false); } }}>
     <fieldset disabled={busy} className="space-y-2"><label className="block">Review signal<select className={input} value={kind} onChange={(event) => setKind(event.target.value as typeof kind)}><option value="manual_review">Run a review</option><option value="user_report">I learned something new</option><option value="source_change">A source changed</option></select></label>
       <label className="block">Reason for this review<textarea className={input} value={reason} required maxLength={10000} onChange={(event) => setReason(event.target.value)} /></label>
       <button className={button}>Queue review signal</button><p className="text-sm">This records an explicit signal for the local scheduler. A paused policy keeps the signal until you enable it.</p>
