@@ -1465,3 +1465,180 @@ alter table maintenance_logs
 -- ─────────────────────────────────────────────────────────────────────────
 -- Done.
 -- ─────────────────────────────────────────────────────────────────────────
+
+-- Implementation migration 0054
+-- Resumable owner onboarding. Upgraded installations with an owner stay opt-in.
+create table if not exists onboarding_sessions (
+  id uuid primary key default gen_random_uuid(),
+  owner_id uuid not null references auth_user(id),
+  creation_key text not null,
+  creation_fingerprint text not null,
+  module_id text not null,
+  module_version integer not null,
+  subject_id uuid references assets(id),
+  parent_session_id uuid references onboarding_sessions(id),
+  status text not null default 'in_progress',
+  current_step_id text not null,
+  step_states jsonb not null default '{}',
+  draft jsonb not null default '{}',
+  revision integer not null default 0,
+  preview jsonb,
+  commit_operation_key text,
+  commit_receipt jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  completed_at timestamptz,
+  constraint onboarding_sessions_module check (module_id in ('core', 'vehicle')),
+  constraint onboarding_sessions_status check (status in ('in_progress', 'deferred', 'completed', 'abandoned')),
+  constraint onboarding_sessions_revision check (revision >= 0 and module_version > 0),
+  constraint onboarding_sessions_completed_receipt check ((status = 'completed') = (commit_receipt is not null and commit_operation_key is not null and completed_at is not null))
+);
+create unique index if not exists onboarding_sessions_creation_key on onboarding_sessions(owner_id, creation_key);
+create unique index if not exists onboarding_sessions_active_subject on onboarding_sessions(module_id, subject_id) where subject_id is not null and status in ('in_progress', 'deferred');
+create unique index if not exists onboarding_sessions_active_core on onboarding_sessions(owner_id, module_id) where module_id = 'core' and status in ('in_progress', 'deferred');
+create unique index if not exists onboarding_sessions_commit_key on onboarding_sessions(owner_id, commit_operation_key) where commit_operation_key is not null;
+create index if not exists onboarding_sessions_owner_updated on onboarding_sessions(owner_id, updated_at);
+
+create table if not exists installation_setup (
+  id boolean primary key default true,
+  state text not null default 'eligible',
+  core_session_id uuid references onboarding_sessions(id),
+  updated_at timestamptz not null default now(),
+  constraint installation_setup_singleton check (id),
+  constraint installation_setup_state check (state in ('eligible', 'opt_in', 'in_progress', 'deferred', 'completed'))
+);
+insert into installation_setup (id, state)
+values (true, 'eligible')
+on conflict (id) do nothing;
+
+create table if not exists onboarding_operation_receipts (
+  id uuid primary key default gen_random_uuid(),
+  session_id uuid not null references onboarding_sessions(id),
+  action_id text not null,
+  operation_key text not null,
+  receipt jsonb not null,
+  created_at timestamptz not null default now()
+);
+create unique index if not exists onboarding_operations_key on onboarding_operation_receipts(session_id, operation_key);
+
+-- Implementation migration 0055
+-- Original evidence is private and independent from the public photo gallery.
+create table if not exists source_documents (
+  id uuid primary key default gen_random_uuid(),
+  kind text not null check (kind in ('file', 'text', 'link')),
+  content_hash text not null unique,
+  media_type text not null,
+  size_bytes integer not null check (size_bytes >= 0),
+  storage_key text,
+  text_content text,
+  source_url text,
+  created_at timestamptz not null default now(),
+  check ((kind = 'file' and storage_key is not null and text_content is null)
+      or (kind = 'text' and text_content is not null and storage_key is null)
+      or (kind = 'link' and source_url is not null and storage_key is null))
+);
+create table if not exists source_links (
+  id uuid primary key default gen_random_uuid(),
+  source_id uuid not null references source_documents(id),
+  asset_id uuid references assets(id) on delete cascade,
+  session_id uuid references onboarding_sessions(id) on delete cascade,
+  label text not null,
+  actor text not null,
+  created_at timestamptz not null default now(),
+  check ((asset_id is not null)::int + (session_id is not null)::int = 1)
+);
+create unique index if not exists idx_source_links_asset on source_links(source_id, asset_id) where asset_id is not null;
+create unique index if not exists idx_source_links_session on source_links(source_id, session_id) where session_id is not null;
+create table if not exists source_candidates (
+  id uuid primary key default gen_random_uuid(),
+  source_link_id uuid not null references source_links(id),
+  operation_key text not null,
+  creation_fingerprint text not null,
+  candidate jsonb not null,
+  revision integer not null default 1 check (revision > 0),
+  status text not null default 'pending' check (status in ('pending', 'accepted', 'rejected')),
+  receipt jsonb,
+  accepted_key text,
+  accepted_fingerprint text,
+  actor text not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (source_link_id, operation_key)
+);
+
+-- Implementation migration 0056
+-- Versioned responsibility evidence, assessments and owner-approved local changes.
+create table if not exists responsibility_rules (
+  id uuid primary key default gen_random_uuid(), current_version integer not null default 1,
+  creation_key text, creation_actor text, creation_fingerprint text,
+  created_at timestamptz not null default now(),
+  constraint responsibility_rules_creation_identity unique(creation_actor, creation_key),
+  constraint responsibility_rules_version_check check (current_version > 0)
+);
+create table if not exists responsibility_rule_versions (
+  id uuid primary key default gen_random_uuid(), rule_id uuid not null references responsibility_rules(id),
+  version integer not null, title text not null, kind text not null, scope jsonb not null default '{}',
+  status text not null, source_note text, published_at timestamptz, retrieved_at timestamptz,
+  effective_from jsonb, effective_until jsonb, effective_from_at timestamptz, effective_until_at timestamptz,
+  reason text not null, actor text not null, created_at timestamptz not null default now(),
+  constraint responsibility_rule_versions_identity unique (rule_id, version),
+  constraint responsibility_rule_versions_kind_check check (kind in ('user_reminder','service_recommendation','regulatory')),
+  constraint responsibility_rule_versions_status_check check (status in ('proposed','accepted','withdrawn')),
+  constraint responsibility_rule_versions_version_check check (version > 0)
+);
+create table if not exists responsibility_rule_sources (
+  id uuid primary key default gen_random_uuid(), rule_version_id uuid not null references responsibility_rule_versions(id),
+  source_id uuid not null references source_documents(id),
+  constraint responsibility_rule_sources_identity unique (rule_version_id, source_id)
+);
+create table if not exists vehicle_assessments (
+  id uuid primary key default gen_random_uuid(), asset_id uuid not null references assets(id) on delete cascade,
+  rule_id uuid not null references responsibility_rules(id), rule_version_id uuid not null references responsibility_rule_versions(id),
+  revision integer not null default 1, applicability text not null, evidence_basis text not null, review_state text not null,
+  relevant_facts jsonb not null default '{}', source_ids jsonb not null default '[]', rationale text not null, actor text not null,
+  assessed_at timestamptz not null, last_checked_at timestamptz, review_due_at timestamptz,
+  item_id uuid references maintenance_items(id) on delete set null, invalidation_reason text,
+  created_at timestamptz not null default now(), updated_at timestamptz not null default now(),
+  constraint vehicle_assessments_asset_rule_identity unique (asset_id, rule_id),
+  constraint vehicle_assessments_applicability_check check (applicability in ('unknown','applicable','not_applicable')),
+  constraint vehicle_assessments_evidence_basis_check check (evidence_basis in ('user_reported','document_supported','official_source_supported')),
+  constraint vehicle_assessments_review_state_check check (review_state in ('unreviewed','accepted','needs_review')),
+  constraint vehicle_assessments_revision_check check (revision > 0)
+);
+create table if not exists vehicle_assessment_history (
+  id uuid primary key default gen_random_uuid(), assessment_id uuid not null references vehicle_assessments(id) on delete cascade,
+  revision integer not null, snapshot jsonb not null, actor text not null, reason text not null,
+  created_at timestamptz not null default now(),
+  constraint vehicle_assessment_history_identity unique (assessment_id, revision)
+);
+create table if not exists knowledge_change_previews (
+  id uuid primary key default gen_random_uuid(), asset_id uuid not null references assets(id) on delete cascade,
+  operation jsonb not null, fingerprint text not null, preconditions jsonb not null, changes jsonb not null,
+  actor text not null, operation_key text, receipt jsonb, created_at timestamptz not null default now(),
+  constraint knowledge_change_preview_operation_key unique (actor, operation_key)
+);
+create table if not exists knowledge_transitions (
+  id uuid primary key default gen_random_uuid(), asset_id uuid not null references assets(id) on delete cascade,
+  preview_id uuid not null unique references knowledge_change_previews(id), operation jsonb not null, preconditions jsonb not null,
+  effective jsonb not null, effective_at timestamptz, status text not null default 'pending', revision integer not null default 1,
+  actor text not null, approved_at timestamptz not null default now(), reason text, receipt jsonb, applied_at timestamptz,
+  updated_at timestamptz not null default now(),
+  constraint knowledge_transitions_status_check check (status in ('pending','applied','needs_review','cancelled','superseded')),
+  constraint knowledge_transitions_revision_check check (revision > 0),
+  constraint knowledge_transitions_receipt_check check ((status = 'applied') = (receipt is not null and applied_at is not null))
+);
+create index if not exists knowledge_transitions_due on knowledge_transitions(status, effective_at);
+create table if not exists knowledge_transition_history (
+  id uuid primary key default gen_random_uuid(), transition_id uuid not null references knowledge_transitions(id) on delete cascade,
+  revision integer not null, snapshot jsonb not null, actor text not null, reason text not null,
+  created_at timestamptz not null default now(),
+  constraint knowledge_transition_history_identity unique (transition_id, revision)
+);
+
+
+-- Implementation migration 0057
+-- Reviewed receipt imports record history without making it today's service
+-- baseline. Persist the distinction so later corrections/undo preserve pins.
+alter table maintenance_logs add column if not exists historical_only boolean not null default false;
+alter table maintenance_logs drop constraint if exists maintenance_logs_history_not_baseline;
+alter table maintenance_logs add constraint maintenance_logs_history_not_baseline check (not (historical_only and is_baseline));

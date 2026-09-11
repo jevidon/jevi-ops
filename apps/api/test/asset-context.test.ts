@@ -1,0 +1,94 @@
+import { afterAll, beforeAll, expect, it } from 'vitest';
+import type { FastifyInstance } from 'fastify';
+import { eq } from 'drizzle-orm';
+import { buildServer } from '../src/server.js';
+import { getDb } from '../src/lib/db.js';
+import { signSession } from '../src/lib/jwt.js';
+import { INBOX_DOMAIN_ID } from '@jevi-ops/shared';
+import { assets, asset_meter_readings, maintenance_logs, tasks } from '../src/db/schema.js';
+import { vehicle_assessments } from '../src/db/knowledge-schema.js';
+import { createResponsibilityRule } from '../src/lib/knowledge.js';
+import { retainSource } from '../src/lib/private-sources.js';
+import { addReading, createAsset, createItem } from './helpers.js';
+
+let app: FastifyInstance;
+let session: string;
+const owner = '00000000-0000-0000-0000-000000000001';
+beforeAll(async () => { app = await buildServer(); await app.ready(); session = await signSession({ id: owner, email: 'probe@test.local' }); });
+afterAll(async () => { await app.close(); });
+const get = (url: string) => app.inject({ method: 'GET', url, headers: { authorization: `Bearer ${session}` } });
+it('defaults to a minimal external context and keeps original source/narrative/identifier data private', async () => {
+  const asset = await createAsset({ name: 'Private owner vehicle ABC123', doc_md: 'Private household narrative', metadata: { year: 2015, make: 'Toyota', model: 'Prado', vin: 'SECRET-FULL-VIN', plate: 'ABC123', supplier: 'Private dealer', private_custom: 'custom-secret', based_country: { value: 'NZ', source: 'receipt for ABC123', observed_on: '2026-01-01' } } });
+  const source = await retainSource(getDb(), { subject: { asset_id: asset.id }, ownerId: owner, actor: 'test', label: 'ABC123 private receipt', kind: 'text', text: 'Original private invoice body' });
+  await addReading(asset.id, 87600, '2026-01-01');
+  const response = await get(`/api/assets/${asset.id}/context`);
+  expect(response.statusCode).toBe(200);
+  expect(response.json()).toMatchObject({ context_version: 1, audience: 'research', asset_id: asset.id, facts: { make: { value: 'Toyota' } }, latest_reading: { reading: 87600 }, narrative: { body: null, withheld: true } });
+  for (const value of ['SECRET-FULL-VIN', 'ABC123', 'Private household', 'Private dealer', 'custom-secret', 'Original private invoice body']) expect(response.body).not.toContain(value);
+  expect(response.json().source_references[0]).toMatchObject({ id: source.id, source_id: source.source_id, content: 'withheld_pending_owner_authorization' });
+  expect(response.body).not.toContain('download_url');
+  const full = await get(`/api/assets/${asset.id}/context?audience=owner`);
+  expect(full.statusCode).toBe(200); expect(full.body).toContain('SECRET-FULL-VIN'); expect(full.body).toContain('Private household narrative');
+});
+it('declares truncated normal bundles and supports consistent paged histories with authoritative latest reading', async () => {
+  const asset = await createAsset();
+  await getDb().insert(asset_meter_readings).values(Array.from({ length: 55 }, (_, index) => ({ asset_id: asset.id, reading: 1000 + index, recorded_on: `2026-01-${String(index % 28 + 1).padStart(2, '0')}`, source: 'manual' })));
+  const latest = await addReading(asset.id, 9000, '2026-08-01');
+  const normal = await get(`/api/assets/${asset.id}`);
+  expect(normal.statusCode).toBe(200);
+  expect(normal.json().pagination.readings).toMatchObject({ total: 56, truncated: true });
+  expect(normal.json().latest_reading.id).toBe(latest.id);
+  const first = await get(`/api/assets/${asset.id}/context?limit=20`);
+  expect(first.statusCode).toBe(200); expect(first.json().readings).toHaveLength(20);
+  expect(first.json().pagination.readings.total).toBe(56);
+  const second = await get(first.json().pagination.readings.next);
+  expect(second.statusCode).toBe(200); expect(second.json().snapshot).toBe(first.json().snapshot);
+  expect(second.json().latest_reading.id).toBe(latest.id);
+  expect(new Set([...first.json().readings, ...second.json().readings].map((r: { id: string }) => r.id)).size).toBe(40);
+  await getDb().update(asset_meter_readings).set({ reading: 9001 }).where(eq(asset_meter_readings.id, latest.id));
+  const stale = await get(first.json().pagination.readings.next);
+  expect(stale.statusCode).toBe(409); expect(stale.json().error).toBe('asset_context_changed');
+});
+it('changes the snapshot for corrected historical contents and exports a readable dated narrative snapshot', async () => {
+  const asset = await createAsset({ name: 'Prado', doc_md: '# Owner notes\nKeep this authored text.', doc_version: 3, metadata: { year: 2015, make: 'Toyota' } });
+  const item = await createItem({ asset_id: asset.id, name: 'Oil service' });
+  const [log] = await getDb().insert(maintenance_logs).values({ item_id: item.id, completed_on: '2024-03-12', notes: 'original', historical_only: true }).returning();
+  const first = await get(`/api/assets/${asset.id}/context`);
+  await getDb().update(maintenance_logs).set({ notes: 'corrected' }).where(eq(maintenance_logs.id, log!.id));
+  const second = await get(`/api/assets/${asset.id}/context`);
+  expect(second.json().snapshot).not.toBe(first.json().snapshot);
+  const exported = await get(`/api/assets/${asset.id}/export.md`);
+  expect(exported.statusCode).toBe(200);
+  expect(exported.headers['cache-control']).toBe('private, no-store');
+  expect(exported.headers['content-disposition']).toContain('attachment');
+  expect(exported.body).toContain(`Asset ID: ${asset.id}`); expect(exported.body).toContain('Authored document version: 3');
+  expect(exported.body).toContain('## Generated facts snapshot'); expect(exported.body).toContain('Keep this authored text.');
+  expect(exported.body).toContain('2024-03-12'); expect(exported.body).toContain('historical evidence only');
+  const after = await getDb().query.assets.findFirst({ where: eq(assets.id, asset.id) });
+  expect(after?.doc_md).toBe(asset.doc_md); expect(after?.doc_version).toBe(3);
+});
+
+it('invalidates snapshots when an older generated occurrence or its nested subtask changes', async () => {
+  const asset = await createAsset();
+  const item = await createItem({ asset_id: asset.id });
+  const [occurrence] = await getDb().insert(tasks).values({ title: 'Prior occurrence', domain_id: INBOX_DOMAIN_ID, source: 'maintenance', source_ref: `maint:${item.id}:older` }).returning();
+  const [child] = await getDb().insert(tasks).values({ title: 'Owner subtask', domain_id: INBOX_DOMAIN_ID, parent_task_id: occurrence!.id }).returning();
+  const [grandchild] = await getDb().insert(tasks).values({ title: 'Owner detail', domain_id: INBOX_DOMAIN_ID, parent_task_id: child!.id }).returning();
+  const before = await get(`/api/assets/${asset.id}/context`);
+  await getDb().update(tasks).set({ notes: 'New annotation without changing parent or item' }).where(eq(tasks.id, grandchild!.id));
+  const after = await get(`/api/assets/${asset.id}/context`);
+  expect(after.json().snapshot).not.toBe(before.json().snapshot);
+});
+
+it('exposes dated rule references while withholding owner-authored titles and source narrative', async () => {
+  const asset = await createAsset();
+  const rule = await createResponsibilityRule(getDb(), { title: 'Private ABC123 responsibility', kind: 'regulatory', scope: { country: 'NZ', region: 'Auckland', description: 'Private owner circumstances' }, source_note: 'Private document note', source_ids: [], reason: 'Owner recorded a reference', effective_from: { kind: 'date', date: '2027-01-01', timezone: 'Pacific/Auckland' } }, 'session:test');
+  await getDb().insert(vehicle_assessments).values({ asset_id: asset.id, rule_id: rule.rule_id, rule_version_id: rule.id, applicability: 'unknown', evidence_basis: 'user_reported', review_state: 'needs_review', rationale: 'Private assessment narrative', actor: 'session:test', assessed_at: '2026-09-11T00:00:00Z' });
+  const safe = await get(`/api/assets/${asset.id}/context`);
+  expect(safe.statusCode).toBe(200);
+  expect(safe.json().rule_references).toEqual([expect.objectContaining({ id: rule.id, rule_id: rule.rule_id, version: 1, kind: 'regulatory', title: null, title_withheld: true, scope: { country: 'NZ', region: 'Auckland' }, effective_from: { kind: 'date', date: '2027-01-01', timezone: 'Pacific/Auckland' } })]);
+  for (const secret of ['ABC123', 'Private owner circumstances', 'Private document note', 'Private assessment narrative']) expect(safe.body).not.toContain(secret);
+  expect(safe.json().pagination.rule_references).toMatchObject({ total: 1, truncated: false });
+  const full = await get(`/api/assets/${asset.id}/context?audience=owner`);
+  expect(full.body).toContain('Private ABC123 responsibility');
+});

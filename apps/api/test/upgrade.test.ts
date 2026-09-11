@@ -21,6 +21,10 @@ const MIGRATIONS = [
   '0051_service_visits.sql',
   '0052_currency_visit_outcomes.sql',
   '0053_safe_settings.sql',
+  '0054_onboarding.sql',
+  '0055_private_sources.sql',
+  '0056_vehicle_knowledge.sql',
+  '0057_historical_source_evidence.sql',
 ].map((f) => resolve(ROOT, 'infrastructure/migrations', f));
 
 function upgradeUrl(): string {
@@ -42,6 +46,7 @@ beforeAll(async () => {
   sql = postgres(upgradeUrl(), { max: 1, onnotice: () => {} });
   await sql.file(resolve(ROOT, 'apps/api/test/fixtures/schema-0047.sql'));
   await sql.file(resolve(ROOT, 'infrastructure/seed.sql'));
+  await sql.file(resolve(ROOT, 'apps/api/test/fixtures/domains.sql'));
 });
 afterAll(async () => {
   await sql.end();
@@ -49,6 +54,8 @@ afterAll(async () => {
 
 describe('0047 → 0048 → 0049', () => {
   it('upgrades a populated database and is idempotent', async () => {
+    const domainsBeforeUpgrade = await sql`select id, name, is_system from stewardship_domains order by id`;
+    await sql`insert into auth_user (email, password_hash) values ('existing-owner@upgrade.test', 'test-only-preserved-hash')`;
     const domains = await sql`select id from stewardship_domains where is_system = false order by name limit 2`;
     const domainA = domains[0]!.id as string;
     const domainB = (domains[1] ?? domains[0])!.id as string;
@@ -76,6 +83,9 @@ describe('0047 → 0048 → 0049', () => {
 
     // ─── Upgrade ─────────────────────────────────────────────────────
     for (const m of MIGRATIONS) await sql.file(m);
+    expect(await sql`select id, name, is_system from stewardship_domains order by id`).toEqual(domainsBeforeUpgrade);
+    expect((await sql`select state, core_session_id from installation_setup where id = true`)[0]).toMatchObject({ state: 'opt_in', core_session_id: null });
+    expect((await sql`select password_hash from auth_user where email = 'existing-owner@upgrade.test'`)[0]?.password_hash).toBe('test-only-preserved-hash');
 
     const [s] = await sql`select policy, domain_id, system, generated_task_id from maintenance_items where id = ${seedOnly!.id}`;
     expect(s!.policy).toBe('interval');
@@ -145,7 +155,28 @@ describe('0047 → 0048 → 0049', () => {
 
     // ─── Again — every statement is idempotent ───────────────────────
     for (const m of MIGRATIONS) await sql.file(m);
+    expect((await sql`select state from installation_setup where id = true`)[0]?.state).toBe('opt_in');
     const [n] = await sql`select count(*)::int as n from maintenance_logs where item_id = ${seedOnly!.id}`;
     expect(n!.n).toBe(1);
+  });
+
+  it('boots a fresh installation with only system records and keeps first-owner setup eligible', async () => {
+    // This connection is created solely for the disposable upgrade database.
+    // Reset it after the populated upgrade assertions to exercise the complete
+    // fresh bootstrap, including its distinct setup eligibility seed.
+    expect((await sql`select current_database() as name`)[0]?.name).toBe(DB);
+    await sql`drop schema public cascade`;
+    await sql`create schema public`;
+    await sql.file(resolve(ROOT, 'infrastructure/schema-selfhost.sql'));
+    await sql.file(resolve(ROOT, 'infrastructure/seed.sql'));
+    expect(await sql`select id, name, is_system from stewardship_domains`).toEqual([{ id: INBOX_DOMAIN_ID, name: 'Inbox', is_system: true }]);
+    expect((await sql`select count(*)::int as n from auth_user`)[0]?.n).toBe(0);
+    expect((await sql`select state, core_session_id from installation_setup where id = true`)[0]).toMatchObject({ state: 'eligible', core_session_id: null });
+    expect((await sql`select count(*)::int as n from assets`)[0]?.n).toBe(0);
+    expect((await sql`select count(*)::int as n from projects`)[0]?.n).toBe(0);
+    await sql`insert into auth_user (email, password_hash) values ('first-owner@fresh.test', 'test-only')`;
+    await sql.file(resolve(ROOT, 'infrastructure/seed.sql'));
+    expect((await sql`select state from installation_setup where id = true`)[0]?.state).toBe('eligible');
+    expect((await sql`select count(*)::int as n from stewardship_domains`)[0]?.n).toBe(1);
   });
 });

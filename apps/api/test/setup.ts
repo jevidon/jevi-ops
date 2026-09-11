@@ -21,7 +21,11 @@ beforeEach(async () => {
   const db = getDb();
   await db.execute(`
     truncate table maintenance_logs, maintenance_items, asset_meter_readings, assets,
-                   attention_items, tasks, api_tokens
+                   attention_items, tasks, api_tokens, source_candidates, source_links, source_documents,
+                   onboarding_operation_receipts, onboarding_sessions,
+                   responsibility_rules, responsibility_rule_versions, responsibility_rule_sources,
+                   vehicle_assessments, vehicle_assessment_history, knowledge_change_previews,
+                   knowledge_transitions, knowledge_transition_history
     restart identity cascade
   `);
   // Locale changes are test fixtures too; they must not leak into later files.

@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { ApiError, assetsApi, domainsApi, type AssetListItem } from '@/lib/api';
 import { AssetForm } from '../asset-form';
 import type { DomainOption } from '../item-form';
+import { StartSetup } from '../../onboarding/start-setup';
 
 // /maintenance/assets — the things under upkeep. Each row shows the latest
 // meter reading (and its age — the staleness signal the odometer nag keys
@@ -46,6 +47,7 @@ export default async function AssetsPage({
       </div>
 
       <div className="hairline mt-4 mx-5 lg:mx-0" />
+      <div className="px-5 lg:px-0 mt-4"><StartSetup moduleId="vehicle" title="Add vehicle with guided setup" domainId={defaultDomainId} /></div>
 
       {errorMessage && (
         <div className="px-5 lg:px-0 mt-6 font-sans text-[13px] text-ink-3">

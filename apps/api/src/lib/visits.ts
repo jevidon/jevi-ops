@@ -75,6 +75,7 @@ export interface CompleteVisitInput {
   notes?: string | null;
   attachments?: StoredAttachment[] | null;
   eventKey?: string | null;
+  historicalOnly?: boolean;
   runId?: string | null;
   source: 'manual' | 'agent' | 'import';
   actor: string;
@@ -275,6 +276,7 @@ export async function completeVisit(db: DbOrTx, input: CompleteVisitInput): Prom
         notes: line.notes ?? null,
         cost: line.cost ?? null,
         source: input.source,
+        historicalOnly: input.historicalOnly,
         actor: input.actor,
         runId: input.runId ?? null,
         eventKey: `${eventKey}:${line.itemId}`,

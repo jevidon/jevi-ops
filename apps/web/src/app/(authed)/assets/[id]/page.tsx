@@ -26,6 +26,9 @@ import { AssetGallery } from './asset-gallery';
 import { isStructuredFact, renderFact } from './facts';
 import { FactsEditor, type FactRow } from './facts-editor';
 import { ServiceSchedule } from './service-schedule';
+import { SourcePanel } from '@/components/sources/SourcePanel';
+import { StartSetup } from '../../onboarding/start-setup';
+import { AssetKnowledgePanel } from '@/components/knowledge/AssetKnowledgePanel';
 
 // /assets/[id] — the asset as an area (0049). The same anatomy as a
 // project or domain page: header band → stat strip → two-column read
@@ -166,6 +169,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
         state={<Pill state={urgency}>{assetActive && (card?.worst === 'due_soon' || (!card && worst === 'due_soon')) ? 'Due soon' : undefined}</Pill>}
         actions={
           <>
+            {asset.kind === 'vehicle' && <StartSetup moduleId="vehicle" title="Complete vehicle details" subjectId={asset.id} />}
             <ActionButton href={`/maintenance/new?asset_id=${asset.id}`}>＋ Item</ActionButton>
             <ActionButton href="#projects">＋ Project</ActionButton>
             {unit && assetActive && <ActionButton href="#meter">Log reading</ActionButton>}
@@ -326,6 +330,15 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
                 emptyHint="The living page for this asset — specs, history, links, decisions, a parts list. Markdown; a checklist line can become a task with → task."
               />
             </DetailSection>
+
+            <DetailSection label="Sources and historical evidence">
+              <SourcePanel subject={{ asset_id: asset.id }} meterUnit={unit} items={items} visits={visits} today={today} />
+              <a href={`/api/assets/${asset.id}/export`} className="inline-block mt-4 text-sm underline">Download vehicle Markdown snapshot and narrative</a>
+            </DetailSection>
+
+            {asset.kind === 'vehicle' && <DetailSection label="Responsibilities and knowledge">
+              <AssetKnowledgePanel assetId={asset.id} meterUnit={unit} items={items} factKeys={Object.keys(asset.metadata ?? {})} />
+            </DetailSection>}
 
             <DetailSection
               label="Service schedule"

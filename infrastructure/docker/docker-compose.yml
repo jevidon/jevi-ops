@@ -62,6 +62,7 @@ services:
       CORS_ORIGINS: ${WEB_APP_URL}
       CRON_ENABLED: "true"
       UPLOADS_DIR: /uploads
+      PRIVATE_SOURCES_DIR: /private-sources
       SETTINGS_ENCRYPTION_KEYS: ${SETTINGS_ENCRYPTION_KEYS:-}
       SETTINGS_ENCRYPTION_ACTIVE_KEY: ${SETTINGS_ENCRYPTION_ACTIVE_KEY:-}
       # LLM / STT defaults — normally configured in Settings → AI instead.
@@ -85,6 +86,7 @@ services:
       PUSHOVER_API_TOKEN: ${PUSHOVER_API_TOKEN:-}
     volumes:
       - ${UPLOADS_DIR_HOST:?host path for image attachments}:/uploads
+      - ${PRIVATE_SOURCES_DIR_HOST:-jevi-private-sources}:/private-sources
 
   web:
     build:
@@ -125,3 +127,6 @@ services:
       HEALTHCHECK_PORT: "8080"
     volumes:
       - ${BACKUPS_DIR:?host path for pg_dump output}:/backups
+
+volumes:
+  jevi-private-sources:

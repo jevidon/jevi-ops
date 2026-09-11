@@ -100,6 +100,9 @@ export interface CompleteMaintenanceInput {
   runId?: string | null;
   // Idempotency key; server-generated when absent.
   eventKey?: string | null;
+  // Explicit historical-source import: retained evidence, never a new
+  // operational baseline or permission to close today's generated task.
+  historicalOnly?: boolean;
   // A service visit (0051): the completion happened at it, and its meter
   // is the visit's single reading (already recorded) rather than a new one.
   visitId?: string | null;
@@ -141,7 +144,7 @@ export async function latestLog(db: DbOrTx, itemId: string): Promise<LogRow | nu
   const [row] = await db
     .select()
     .from(maintenance_logs)
-    .where(eq(maintenance_logs.item_id, itemId))
+    .where(and(eq(maintenance_logs.item_id, itemId), eq(maintenance_logs.historical_only, false)))
     .orderBy(desc(maintenance_logs.completed_on), desc(maintenance_logs.created_at))
     .limit(1);
   return row ?? null;
@@ -246,6 +249,7 @@ export async function completeMaintenanceItem(
         event_key: eventKey,
         actor: input.actor ?? null,
         run_id: input.runId ?? null,
+        historical_only: input.historicalOnly ?? false,
         visit_id: input.visitId ?? null,
         reading_id: input.readingId ?? null,
         issued_until: input.issuedUntil ?? null,
@@ -293,14 +297,14 @@ export async function completeMaintenanceItem(
         throw new MaintenanceConflict('event_key_conflict', 'This event_key already identifies a completion on a different item.');
       }
       const latestNow = await latestLog(tx, item.id);
-      return { item, log: existing, logged: false, historical: latestNow != null && latestNow.id !== existing.id };
+      return { item, log: existing, logged: false, historical: existing.historical_only || (latestNow != null && latestNow.id !== existing.id) };
     }
 
     // Current state comes from the LATEST applicable evidence, whatever was
     // just submitted. If the submitted event isn't the latest, it's history:
     // appended, and nothing else moves — a pinned deadline stays pinned.
     const latest = await latestLog(tx, item.id);
-    const historical = latest != null && latest.id !== log.id;
+    const historical = log.historical_only || (latest != null && latest.id !== log.id);
     if (historical) return { item, log, logged, historical };
 
     const derived = await deriveSchedule(tx, item, asset);

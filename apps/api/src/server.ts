@@ -41,6 +41,15 @@ import { immichRoutes } from './routes/immich.js';
 import { maintenanceRoutes } from './routes/maintenance.js';
 import { docRoutes } from './routes/docs.js';
 import { visitRoutes } from './routes/visits.js';
+import { sourceRoutes } from './routes/sources.js';
+import { knowledgeRoutes } from './routes/knowledge.js';
+import { onboardingRoutes } from './routes/onboarding.js';
+import { registerOnboardingModule } from './lib/onboarding.js';
+import { coreOnboardingModule } from './lib/core-onboarding.js';
+import { vehicleOnboardingModule } from './lib/vehicle-onboarding.js';
+
+registerOnboardingModule(coreOnboardingModule);
+registerOnboardingModule(vehicleOnboardingModule);
 
 export async function buildServer() {
   const app = Fastify({
@@ -128,6 +137,9 @@ export async function buildServer() {
   await app.register(maintenanceRoutes);
   await app.register(docRoutes);
   await app.register(visitRoutes);
+  await app.register(sourceRoutes);
+  await app.register(knowledgeRoutes);
+  await app.register(onboardingRoutes);
 
   app.get('/', async () => ({
     name: 'jevi-ops/api',

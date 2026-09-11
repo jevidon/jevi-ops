@@ -1,30 +1,33 @@
+import { z, ZodError } from 'zod';
+import { AssetContextError, assetMarkdownExport, assetSnapshotMarker, assetSourceReferences, buildAssetContext } from '../lib/asset-context.js';
+import { requireOwnerSession } from '../lib/owner-session.js';
+import { createAsset, updateAsset } from '../lib/asset-commands.js';
+import { createMaintenanceItem, updateMaintenanceItem } from '../lib/maintenance-commands.js';
+import { CommandError } from '../lib/command-error.js';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { and, asc, count, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import {
   CompleteMaintenanceSchema,
   CreateAssetSchema,
-  CreateMaintenanceItemSchema,
-  CreateMeterReadingSchema,
-  INBOX_DOMAIN_ID,
-  SetBaselineSchema,
   UpdateAssetSchema,
+  CreateMaintenanceItemSchema,
   UpdateMaintenanceItemSchema,
+  CreateMeterReadingSchema,
+  SetBaselineSchema,
   UpdateMaintenanceLogSchema,
   UpdateMeterReadingSchema,
   effectiveDomainId,
   maintenanceDueState,
-  maintenanceTaskTitle,
   maintenanceTracked,
 } from '@jevi-ops/shared';
 import { getAppSettings } from '../lib/app-settings.js';
 import { clearAttentionForSource } from '../lib/attention.js';
 import { getDb } from '../lib/db.js';
-import { DocConflict, DocVersionRequired, deleteDocRevisions, saveDoc } from '../lib/docs.js';
+import { DocConflict, DocVersionRequired, deleteDocRevisions } from '../lib/docs.js';
 import {
   MaintenanceConflict,
   MaintenanceNeedsDetails,
   completeMaintenanceItem,
-  deriveSchedule,
   latestLog,
   lockItem,
   loadAsset,
@@ -36,7 +39,7 @@ import {
   type ScheduleContext,
 } from '../lib/maintenance.js';
 import { runMaintenanceSweep } from '../lib/maintenance-sweep.js';
-import type { DbOrTx, Tx } from '../lib/maintenance-tx.js';
+import type { Tx } from '../lib/maintenance-tx.js';
 import {
   ReadingRejected,
   latestReadingRowByAsset,
@@ -49,7 +52,6 @@ import { todayInTz } from '../lib/tz.js';
 import { listVisits, spendSummary } from '../lib/visits.js';
 import {
   assets, attention_items, asset_meter_readings, maintenance_items, maintenance_logs, maintenance_visits, projects, tasks,
-  type StoredAttachment,
 } from '../db/schema.js';
 
 // Maintenance module (migrations 0047 + 0048 + 0049): assets + meter
@@ -88,23 +90,25 @@ function sendMaintenanceError(reply: FastifyReply, err: unknown): boolean {
   return false;
 }
 
-// Structural equality over JSON values — the compare-and-set check for a
-// facts patch. null and undefined both mean "no value".
-function jsonEqual(a: unknown, b: unknown): boolean {
-  if (a === b) return true;
-  if (a == null || b == null) return a == null && b == null;
-  if (typeof a !== typeof b) return false;
-  if (typeof a !== 'object') return false;
-  if (Array.isArray(a) !== Array.isArray(b)) return false;
-  if (Array.isArray(a)) {
-    const bb = b as unknown[];
-    return a.length === bb.length && a.every((v, i) => jsonEqual(v, bb[i]));
+
+function sendCommandError(reply: FastifyReply, err: unknown): boolean {
+  if (err instanceof ZodError) {
+    reply.code(400).send({ error: 'invalid_payload', details: err.flatten().fieldErrors });
+    return true;
   }
-  const ao = a as Record<string, unknown>;
-  const bo = b as Record<string, unknown>;
-  const ka = Object.keys(ao);
-  if (ka.length !== Object.keys(bo).length) return false;
-  return ka.every((k) => k in bo && jsonEqual(ao[k], bo[k]));
+  if (err instanceof CommandError) {
+    reply.code(err.status).send({ error: err.code, message: err.message, ...err.details });
+    return true;
+  }
+  if (err instanceof DocConflict) {
+    reply.code(409).send({ error: 'doc_conflict', ...err.current, message: err.message });
+    return true;
+  }
+  if (err instanceof DocVersionRequired) {
+    reply.code(400).send({ error: 'doc_version_required', message: err.message });
+    return true;
+  }
+  return false;
 }
 
 type AssetRow = typeof assets.$inferSelect;
@@ -148,23 +152,6 @@ function dueSort(
   const band = (STATUS_ORDER[a.due_state.status] ?? 9) - (STATUS_ORDER[b.due_state.status] ?? 9);
   if (band !== 0) return band;
   return (a.next_due_date ?? '9999-12-31').localeCompare(b.next_due_date ?? '9999-12-31');
-}
-
-// Cross-table cadence rule: a meter interval (or a prepaid-distance policy)
-// only makes sense on an asset with a meter. Returns an error string or null.
-async function validateMeterAxis(
-  db: DbOrTx,
-  policy: string,
-  intervalMeter: number | null,
-  assetId: string | null,
-): Promise<string | null> {
-  const needsMeter = intervalMeter != null || policy === 'prepaid_meter';
-  if (!needsMeter) return null;
-  if (!assetId) return 'A meter cadence requires the item to be attached to an asset with a meter_unit.';
-  const asset = await loadAsset(db, assetId);
-  if (!asset) return 'asset_id does not exist.';
-  if (!asset.meter_unit) return 'A meter cadence requires the asset to have a meter_unit.';
-  return null;
 }
 
 const ASSET_EMBED = { columns: { id: true, name: true, kind: true, meter_unit: true, domain_id: true, lifecycle: true } } as const;
@@ -223,7 +210,7 @@ export const maintenanceRoutes: FastifyPluginAsync = async (app) => {
   // year — one round-trip. This response is also the future agent's
   // per-asset context bundle.
   app.get<{ Params: { id: string } }>('/api/assets/:id', async (req, reply) => {
-    const db = getDb();
+    return getDb().transaction(async (db) => {
     const asset = await db.query.assets.findFirst({
       where: eq(assets.id, req.params.id),
       with: { domain: { columns: { id: true, name: true } } },
@@ -263,7 +250,21 @@ export const maintenanceRoutes: FastifyPluginAsync = async (app) => {
     const withState = items.map((i) => withDueState(i, ctx, latest)).sort(dueSort);
     const [visits, spend] = await Promise.all([listVisits(db, asset.id), spendSummary(db, asset.id, yearStart, ctx.currency)]);
     const { domain, ...assetRow } = asset;
+    const [snapshot, sourceRefs, totalRows] = await Promise.all([
+      assetSnapshotMarker(db, asset.id), assetSourceReferences(db, asset.id, 'owner'),
+      db.execute(sql`select (select count(*)::int from asset_meter_readings where asset_id=${asset.id}::uuid) as readings, (select count(*)::int from source_links where asset_id=${asset.id}::uuid) as sources`),
+    ]);
+    const totals = totalRows[0] as unknown as { readings: number; sources: number };
     return {
+      context_version: 1, snapshot, generated_at: new Date().toISOString(),
+      source_references: sourceRefs,
+      pagination: {
+        readings: { total: totals.readings, limit: 50, truncated: totals.readings > readings.length },
+        sources: { total: totals.sources, limit: 50, truncated: totals.sources > sourceRefs.length },
+        projects: { scope: 'non_archived', total: projectRows.length, truncated: false },
+        visits: { total: visits.length, truncated: false },
+        follow_up: `/api/assets/${asset.id}/context?audience=owner&expected_snapshot=${snapshot}`,
+      },
       asset: assetRow,
       domain: domain ?? null,
       latest_reading: latest,
@@ -281,221 +282,49 @@ export const maintenanceRoutes: FastifyPluginAsync = async (app) => {
       today: ctx.today,
       meter_stale_days: ctx.staleDays,
     };
+    }, { isolationLevel: 'repeatable read', accessMode: 'read only' });
+  });
+
+  app.get<{ Params: { id: string } }>('/api/assets/:id/context', async (req, reply) => {
+    const params = z.object({ id: z.string().uuid() }).safeParse(req.params);
+    const query = z.object({ audience: z.enum(['owner', 'research']).default('research'), offset: z.coerce.number().int().min(0).max(1_000_000).default(0), limit: z.coerce.number().int().min(1).max(100).default(50), expected_snapshot: z.string().regex(/^[0-9a-f]{64}$/).optional() }).safeParse(req.query);
+    if (!params.success || !query.success) return reply.code(400).send({ error: 'invalid_context_request' });
+    if (query.data.audience === 'owner') { await requireOwnerSession(req, reply); if (reply.sent) return; }
+    try {
+      return await getDb().transaction((db) => buildAssetContext(db, params.data.id, { audience: query.data.audience, offset: query.data.offset, limit: query.data.limit, expectedSnapshot: query.data.expected_snapshot }), { isolationLevel: 'repeatable read', accessMode: 'read only' });
+    } catch (error) { if (error instanceof AssetContextError) return reply.code(error.status).send({ error: error.code }); throw error; }
+  });
+  app.get<{ Params: { id: string } }>('/api/assets/:id/export.md', { preHandler: requireOwnerSession }, async (req, reply) => {
+    if (!z.string().uuid().safeParse(req.params.id).success) return reply.code(400).send({ error: 'invalid_asset_id' });
+    try {
+      const context = await getDb().transaction((db) => buildAssetContext(db, req.params.id, { audience: 'owner', limit: 100 }), { isolationLevel: 'repeatable read', accessMode: 'read only' });
+      return reply.type('text/markdown; charset=utf-8').header('Cache-Control', 'private, no-store')
+        .header('Content-Disposition', `attachment; filename="vehicle-${req.params.id}.md"`)
+        .header('X-Content-Type-Options', 'nosniff').header('Content-Security-Policy', "sandbox; default-src 'none'")
+        .send(assetMarkdownExport(context));
+    } catch (error) { if (error instanceof AssetContextError) return reply.code(error.status).send({ error: error.code }); throw error; }
   });
 
   app.post('/api/assets', async (req, reply) => {
-    const parsed = CreateAssetSchema.safeParse(req.body);
-    if (!parsed.success) {
-      return reply.code(400).send({ error: 'invalid_payload', details: parsed.error.flatten().fieldErrors });
-    }
-    const db = getDb();
-    const [row] = await db
-      .insert(assets)
-      .values({
-        name: parsed.data.name,
-        kind: parsed.data.kind ?? 'other',
-        domain_id: parsed.data.domain_id ?? null,
-        meter_unit: parsed.data.meter_unit ?? null,
-        metadata: parsed.data.metadata ?? {},
-        notes: parsed.data.notes ?? null,
-        doc_md: parsed.data.doc_md || null,
-      })
-      .returning();
-    return reply.code(201).send({ asset: row });
-  });
-
-  // Edit an asset. Three things ripple from here, all in one transaction
-  // with the row locked:
-  //   * metadata_patch — per-key compare-and-set (409 fact_conflict on a
-  //     key someone else changed since the writer saw it);
-  //   * a domain change — the routing the asset's work INHERITED follows
-  //     it: projects (and their tasks) whose domain matched the asset's,
-  //     and the live generated tasks of its items. A project pointed at a
-  //     different domain on purpose is an override and stays. The one rule
-  //     is domain equality at the moment of the change — a project sitting
-  //     in the asset's domain is "with the asset", however it got there;
-  //   * leaving 'active' — generated work retires.
-  app.patch<{ Params: { id: string } }>('/api/assets/:id', async (req, reply) => {
-    const parsed = UpdateAssetSchema.safeParse(req.body);
-    if (!parsed.success) {
-      return reply.code(400).send({ error: 'invalid_payload', details: parsed.error.flatten().fieldErrors });
-    }
-    const db = getDb();
-    const ctx = await policyContext();
-    const d = parsed.data;
-    const { actor } = provenance(req);
-
-    let result: Awaited<ReturnType<typeof patchAsset>>;
     try {
-      result = await patchAsset();
+      const row = await createAsset(getDb(), CreateAssetSchema.parse(req.body));
+      return reply.code(201).send({ asset: row });
     } catch (err) {
-      if (err instanceof DocConflict) {
-        return reply.code(409).send({ error: 'doc_conflict', ...err.current, message: err.message });
-      }
-      if (err instanceof DocVersionRequired) {
-        return reply.code(400).send({ error: 'doc_version_required', message: err.message });
-      }
+      if (sendCommandError(reply, err)) return;
       throw err;
     }
+  });
 
-    async function patchAsset() {
-    return db.transaction(async (tx) => {
-      const [existing] = await tx.select().from(assets).where(eq(assets.id, req.params.id)).for('update');
-      if (!existing) return { error: 404 as const };
-
-      // Unit lock: once a reading exists, relabelling km→mi would silently
-      // change what every historical number and threshold means.
-      if ('meter_unit' in d && d.meter_unit !== existing.meter_unit) {
-        const [n] = await tx
-          .select({ n: count() })
-          .from(asset_meter_readings)
-          .where(eq(asset_meter_readings.asset_id, existing.id));
-        if (n && n.n > 0) {
-          return {
-            error: 400 as const,
-            code: 'meter_unit_locked',
-            message: 'This asset has readings; its meter unit cannot change. Create a new asset for a different meter.',
-          };
-        }
-        if (d.meter_unit == null) {
-          const dependent = await tx.query.maintenance_items.findMany({
-            columns: { id: true },
-            where: and(
-              eq(maintenance_items.asset_id, existing.id),
-              eq(maintenance_items.active, true),
-              sql`(${maintenance_items.interval_meter} is not null or ${maintenance_items.policy} = 'prepaid_meter')`,
-            ),
-          });
-          if (dependent.length > 0) {
-            return {
-              error: 400 as const,
-              code: 'meter_in_use',
-              message: 'Active meter-cadence items depend on this meter. Update or deactivate them first.',
-            };
-          }
-        }
-      }
-
-      const { attachments, attachments_patch, metadata_patch, doc_md, doc_version, doc_force, ...rest } = d;
-      const update: Partial<typeof assets.$inferInsert> = { ...rest };
-      // Zod's Attachment and the persisted StoredAttachment are the same shape
-      // spelled twice (notes route precedent) — cast at the boundary.
-      if (attachments) update.attachments = attachments as StoredAttachment[];
-      // Photo operations against the CURRENT array (under the lock): an
-      // upload finishing late appends to what is there now, never to the
-      // array it started from.
-      if (attachments_patch) {
-        let arr: StoredAttachment[] = [...((update.attachments as StoredAttachment[] | undefined) ?? existing.attachments ?? [])];
-        const have = new Set(arr.map((a) => a.storage_path));
-        for (const a of attachments_patch.add ?? []) {
-          if (have.has(a.storage_path)) continue;
-          arr.push(a as StoredAttachment);
-          have.add(a.storage_path);
-        }
-        if (attachments_patch.remove?.length) {
-          const gone = new Set(attachments_patch.remove);
-          arr = arr.filter((a) => !gone.has(a.storage_path));
-        }
-        if (attachments_patch.hero) {
-          const i = arr.findIndex((a) => a.storage_path === attachments_patch.hero);
-          if (i > 0) arr = [arr[i]!, ...arr.slice(0, i), ...arr.slice(i + 1)];
-        }
-        update.attachments = arr;
-      }
-
-      if (metadata_patch) {
-        const base: Record<string, unknown> = { ...(rest.metadata ?? existing.metadata ?? {}) };
-        const conflicts: string[] = [];
-        for (const [key, entry] of Object.entries(metadata_patch.set ?? {})) {
-          if (entry.expected !== undefined && !jsonEqual(base[key], entry.expected)) conflicts.push(key);
-          else base[key] = entry.value;
-        }
-        for (const [key, entry] of Object.entries(metadata_patch.unset ?? {})) {
-          if (entry.expected !== undefined && !jsonEqual(base[key], entry.expected)) conflicts.push(key);
-          else delete base[key];
-        }
-        if (conflicts.length > 0) return { error: 409 as const, keys: conflicts, metadata: existing.metadata };
-        update.metadata = base;
-      }
-
-      // Lifecycle ⇄ archived_at stay consistent whichever one the caller sets.
-      if (d.lifecycle) {
-        if (d.lifecycle === 'active') update.archived_at = null;
-        else if (!('archived_at' in d)) update.archived_at = existing.archived_at ?? new Date().toISOString();
-      } else if ('archived_at' in d) {
-        update.lifecycle = d.archived_at ? 'archived' : 'active';
-      }
-
-      // A doc-only or patch-only PATCH leaves no columns here; Drizzle
-      // refuses an empty set, and there is nothing to write anyway.
-      let [updated] = Object.keys(update).length > 0
-        ? await tx.update(assets).set(update).where(eq(assets.id, existing.id)).returning()
-        : [existing];
-      if (!updated) return { error: 404 as const };
-
-      // The overview document (0050): versioned, revisioned, refused on a
-      // stale version — a DocConflict thrown here rolls the whole PATCH
-      // back and reaches the client as 409 doc_conflict.
-      if (doc_md !== undefined) {
-        const saved = await saveDoc(tx, { entityType: 'asset', id: existing.id, body: doc_md, expectedVersion: doc_version ?? null, force: doc_force, actor });
-        if (saved) updated = { ...updated, doc_md: saved.doc_md, doc_version: saved.doc_version };
-      }
-
-      const items = await tx
-        .select({ id: maintenance_items.id, name: maintenance_items.name })
-        .from(maintenance_items)
-        .where(eq(maintenance_items.asset_id, existing.id));
-
-      const leavingActive = existing.lifecycle === 'active' && updated.lifecycle !== 'active';
-      if (leavingActive) {
-        // A sold/stored/archived asset keeps its schedules but its generated
-        // work is noise — retire it.
-        await reconcileGeneratedWork(tx, items.map((i) => i.id));
-        await tx
-          .delete(attention_items)
-          .where(and(eq(attention_items.source_type, 'asset'), eq(attention_items.source_id, existing.id)));
-      }
-
-      const domainChanged = 'domain_id' in d && (d.domain_id ?? null) !== existing.domain_id;
-      if (domainChanged) {
-        const oldDomain = existing.domain_id;
-        const newDomain = d.domain_id ?? null;
-        const moved = await tx
-          .update(projects)
-          .set({ domain_id: newDomain })
-          .where(and(eq(projects.asset_id, existing.id), oldDomain ? eq(projects.domain_id, oldDomain) : isNull(projects.domain_id)))
-          .returning({ id: projects.id });
-        if (moved.length > 0) {
-          await tx
-            .update(tasks)
-            .set({ domain_id: newDomain ?? INBOX_DOMAIN_ID })
-            .where(and(inArray(tasks.project_id, moved.map((m) => m.id)), eq(tasks.domain_id, oldDomain ?? INBOX_DOMAIN_ID)));
-        }
-      }
-
-      const nameChanged = d.name !== undefined && d.name !== existing.name;
-      if ((domainChanged || nameChanged) && updated.lifecycle === 'active') {
-        for (const it of items) {
-          await reconcileItemTask(tx, it.id, ctx, { previousTitle: nameChanged ? maintenanceTaskTitle(it, existing) : null });
-        }
-      }
-      return { asset: updated };
-    });
+  // Shared command preserves fact CAS, gallery operations, document versions,
+  // lifecycle/task reconciliation and inherited domain routing atomically.
+  app.patch<{ Params: { id: string } }>('/api/assets/:id', async (req, reply) => {
+    try {
+      const asset = await updateAsset(getDb(), req.params.id, UpdateAssetSchema.parse(req.body), await policyContext(), provenance(req).actor);
+      return { asset };
+    } catch (err) {
+      if (sendCommandError(reply, err)) return;
+      throw err;
     }
-
-    if ('error' in result) {
-      if (result.error === 404) return reply.code(404).send({ error: 'not_found' });
-      if (result.error === 409) {
-        return reply.code(409).send({
-          error: 'fact_conflict',
-          keys: result.keys,
-          metadata: result.metadata,
-          message: `Changed since you opened them: ${result.keys.join(', ')}. Reload to see the latest.`,
-        });
-      }
-      return reply.code(400).send({ error: result.code, message: result.message });
-    }
-    return result;
   });
 
   // Delete is for mistakes; a car you sold is lifecycle:'sold'. Refused
@@ -720,165 +549,23 @@ export const maintenanceRoutes: FastifyPluginAsync = async (app) => {
   });
 
   app.post('/api/maintenance', async (req, reply) => {
-    const parsed = CreateMaintenanceItemSchema.safeParse(req.body);
-    if (!parsed.success) {
-      return reply.code(400).send({ error: 'invalid_payload', details: parsed.error.flatten().fieldErrors });
+    try {
+      const item = await createMaintenanceItem(getDb(), CreateMaintenanceItemSchema.parse(req.body), provenance(req).actor);
+      return reply.code(201).send({ item });
+    } catch (err) {
+      if (sendCommandError(reply, err)) return;
+      throw err;
     }
-    const db = getDb();
-    const d = parsed.data;
-    const policy = d.policy ?? 'interval';
-
-    const meterError = await validateMeterAxis(db, policy, d.interval_meter ?? null, d.asset_id ?? null);
-    if (meterError) return reply.code(400).send({ error: 'invalid_cadence', message: meterError });
-
-    const { actor } = provenance(req);
-    const row = await db.transaction(async (tx) => {
-      const [created] = await tx
-        .insert(maintenance_items)
-        .values({
-          name: d.name,
-          notes: d.notes ?? null,
-          asset_id: d.asset_id ?? null,
-          // Null = inherit the asset's domain (else Inbox) at read time.
-          domain_id: d.domain_id ?? null,
-          policy,
-          system: d.system ?? null,
-          interval_days: d.interval_days ?? null,
-          interval_months: d.interval_months ?? null,
-          interval_meter: d.interval_meter ?? null,
-          lead_days: d.lead_days ?? 14,
-          lead_meter: d.lead_meter ?? null,
-          metadata: d.metadata ?? {},
-        })
-        .returning();
-      if (!created) throw new Error('insert returned no row');
-
-      // Seed history is EVIDENCE — an explicit baseline log, editable but
-      // not deletable — so undo and re-derivation always have it.
-      if (d.last_completed_on) {
-        await tx.insert(maintenance_logs).values({
-          item_id: created.id,
-          completed_on: d.last_completed_on,
-          meter_at_completion: d.last_completed_meter ?? null,
-          source: 'import',
-          actor,
-          is_baseline: true,
-          notes: 'Baseline',
-        });
-      }
-
-      // Materialise next-due from evidence (or the creation-date anchor),
-      // then let an explicit override pin either axis ("brakes due at
-      // 150,000 km") without inventing a completion. Omission and an
-      // explicit null are different: null clears the axis on purpose.
-      const asset = await loadAsset(tx, created.asset_id);
-      const derived = await deriveSchedule(tx, created, asset);
-      if (d.next_due_date !== undefined) derived.next_due_date = d.next_due_date;
-      if (d.next_due_meter !== undefined) derived.next_due_meter = d.next_due_meter;
-      // A baseline meter with no explicit override still seeds the axis.
-      if (derived.next_due_meter == null && d.last_completed_meter != null && d.interval_meter != null && d.next_due_meter === undefined) {
-        derived.next_due_meter = d.last_completed_meter + d.interval_meter;
-      }
-      const [updated] = await tx.update(maintenance_items).set(derived).where(eq(maintenance_items.id, created.id)).returning();
-      return updated ?? created;
-    });
-    return reply.code(201).send({ item: row });
   });
 
   app.patch<{ Params: { id: string } }>('/api/maintenance/:id', async (req, reply) => {
-    const parsed = UpdateMaintenanceItemSchema.safeParse(req.body);
-    if (!parsed.success) {
-      return reply.code(400).send({ error: 'invalid_payload', details: parsed.error.flatten().fieldErrors });
+    try {
+      const item = await updateMaintenanceItem(getDb(), req.params.id, UpdateMaintenanceItemSchema.parse(req.body), await policyContext());
+      return { item };
+    } catch (err) {
+      if (sendCommandError(reply, err)) return;
+      throw err;
     }
-    const db = getDb();
-    const ctx = await policyContext();
-    const d = parsed.data;
-
-    const result = await db.transaction(async (tx) => {
-      const existing = await lockItem(tx, req.params.id);
-      if (!existing) return { error: 404 as const };
-
-      // Merged-cadence validation — the Zod checks can't see the columns a
-      // partial patch leaves untouched.
-      const merged = {
-        policy: d.policy ?? existing.policy,
-        interval_days: 'interval_days' in d ? (d.interval_days ?? null) : existing.interval_days,
-        interval_months: 'interval_months' in d ? (d.interval_months ?? null) : existing.interval_months,
-        interval_meter: 'interval_meter' in d ? (d.interval_meter ?? null) : existing.interval_meter,
-      };
-      if (merged.policy === 'interval' && merged.interval_days == null && merged.interval_months == null && merged.interval_meter == null) {
-        return { error: 400 as const, message: 'Interval items need interval_days, interval_months, or interval_meter.' };
-      }
-      if (merged.interval_days != null && merged.interval_months != null) {
-        return { error: 400 as const, message: 'Use interval_days or interval_months, not both.' };
-      }
-      const mergedAssetId = 'asset_id' in d ? (d.asset_id ?? null) : existing.asset_id;
-      const meterError = await validateMeterAxis(tx, merged.policy, merged.interval_meter, mergedAssetId);
-      if (meterError) return { error: 400 as const, message: meterError };
-
-      const update: Partial<typeof maintenance_items.$inferInsert> = {};
-      if (d.name !== undefined) update.name = d.name;
-      if ('notes' in d) update.notes = d.notes ?? null;
-      if ('asset_id' in d) update.asset_id = d.asset_id ?? null;
-      if ('domain_id' in d) update.domain_id = d.domain_id ?? null;
-      if (d.policy !== undefined) update.policy = d.policy;
-      if ('system' in d) update.system = d.system ?? null;
-      if ('interval_days' in d) update.interval_days = d.interval_days ?? null;
-      if ('interval_months' in d) update.interval_months = d.interval_months ?? null;
-      if ('interval_meter' in d) update.interval_meter = d.interval_meter ?? null;
-      if (d.lead_days !== undefined) update.lead_days = d.lead_days;
-      if ('lead_meter' in d) update.lead_meter = d.lead_meter ?? null;
-      if (d.active !== undefined) update.active = d.active;
-      if (d.metadata !== undefined) update.metadata = d.metadata;
-
-      // Schedule stability: an axis is re-derived ONLY when the value of
-      // something that defines it actually changed — a form that echoes
-      // every field back must not move a due date. An explicit next_due_*
-      // in the patch pins its axis regardless.
-      const policyChanged = merged.policy !== existing.policy;
-      const dateAxisChanged =
-        policyChanged ||
-        merged.interval_days !== existing.interval_days ||
-        merged.interval_months !== existing.interval_months;
-      const meterAxisChanged =
-        policyChanged || merged.interval_meter !== existing.interval_meter || mergedAssetId !== existing.asset_id;
-
-      if (dateAxisChanged || meterAxisChanged) {
-        const asset = await loadAsset(tx, mergedAssetId);
-        const derived = await deriveSchedule(tx, { ...existing, ...merged, asset_id: mergedAssetId }, asset);
-        if (dateAxisChanged && !('next_due_date' in d)) update.next_due_date = derived.next_due_date;
-        if (meterAxisChanged && !('next_due_meter' in d)) update.next_due_meter = derived.next_due_meter;
-      }
-      if ('next_due_date' in d) update.next_due_date = d.next_due_date ?? null;
-      if ('next_due_meter' in d) update.next_due_meter = d.next_due_meter ?? null;
-
-      const [row] = await tx.update(maintenance_items).set(update).where(eq(maintenance_items.id, existing.id)).returning();
-      if (!row) return { error: 404 as const };
-
-      // Deactivating retires the generated work. Anything else that moves
-      // the occurrence, the routing, or the name reconciles the live task
-      // now — a pin 180 days out must not leave last week's overdue task
-      // sitting open, and a re-routed item's task must move with it.
-      if (d.active === false && existing.active) {
-        await reconcileGeneratedWork(tx, [existing.id]);
-      } else {
-        const scheduleChanged = row.next_due_date !== existing.next_due_date || row.next_due_meter !== existing.next_due_meter;
-        const routingChanged = row.domain_id !== existing.domain_id || row.asset_id !== existing.asset_id;
-        const nameChanged = row.name !== existing.name;
-        if (scheduleChanged || routingChanged || nameChanged) {
-          const oldAsset = await loadAsset(tx, existing.asset_id);
-          await reconcileItemTask(tx, existing.id, ctx, { previousTitle: maintenanceTaskTitle(existing, oldAsset) });
-        }
-      }
-      const [fresh] = await tx.select().from(maintenance_items).where(eq(maintenance_items.id, existing.id));
-      return { item: fresh ?? row };
-    });
-
-    if ('error' in result) {
-      if (result.error === 404) return reply.code(404).send({ error: 'not_found' });
-      return reply.code(400).send({ error: 'invalid_cadence', message: result.message });
-    }
-    return result;
   });
 
   app.delete<{ Params: { id: string } }>('/api/maintenance/:id', async (req, reply) => {

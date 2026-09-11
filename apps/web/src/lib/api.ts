@@ -57,7 +57,7 @@ export const api = {
     call<T>(path, { method: 'PATCH', body: body ? JSON.stringify(body) : undefined }),
   put: <T>(path: string, body?: unknown) =>
     call<T>(path, { method: 'PUT', body: body ? JSON.stringify(body) : undefined }),
-  delete: <T = void>(path: string) => call<T>(path, { method: 'DELETE' }),
+  delete: <T = void>(path: string, body?: unknown) => call<T>(path, { method: 'DELETE', body: body === undefined ? undefined : JSON.stringify(body) }),
 };
 
 export { ApiError };
