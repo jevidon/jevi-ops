@@ -1,0 +1,14 @@
+# The adapter supplies model/provider explicitly and only registers jevi_fetch.
+# An isolated HERMES_HOME is created per run; this is never your normal profile.
+agent:
+  max_turns: 20
+  toolsets: [jevi_research]
+memory:
+  memory_enabled: false
+  user_profile_enabled: false
+terminal:
+  backend: local
+  cwd: .
+tools:
+  tool_search:
+    enabled: 'off'

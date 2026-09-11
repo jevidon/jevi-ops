@@ -25,6 +25,8 @@ const MIGRATIONS = [
   '0055_private_sources.sql',
   '0056_vehicle_knowledge.sql',
   '0057_historical_source_evidence.sql',
+  '0058_research_workers.sql',
+  '0059_vehicle_monitoring.sql',
 ].map((f) => resolve(ROOT, 'infrastructure/migrations', f));
 
 function upgradeUrl(): string {

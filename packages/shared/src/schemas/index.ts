@@ -27,3 +27,5 @@ export * from './onboarding.js';
 export * from './knowledge.js';
 export * from './core-onboarding.js';
 export * from './vehicle-onboarding.js';
+export * from './research.js';
+export * from './monitoring.js';

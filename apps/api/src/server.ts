@@ -43,6 +43,9 @@ import { docRoutes } from './routes/docs.js';
 import { visitRoutes } from './routes/visits.js';
 import { sourceRoutes } from './routes/sources.js';
 import { knowledgeRoutes } from './routes/knowledge.js';
+import { researchRoutes } from './routes/research.js';
+import { researchSetupRoutes } from './routes/research-setup.js';
+import { monitoringRoutes } from './routes/monitoring.js';
 import { onboardingRoutes } from './routes/onboarding.js';
 import { registerOnboardingModule } from './lib/onboarding.js';
 import { coreOnboardingModule } from './lib/core-onboarding.js';
@@ -139,6 +142,9 @@ export async function buildServer() {
   await app.register(visitRoutes);
   await app.register(sourceRoutes);
   await app.register(knowledgeRoutes);
+  await app.register(researchRoutes);
+  await app.register(researchSetupRoutes);
+  await app.register(monitoringRoutes);
   await app.register(onboardingRoutes);
 
   app.get('/', async () => ({
