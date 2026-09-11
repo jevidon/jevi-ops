@@ -2,7 +2,7 @@
 
 import { useRef, useState, useTransition } from 'react';
 import imageCompression from 'browser-image-compression';
-import type { Attachment } from '@/lib/api';
+import type { Attachment, UploadPrefix } from '@/lib/api';
 import { uploadImageAction } from '@/lib/upload-actions';
 import { AttachmentGrid } from './AttachmentGrid';
 
@@ -65,7 +65,7 @@ export function ImageUploader({
 }: {
   attachments: Attachment[];
   onChange: (next: Attachment[]) => void;
-  prefix: 'notes' | 'journal' | 'other';
+  prefix: UploadPrefix;
   label?: string;
   // Free text used to build the stored filename (YYYYMMDD-<slug>-xxxx.jpg).
   // Pass the current note title, or for journal entries the first few

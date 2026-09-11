@@ -26,6 +26,12 @@ export interface AppSettings {
   health_module_enabled: boolean;
   routines_module_enabled: boolean;
   rule_module_enabled: boolean;
+  // Maintenance module (migration 0047). Default on — core home-ops.
+  maintenance_module_enabled: boolean;
+  // Reading-staleness policy (0048): days before the reading nag fires.
+  meter_stale_days: number;
+  // Household currency (0052), ISO 4217: spend totals are stated in it.
+  currency: string;
   // Briefing panel visibility/order (migration 0044); null → registry
   // defaults. This interface is an explicit projection — a new column
   // MUST be added here and in load() or GET /api/settings/app silently
@@ -50,6 +56,9 @@ const DEFAULTS: AppSettings = {
   health_module_enabled: false,
   routines_module_enabled: true,
   rule_module_enabled: false,
+  maintenance_module_enabled: true,
+  meter_stale_days: 14,
+  currency: 'USD',
   briefing_panels: null,
   agenda_image_url: null,
   agenda_data_url: null,
@@ -79,6 +88,9 @@ async function load(): Promise<AppSettings> {
       health_module_enabled: row.health_module_enabled ?? false,
       routines_module_enabled: row.routines_module_enabled ?? true,
       rule_module_enabled: row.rule_module_enabled ?? false,
+      maintenance_module_enabled: row.maintenance_module_enabled ?? true,
+      meter_stale_days: row.meter_stale_days ?? 14,
+      currency: row.currency ?? 'USD',
       briefing_panels: row.briefing_panels ?? null,
       agenda_image_url: row.agenda_image_url ?? null,
       agenda_data_url: row.agenda_data_url ?? null,

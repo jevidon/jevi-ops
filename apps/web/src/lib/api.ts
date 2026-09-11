@@ -120,6 +120,8 @@ export interface ProjectDetail {
     domain?: { id: string; name: string } | null;
     company?: { id: string; name: string } | null;
     primary_contact?: { id: string; name: string; email: string | null; role_at_company: string | null } | null;
+    // The asset this work groups under (0049).
+    asset?: { id: string; name: string } | null;
   };
   milestones: Milestone[];
   tasks: Task[];
@@ -168,7 +170,7 @@ export const tasksApi = {
 
 // The Work page's computed map (Addendum 08).
 import type { WorkPayload } from '@jevi-ops/shared';
-export type { WorkPayload, WorkDomain, WorkProjectCard, WorkContentRow, WorkDirect, WorkRollup } from '@jevi-ops/shared';
+export type { WorkPayload, WorkDomain, WorkProjectCard, WorkContentRow, WorkDirect, WorkRollup, WorkAssetCard } from '@jevi-ops/shared';
 
 export const workApi = {
   get: () => api.get<WorkPayload>('/api/work'),
@@ -212,10 +214,18 @@ export interface ProjectCreate {
   engagement_type?: EngagementType;
   kind?: ProjectKind;
   retainer_anchor_day?: number | null;
+  // With asset_id and no domain_id, the server inherits the asset's domain.
+  asset_id?: string | null;
+  // Create as an idea (0050) — a candidate, off the board until promoted.
+  status?: 'idea' | 'active';
+  doc_md?: string | null;
 }
 
-export interface ProjectUpdate extends Partial<ProjectCreate> {
-  status?: 'active' | 'paused' | 'done' | 'archived';
+export interface ProjectUpdate extends Partial<Omit<ProjectCreate, 'status'>> {
+  status?: 'idea' | 'active' | 'paused' | 'done' | 'archived';
+  // The overview document (0050): body + the version it was written against.
+  doc_md?: string | null;
+  doc_version?: number;
 }
 
 export const projectsApi = {
@@ -293,6 +303,9 @@ export interface DomainCreate {
 }
 
 export interface DomainUpdate {
+  // The overview document (0050): body + the version it was written against.
+  doc_md?: string | null;
+  doc_version?: number;
   name?: string;
   description?: string | null;
   fruit_definition?: string | null;
@@ -387,6 +400,10 @@ export const captureApi = {
       body: formData,
       json: false,
     }),
+
+  // Prime the parser's LLM prompt cache — fired when a recording starts so
+  // the model's prefill overlaps with the user talking. 202 immediately.
+  warm: () => api.post<{ status: string }>('/api/capture/warm'),
 };
 
 // ─── Image uploads ──────────────────────────────────────────────────────
@@ -399,12 +416,15 @@ export const captureApi = {
 // storage folder. Alt text can be passed as ?alt= but most clients
 // just leave it null at upload time and let the user fill it in later.
 
+// Storage folder for an upload; 'assets' (0050) is the asset gallery.
+export type UploadPrefix = 'notes' | 'journal' | 'assets' | 'other';
+
 export const uploadsApi = {
   // The FormData carries the file and (optionally) `prefix` / `title_hint`
   // as additional fields. Passing prefix via query also works as a
   // fallback for old clients; the server prefers the form-field value
   // when both are present.
-  image: (formData: FormData, prefix: 'notes' | 'journal' | 'other' = 'other') =>
+  image: (formData: FormData, prefix: UploadPrefix = 'other') =>
     call<Attachment>(`/api/uploads/image?prefix=${prefix}`, {
       method: 'POST',
       body: formData,
@@ -880,6 +900,410 @@ export const routinesApi = {
     api.post<unknown>(`/api/routines/${id}/completions`, body),
 };
 
+// ─── Maintenance module (migration 0047) ─────────────────────────────────
+// Assets (kind is display-only; meter behavior gates on meter_unit) +
+// recurring maintenance items with date and/or meter cadence. due_state is
+// computed server-side by the shared maintenanceDueState so every surface
+// agrees on due-ness.
+
+export type AssetKind = 'vehicle' | 'appliance' | 'home' | 'device' | 'equipment' | 'other';
+// Only active assets generate tasks, attention, and reading nags (0048).
+export type AssetLifecycle = 'active' | 'stored' | 'sold' | 'archived';
+// Obligation policy (0048): interval re-anchors from completion; expiry
+// takes the newly issued expiry; prepaid_meter takes the purchased end
+// distance (RUC); on_condition records a finding + next review.
+export type MaintenancePolicy = 'interval' | 'expiry' | 'prepaid_meter' | 'on_condition';
+
+export interface Asset {
+  id: string;
+  name: string;
+  kind: AssetKind;
+  domain_id: string | null;
+  meter_unit: string | null;
+  metadata: Record<string, unknown>;
+  notes: string | null;
+  lifecycle: AssetLifecycle;
+  // Photos (0049): StoredAttachment[]; [0] is the hero.
+  attachments: Attachment[];
+  // Markdown overview + its version (0050).
+  doc_md?: string | null;
+  doc_version?: number;
+  archived_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// A project grouped under an asset, as the asset detail bundle carries it.
+// 'idea' (0050): a candidate, not yet work.
+export interface AssetProjectRow {
+  id: string;
+  name: string;
+  status: 'idea' | 'active' | 'paused' | 'done' | 'archived';
+  kind: ProjectKind;
+  color: string | null;
+  target_date: string | null;
+  description: string | null;
+  created_at: string;
+}
+
+export interface AssetListItem extends Asset {
+  latest_reading: number | null;
+  latest_reading_on: string | null;
+  latest_reading_days_ago: number | null;
+  active_item_count: number;
+}
+
+export interface MeterReading {
+  id: string;
+  asset_id: string;
+  reading: number;
+  recorded_on: string;
+  source: 'manual' | 'completion' | 'agent' | 'import';
+  notes: string | null;
+  event_key?: string | null;
+  actor?: string | null;
+  voided_at?: string | null;
+  created_at: string;
+}
+
+// Urgency (status) and data confidence (data) are separate dimensions:
+// "ok" only ever means the tracked obligation is current.
+export type MaintenanceDataState = 'complete' | 'needs_baseline' | 'needs_reading' | 'stale_reading';
+
+export interface MaintenanceDueState {
+  status: 'ok' | 'due_soon' | 'due' | 'overdue';
+  trigger: 'date' | 'meter' | null;
+  days_until: number | null;
+  meter_remaining: number | null;
+  data: MaintenanceDataState;
+  reading_age_days: number | null;
+}
+
+export interface MaintenanceItem {
+  id: string;
+  name: string;
+  notes: string | null;
+  asset_id: string | null;
+  // Null = inherit the asset's domain (else Inbox); see effective_domain_id.
+  domain_id: string | null;
+  policy: MaintenancePolicy;
+  system: string | null;
+  interval_days: number | null;
+  interval_months: number | null;
+  interval_meter: number | null;
+  lead_days: number;
+  lead_meter: number | null;
+  next_due_date: string | null;
+  next_due_meter: number | null;
+  last_completed_on: string | null;
+  last_completed_meter: number | null;
+  generated_task_id: string | null;
+  active: boolean;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+  asset?: Pick<Asset, 'id' | 'name' | 'kind' | 'meter_unit' | 'domain_id' | 'lifecycle'> | null;
+  effective_domain_id?: string;
+  latest_reading?: number | null;
+  latest_reading_on?: string | null;
+  due_state?: MaintenanceDueState;
+  // Shared scope: active item on an active asset. False rows keep a
+  // due_state for display but count and prompt nowhere.
+  tracked?: boolean;
+}
+
+// A facts edit as a patch with per-key compare-and-set (see the API's
+// MetadataPatchSchema). `expected` is the value the writer last saw —
+// null for "none"; omit it for an unconditional write.
+export interface MetadataPatch {
+  set?: Record<string, { value: unknown; expected?: unknown }>;
+  unset?: Record<string, { expected?: unknown }>;
+}
+
+export interface MaintenanceLog {
+  id: string;
+  item_id: string;
+  completed_on: string;
+  meter_at_completion: number | null;
+  notes: string | null;
+  cost: number | null;
+  source: 'manual' | 'task' | 'agent' | 'import';
+  event_key?: string | null;
+  actor?: string | null;
+  run_id?: string | null;
+  reading_id?: string | null;
+  // The service visit this completion happened at (0051).
+  visit_id?: string | null;
+  is_baseline: boolean;
+  issued_until?: string | null;
+  purchased_to?: number | null;
+  finding?: string | null;
+  next_review_on?: string | null;
+  next_review_meter?: number | null;
+  created_at: string;
+}
+
+export interface CompleteMaintenanceBody {
+  completed_on?: string;
+  meter?: number | null;
+  allow_decrease?: boolean;
+  notes?: string | null;
+  cost?: number | null;
+  event_key?: string;
+  issued_until?: string | null;
+  purchased_to?: number | null;
+  finding?: string | null;
+  next_review_on?: string | null;
+  next_review_meter?: number | null;
+}
+
+export interface MaintenanceItemBody {
+  name?: string;
+  notes?: string | null;
+  asset_id?: string | null;
+  domain_id?: string | null;
+  policy?: MaintenancePolicy;
+  system?: string | null;
+  interval_days?: number | null;
+  interval_months?: number | null;
+  interval_meter?: number | null;
+  lead_days?: number;
+  lead_meter?: number | null;
+  last_completed_on?: string | null;
+  last_completed_meter?: number | null;
+  next_due_date?: string | null;
+  next_due_meter?: number | null;
+  active?: boolean;
+}
+
+// ─── Service visits (0051) ───────────────────────────────────────────────
+// One event: several items done on ONE odometer with ONE invoice. planned =
+// a saved work order; done = the record. `total` is the invoice; each
+// line's `cost` is the allocated part — kept distinct.
+
+export type VisitStatus = 'planned' | 'done';
+
+export interface VisitLineInput {
+  item_id: string;
+  skipped?: boolean;
+  skip_reason?: string | null;
+  cost?: number | null;
+  notes?: string | null;
+  issued_until?: string | null;
+  purchased_to?: number | null;
+  finding?: string | null;
+  next_review_on?: string | null;
+  next_review_meter?: number | null;
+}
+
+export interface VisitItemRef {
+  id: string;
+  name: string;
+  policy: MaintenancePolicy;
+  system: string | null;
+}
+
+export interface Visit {
+  id: string;
+  asset_id: string;
+  status: VisitStatus;
+  planned_on: string | null;
+  visited_on: string | null;
+  meter: number | null;
+  reading_id: string | null;
+  provider: string | null;
+  invoice_number: string | null;
+  currency: string | null;
+  total: number | null;
+  notes: string | null;
+  attachments: Attachment[];
+  event_key?: string | null;
+  actor?: string | null;
+  run_id?: string | null;
+  created_at: string;
+  updated_at: string;
+  // The lines: the plan (and, once recorded, each line's outcome and any
+  // skip reason — planned instructions are kept)…
+  lines: Array<{
+    visit_id: string;
+    item_id: string;
+    notes: string | null;
+    position: number;
+    outcome: 'done' | 'skipped' | null;
+    skip_reason: string | null;
+    item: VisitItemRef | null;
+  }>;
+  // …and a done visit's completions.
+  logs: Array<MaintenanceLog & { item: VisitItemRef | null }>;
+}
+
+// Spend in the household currency (0052): invoice-grounded, with foreign
+// invoices and unpriced work reported apart — never converted or hidden.
+export interface SpendSummary {
+  currency: string;
+  total: number;
+  lines_total: number;
+  foreign: Array<{ currency: string; total: number; visits: number }>;
+  unpriced: { visits: number; completions: number };
+}
+
+export function formatMoney(amount: number, currency: string): string {
+  try {
+    return new Intl.NumberFormat('en', { style: 'currency', currency, maximumFractionDigits: 0 }).format(amount);
+  } catch {
+    return `${currency} ${amount.toLocaleString('en-US')}`;
+  }
+}
+
+export interface CompleteVisitBody {
+  visited_on?: string;
+  meter?: number | null;
+  allow_decrease?: boolean;
+  provider?: string | null;
+  invoice_number?: string | null;
+  currency?: string | null;
+  total?: number | null;
+  notes?: string | null;
+  attachments?: Attachment[];
+  event_key?: string;
+  lines: VisitLineInput[];
+}
+
+export const visitsApi = {
+  list: (assetId: string) => api.get<{ visits: Visit[] }>(`/api/assets/${assetId}/visits`),
+  get: (id: string) => api.get<{ visit: Visit | null }>(`/api/visits/${id}`),
+  plan: (assetId: string, body: { planned_on?: string | null; provider?: string | null; notes?: string | null; items: Array<{ item_id: string; notes?: string | null }> }) =>
+    api.post<{ visit: Visit }>(`/api/assets/${assetId}/visits`, { status: 'planned', ...body }),
+  log: (assetId: string, body: CompleteVisitBody) =>
+    api.post<{ visit: Visit; lines: Array<{ item_id: string; log_id: string; logged: boolean; historical: boolean }>; logged: boolean }>(
+      `/api/assets/${assetId}/visits`,
+      { status: 'done', ...body },
+    ),
+  complete: (id: string, body: CompleteVisitBody) =>
+    api.post<{ visit: Visit; lines: Array<{ item_id: string; log_id: string; logged: boolean; historical: boolean }>; logged: boolean }>(
+      `/api/visits/${id}/complete`,
+      body,
+    ),
+  update: (
+    id: string,
+    body: Partial<{
+      planned_on: string | null;
+      items: Array<{ item_id: string; notes?: string | null }>;
+      visited_on: string;
+      meter: number | null;
+      allow_decrease: boolean;
+      provider: string | null;
+      invoice_number: string | null;
+      currency: string | null;
+      total: number | null;
+      notes: string | null;
+      attachments: Attachment[];
+    }>,
+  ) => api.patch<{ visit: Visit }>(`/api/visits/${id}`, body),
+  remove: (id: string) => api.delete<{ deleted: boolean; logs_removed: number }>(`/api/visits/${id}`),
+};
+
+export const assetsApi = {
+  list: (opts?: { include_archived?: boolean }) =>
+    api.get<{ assets: AssetListItem[] }>(
+      `/api/assets${opts?.include_archived ? '?include_archived=true' : ''}`,
+    ),
+  get: (id: string) =>
+    api.get<{
+      asset: Asset;
+      domain: { id: string; name: string } | null;
+      // The authoritative latest non-voided reading — never derived from
+      // the paginated history below.
+      latest_reading: { id: string; reading: number; recorded_on: string } | null;
+      readings: MeterReading[];
+      items: MaintenanceItem[];
+      projects: AssetProjectRow[];
+      // Service visits (0051): planned first, then done newest first.
+      visits: Visit[];
+      // Allocated line costs across all completions this app-tz year…
+      cost_ytd: number;
+      // …versus invoice-grounded spend in the household currency (0052).
+      spend: SpendSummary;
+      spend_ytd: number;
+      today: string;
+      meter_stale_days: number;
+    }>(`/api/assets/${id}`),
+  create: (body: {
+    name: string;
+    kind?: AssetKind;
+    domain_id?: string | null;
+    meter_unit?: string | null;
+    notes?: string | null;
+  }) => api.post<{ asset: Asset }>('/api/assets', body),
+  update: (
+    id: string,
+    body: Partial<{
+      name: string;
+      kind: AssetKind;
+      domain_id: string | null;
+      meter_unit: string | null;
+      metadata: Record<string, unknown>;
+      metadata_patch: MetadataPatch;
+      notes: string | null;
+      lifecycle: AssetLifecycle;
+      archived_at: string | null;
+      attachments: Attachment[];
+      // Photo operations against the current array (add / remove / hero).
+      attachments_patch: { add?: Attachment[]; remove?: string[]; hero?: string };
+      doc_md: string | null;
+      doc_version: number;
+    }>,
+  ) => api.patch<{ asset: Asset }>(`/api/assets/${id}`, body),
+  remove: (id: string) => api.delete(`/api/assets/${id}`),
+  addReading: (
+    id: string,
+    body: { reading: number; recorded_on?: string; notes?: string | null; event_key?: string; allow_decrease?: boolean },
+  ) => api.post<{ reading: MeterReading; logged: boolean }>(`/api/assets/${id}/readings`, body),
+  updateReading: (
+    id: string,
+    rid: string,
+    body: { reading?: number; recorded_on?: string; notes?: string | null; allow_decrease?: boolean },
+  ) => api.patch<{ reading: MeterReading; item: MaintenanceItem | null }>(`/api/assets/${id}/readings/${rid}`, body),
+  // Void, not delete — the row stays for audit.
+  voidReading: (id: string, rid: string) => api.delete(`/api/assets/${id}/readings/${rid}`),
+};
+
+export const maintenanceApi = {
+  list: (opts?: { asset_id?: string; include_inactive?: boolean }) => {
+    const qs = new URLSearchParams();
+    if (opts?.asset_id) qs.set('asset_id', opts.asset_id);
+    if (opts?.include_inactive) qs.set('include_inactive', 'true');
+    const q = qs.toString();
+    return api.get<{ items: MaintenanceItem[]; today: string; meter_stale_days: number }>(
+      `/api/maintenance${q ? `?${q}` : ''}`,
+    );
+  },
+  get: (id: string) =>
+    api.get<{ item: MaintenanceItem; logs: MaintenanceLog[]; today: string }>(
+      `/api/maintenance/${id}`,
+    ),
+  create: (body: MaintenanceItemBody & { name: string }) =>
+    api.post<{ item: MaintenanceItem }>('/api/maintenance', body),
+  update: (id: string, body: MaintenanceItemBody) =>
+    api.patch<{ item: MaintenanceItem }>(`/api/maintenance/${id}`, body),
+  remove: (id: string) => api.delete(`/api/maintenance/${id}`),
+  complete: (id: string, body: CompleteMaintenanceBody) =>
+    api.post<{ item: MaintenanceItem; log: MaintenanceLog; logged: boolean; historical: boolean }>(
+      `/api/maintenance/${id}/complete`,
+      body,
+    ),
+  // Seed evidence: create or edit the item's baseline log.
+  setBaseline: (id: string, body: { completed_on: string; meter?: number | null }) =>
+    api.post<{ item: MaintenanceItem; log: MaintenanceLog }>(`/api/maintenance/${id}/baseline`, body),
+  updateLog: (
+    id: string,
+    logId: string,
+    body: { completed_on?: string; meter_at_completion?: number | null; notes?: string | null; cost?: number | null },
+  ) => api.patch<{ item: MaintenanceItem; log: MaintenanceLog }>(`/api/maintenance/${id}/logs/${logId}`, body),
+  deleteLog: (id: string, logId: string) =>
+    api.delete<{ item: MaintenanceItem }>(`/api/maintenance/${id}/logs/${logId}`),
+};
+
 // ─── People CRM ──────────────────────────────────────────────────────────
 
 export type RelationshipType =
@@ -987,7 +1411,8 @@ export interface ConversationCreate {
 // ─── Attention Engine (Addendum 05) ──────────────────────────────────────
 
 export type AttentionSourceType =
-  | 'person' | 'company' | 'domain' | 'project' | 'conversation' | 'task' | 'content';
+  | 'person' | 'company' | 'domain' | 'project' | 'conversation' | 'task' | 'content'
+  | 'maintenance_item' | 'asset';
 export type AttentionUrgency = 'low' | 'normal' | 'high';
 export type AttentionStatus = 'active' | 'dismissed' | 'snoozed' | 'acted_on' | 'expired';
 
@@ -1471,6 +1896,12 @@ export interface AppSettings {
   routines_module_enabled: boolean;
   // Daily Rule (Addendum 06), retired by Addendum 09 — defaults false.
   rule_module_enabled: boolean;
+  // Maintenance module (migration 0047). Default on — core home-ops.
+  maintenance_module_enabled: boolean;
+  // Reading-staleness policy (0048): days before the reading nag fires.
+  meter_stale_days?: number;
+  // Household currency (0052), ISO 4217.
+  currency?: string;
   // Briefing panel visibility/order (migration 0044). Null → registry
   // defaults; resolved by mergePanelConfig in the panel registry.
   briefing_panels?: Array<{ id: string; enabled: boolean }> | null;

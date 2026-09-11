@@ -181,6 +181,68 @@ export async function toggleRuleModuleAction(formData: FormData): Promise<SyncRe
   };
 }
 
+// Toggle the Maintenance module (migration 0047). Default on; turning it off
+// hides /maintenance from the nav. The cron sweep + attention rules keep
+// running server-side either way — the flag is a UI gate, not a data gate.
+export async function toggleMaintenanceModuleAction(formData: FormData): Promise<SyncResult> {
+  const enabled = formData.get('enabled') === 'true';
+  try {
+    await settingsApi.updateApp({ maintenance_module_enabled: enabled });
+  } catch (err) {
+    if (err instanceof ApiError) {
+      const body = err.body as { error?: string } | null;
+      return { ok: false, message: body?.error ?? `HTTP ${err.status}` };
+    }
+    return { ok: false, message: (err as Error).message };
+  }
+  revalidatePath('/', 'layout');
+  return {
+    ok: true,
+    message: enabled ? 'Maintenance module enabled.' : 'Maintenance module hidden.',
+  };
+}
+
+// The one reading-staleness policy (migration 0048): how many days a metered
+// asset with meter-cadence items may go without a reading before the
+// reading nag fires. Read by the attention rule and shown on /maintenance.
+export async function setMeterStaleDaysAction(formData: FormData): Promise<SyncResult> {
+  const raw = Number(String(formData.get('meter_stale_days') ?? '').trim());
+  if (!Number.isInteger(raw) || raw < 1 || raw > 365) {
+    return { ok: false, message: 'Enter a whole number of days between 1 and 365.' };
+  }
+  try {
+    await settingsApi.updateApp({ meter_stale_days: raw });
+  } catch (err) {
+    if (err instanceof ApiError) {
+      const body = err.body as { error?: string } | null;
+      return { ok: false, message: body?.error ?? `HTTP ${err.status}` };
+    }
+    return { ok: false, message: (err as Error).message };
+  }
+  revalidatePath('/settings');
+  revalidatePath('/maintenance');
+  return { ok: true, message: `Readings expected every ${raw} days.` };
+}
+
+// Settings → Maintenance → household currency (0052). Spend totals are
+// stated in it; visits default to it; foreign invoices are listed apart.
+export async function setCurrencyAction(formData: FormData): Promise<SyncResult> {
+  const raw = String(formData.get('currency') ?? '').trim().toUpperCase();
+  if (!/^[A-Z]{3}$/.test(raw)) return { ok: false, message: 'Use a three-letter ISO 4217 code, like NZD or USD.' };
+  try {
+    await settingsApi.updateApp({ currency: raw });
+  } catch (err) {
+    if (err instanceof ApiError) {
+      const body = err.body as { error?: string } | null;
+      return { ok: false, message: body?.error ?? `HTTP ${err.status}` };
+    }
+    return { ok: false, message: (err as Error).message };
+  }
+  revalidatePath('/settings');
+  revalidatePath('/assets/[id]', 'page');
+  return { ok: true, message: `Spend is stated in ${raw}.` };
+}
+
 export async function disconnectGoogleAction(): Promise<SyncResult> {
   try {
     await googleApi.disconnect();

@@ -26,6 +26,13 @@ If `start` refuses because the port is held by a process devctl didn't start
 (a stale server from a pre-devctl session), kill the PID it prints and re-run.
 `status` flags the same condition.
 
+Always invoke `scripts/devctl.sh` from the repo root (or by absolute path).
+A terminal tool's working directory persists between calls — after a
+`cd apps/api && …`, a relative `scripts/devctl.sh restart api` silently fails
+and the OLD server keeps serving, which looks exactly like "my change didn't
+work". Verify a restart landed by checking the code's new behaviour, not
+just `/healthz`.
+
 ## Database & migrations
 
 `scripts/db-migrate.sh` targets, in order: `--url`, `$DATABASE_URL`,
@@ -96,6 +103,34 @@ curl -s http://127.0.0.1:3001/api/work -H "authorization: Bearer $TOKEN" | jq .
 ```
 
 Checks: `pnpm typecheck` and `pnpm build` from the repo root.
+
+## Tests
+
+`pnpm test` (root) runs the API's Vitest suite (`apps/api/test/`). It is an
+integration suite against a **disposable database**: the global setup drops
+and recreates `jeviops_test` on the same Postgres the dev `DATABASE_URL`
+points at (the docker dev container), loads `schema-selfhost.sql` +
+`seed.sql`, and each test file truncates the maintenance/task/attention
+tables between cases. Nothing touches the dev database. Requirements: the
+dev Postgres up, and `DATABASE_URL` in `.env`. Files run serially — they
+share the one test database. Route tests build the real Fastify app and
+`inject()` requests with a signed session; `test/helpers.ts` has fixtures.
+
+Two files go further: `test/web-actions.test.ts` transpiles the web's
+server actions and runs them against the real routes (mock `next/*`, route
+`@/lib/api` into `inject()`), and `test/upgrade.test.ts` builds a second
+disposable database (`jeviops_upgrade`) from the frozen 0047-era schema in
+`test/fixtures/schema-0047.sql`, populates it, and applies the later
+migrations on top — so a migration is tested on a populated database, not
+only via the clean `schema-selfhost.sql` bootstrap. When you add a
+migration, add it to that test's list.
+
+The web app has its own small Vitest suite (`apps/web/src/**/*.test.tsx`,
+jsdom + Testing Library, no database) for behaviour only a DOM can
+exercise — editor state during an in-flight save, navigation guards. Root
+`pnpm test` runs both suites. Never run `next build` beside the dev server
+(it clobbers the dev `.next` and pages 500 until `rm -rf apps/web/.next`
+and a web restart); stop the servers first, build, then start them again.
 
 ## Gotchas
 

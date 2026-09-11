@@ -76,6 +76,16 @@ export async function submitVoiceTranscript(
   return shapeResponse(res);
 }
 
+// Prompt-cache warm-up. Called on record start / portal open; never
+// surfaces an error — a cold parser still works, just slower.
+export async function warmCapture(): Promise<void> {
+  try {
+    await captureApi.warm();
+  } catch {
+    // ignore — LLM not configured, or unreachable; the capture itself reports that
+  }
+}
+
 // Audio path. Server actions accept FormData natively — the action receives
 // a fresh FormData on the server side with the audio Blob attached.
 export async function submitVoiceAudio(formData: FormData): Promise<VoiceResult> {

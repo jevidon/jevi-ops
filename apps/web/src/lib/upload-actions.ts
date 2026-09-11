@@ -1,6 +1,6 @@
 'use server';
 
-import { uploadsApi, ApiError, type Attachment } from '@/lib/api';
+import { uploadsApi, ApiError, type Attachment, type UploadPrefix } from '@/lib/api';
 
 // Server action wrapper around the image upload. Client picks a file
 // + supplies a prefix as a FormData field (NOT a separate argument —
@@ -10,9 +10,9 @@ import { uploadsApi, ApiError, type Attachment } from '@/lib/api';
 //
 // FormData fields expected:
 //   - file:   the image blob
-//   - prefix: 'notes' | 'journal' | 'other' (controls storage folder)
+//   - prefix: 'notes' | 'journal' | 'assets' | 'other' (controls storage folder)
 
-const VALID_PREFIXES = new Set(['notes', 'journal', 'other']);
+const VALID_PREFIXES = new Set(['notes', 'journal', 'assets', 'other']);
 
 export type UploadResult =
   | { ok: true; attachment: Attachment }
@@ -24,9 +24,7 @@ export async function uploadImageAction(formData: FormData): Promise<UploadResul
     return { ok: false, error: 'No file attached.' };
   }
   const rawPrefix = String(formData.get('prefix') ?? 'other');
-  const prefix: 'notes' | 'journal' | 'other' = VALID_PREFIXES.has(rawPrefix)
-    ? (rawPrefix as 'notes' | 'journal' | 'other')
-    : 'other';
+  const prefix: UploadPrefix = VALID_PREFIXES.has(rawPrefix) ? (rawPrefix as UploadPrefix) : 'other';
 
   try {
     // The api helper forwards the FormData straight through; the

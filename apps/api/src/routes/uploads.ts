@@ -21,7 +21,9 @@ const ALLOWED_MIME = new Set([
   'image/gif', 'image/heic', 'image/heif',
 ]);
 
-const ALLOWED_PREFIXES = new Set(['notes', 'journal', 'other']);
+// 'assets' (0050): the asset page's photo gallery.
+const ALLOWED_PREFIXES = new Set(['notes', 'journal', 'assets', 'other']);
+type UploadPrefix = 'notes' | 'journal' | 'assets' | 'other';
 
 export const uploadRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', app.requireAuth);
@@ -45,9 +47,9 @@ export const uploadRoutes: FastifyPluginAsync = async (app) => {
       // matter; we collect into vars and validate at the end.
       let buffer: Buffer | null = null;
       let contentType = '';
-      let prefix: 'notes' | 'journal' | 'other' =
+      let prefix: UploadPrefix =
         ALLOWED_PREFIXES.has((req.query.prefix ?? '').toString())
-          ? ((req.query.prefix ?? 'other').toString() as 'notes' | 'journal' | 'other')
+          ? ((req.query.prefix ?? 'other').toString() as UploadPrefix)
           : 'other';
       let alt: string | null = typeof req.query.alt === 'string' ? req.query.alt : null;
       let titleHint: string | null =
@@ -72,7 +74,7 @@ export const uploadRoutes: FastifyPluginAsync = async (app) => {
             // and avoid query-string escaping for free-form text.
             const value = String(part.value ?? '');
             if (part.fieldname === 'prefix' && ALLOWED_PREFIXES.has(value)) {
-              prefix = value as 'notes' | 'journal' | 'other';
+              prefix = value as UploadPrefix;
             } else if (part.fieldname === 'title_hint') {
               titleHint = value;
             } else if (part.fieldname === 'alt') {

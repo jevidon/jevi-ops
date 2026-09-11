@@ -11,8 +11,10 @@ import {
 import { getAppTz } from '../lib/app-settings.js';
 import { getDb } from '../lib/db.js';
 import { clearAttentionForSource } from '../lib/attention.js';
+import { DocConflict, DocVersionRequired, deleteDocRevisions, saveDoc } from '../lib/docs.js';
 import {
   activity_log,
+  assets,
   conversations,
   milestones,
   people,
@@ -25,14 +27,16 @@ import {
 export const projectRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', app.requireAuth);
 
-  app.get('/api/projects', async () => {
+  app.get<{ Querystring: { asset_id?: string } }>('/api/projects', async (req) => {
     // Eager-load milestones + domain so the list page can render without a
-    // second query.
+    // second query. ?asset_id narrows to the work grouped under one asset.
     const rows = await getDb().query.projects.findMany({
       with: {
         milestones: true,
         domain: { columns: { id: true, name: true } },
+        asset: { columns: { id: true, name: true } },
       },
+      where: req.query.asset_id ? eq(projects.asset_id, req.query.asset_id) : undefined,
       orderBy: desc(projects.created_at),
     });
     return { projects: rows };
@@ -49,6 +53,7 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
           domain: { columns: { id: true, name: true } },
           company: { columns: { id: true, name: true } },
           primary_contact: { columns: { id: true, name: true, email: true, role_at_company: true } },
+          asset: { columns: { id: true, name: true } },
         },
         where: eq(projects.id, id),
       }),
@@ -173,7 +178,18 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
         details: parsed.error.flatten().fieldErrors,
       });
     }
-    const [row] = await getDb().insert(projects).values(parsed.data).returning();
+    const values = { ...parsed.data };
+    // Work grouped under an asset lives in the asset's domain unless told
+    // otherwise (maintenance-items precedent) — so a project created from
+    // an assigned car's page lands beside the car, not in Inbox.
+    if (values.asset_id && !values.domain_id) {
+      const asset = await getDb().query.assets.findFirst({
+        columns: { domain_id: true },
+        where: eq(assets.id, values.asset_id),
+      });
+      if (asset?.domain_id) values.domain_id = asset.domain_id;
+    }
+    const [row] = await getDb().insert(projects).values(values).returning();
     if (!row) throw app.httpErrors.internalServerError('insert_returned_no_row');
     return reply.code(201).send(row);
   });
@@ -186,21 +202,57 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
         details: parsed.error.flatten().fieldErrors,
       });
     }
-    const update: Partial<typeof projects.$inferInsert> = { ...parsed.data };
+    const { doc_md, doc_version, doc_force, ...patch } = parsed.data;
+    const update: Partial<typeof projects.$inferInsert> = { ...patch };
     // Status flips stamp / clear completed_at so analytics never see a
     // stale finish on a project that's back in flight. Mirrors the
     // tasks PATCH handler. Archived keeps completed_at if it was set
-    // (an archived row was usually done first).
+    // (an archived row was usually done first). Promoting an idea is
+    // just the flip to 'active' — notes, document, attachments stay.
     if (parsed.data.status === 'done') {
       update.completed_at = new Date().toISOString();
-    } else if (parsed.data.status === 'active' || parsed.data.status === 'paused') {
+    } else if (parsed.data.status === 'active' || parsed.data.status === 'paused' || parsed.data.status === 'idea') {
       update.completed_at = null;
     }
-    const [row] = await getDb()
-      .update(projects)
-      .set(update)
-      .where(eq(projects.id, req.params.id))
-      .returning();
+    // Linking a domain-less project to an assigned asset routes it beside
+    // the asset (the create-time rule, applied late). An explicit domain in
+    // the same patch, or one the project already has, wins.
+    if (parsed.data.asset_id && !('domain_id' in parsed.data)) {
+      const [current] = await getDb()
+        .select({ domain_id: projects.domain_id })
+        .from(projects)
+        .where(eq(projects.id, req.params.id));
+      if (current && current.domain_id == null) {
+        const asset = await getDb().query.assets.findFirst({
+          columns: { domain_id: true },
+          where: eq(assets.id, parsed.data.asset_id),
+        });
+        if (asset?.domain_id) update.domain_id = asset.domain_id;
+      }
+    }
+    // The overview document (0050) rides in the same transaction: a stale
+    // doc_version rolls everything back and answers 409 doc_conflict.
+    const actor = req.authMethod === 'api_token' ? req.user!.email : `session:${req.user!.email}`;
+    let row: typeof projects.$inferSelect | undefined;
+    try {
+      row = await getDb().transaction(async (tx) => {
+        const [r] = Object.keys(update).length > 0
+          ? await tx.update(projects).set(update).where(eq(projects.id, req.params.id)).returning()
+          : await tx.select().from(projects).where(eq(projects.id, req.params.id));
+        if (!r) return undefined;
+        if (doc_md === undefined) return r;
+        const saved = await saveDoc(tx, { entityType: 'project', id: r.id, body: doc_md, expectedVersion: doc_version ?? null, force: doc_force, actor });
+        return saved ? { ...r, doc_md: saved.doc_md, doc_version: saved.doc_version } : r;
+      });
+    } catch (err) {
+      if (err instanceof DocConflict) {
+        return reply.code(409).send({ error: 'doc_conflict', ...err.current, message: err.message });
+      }
+      if (err instanceof DocVersionRequired) {
+        return reply.code(400).send({ error: 'doc_version_required', message: err.message });
+      }
+      throw err;
+    }
     if (!row) return reply.code(404).send({ error: 'not_found' });
     return row;
   });
@@ -208,7 +260,9 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
   app.delete<{ Params: { id: string } }>('/api/projects/:id', async (req, reply) => {
     // tasks.project_id has ON DELETE SET NULL so child tasks are preserved
     // and just unlinked. Milestones cascade-delete via their FK. Activity
-    // log entries lose their project_id but rows stick around.
+    // log entries lose their project_id but rows stick around. The doc's
+    // revisions (0050) go with it.
+    await deleteDocRevisions(getDb(), 'project', req.params.id);
     await getDb().delete(projects).where(eq(projects.id, req.params.id));
     return reply.code(204).send();
   });

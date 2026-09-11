@@ -12,7 +12,7 @@ import { FilterInput, textMatches } from '@/components/FilterInput';
 import { QuickAddTask } from '@/components/QuickAddTask';
 import { domainColor } from '@/lib/domain-colors';
 import { FocusControl, type FocusOption } from './focus-control';
-import { ProjectCard, ContentRow, FittedArt } from './cards';
+import { ProjectCard, ContentRow, AssetCard, FittedArt } from './cards';
 
 // The Work page (Addendum 08 + v2 redesign, Jul 2026). One computed map: a left
 // facet rail (Domain / Status / Show) filters domain sections, each a sticky
@@ -26,7 +26,8 @@ import { ProjectCard, ContentRow, FittedArt } from './cards';
 // collapse). Preserved from Addendum 08: Tomorrow's Focus and the holder flip.
 
 const STATUS_ORDER: Urgency[] = ['over', 'due', 'ok', 'quiet'];
-type Kind = 'projects' | 'content' | 'tasks';
+type Kind = 'assets' | 'projects' | 'content' | 'tasks';
+const ALL_KINDS: Kind[] = ['assets', 'projects', 'content', 'tasks'];
 
 export function WorkView({
   payload,
@@ -43,7 +44,7 @@ export function WorkView({
 }) {
   const [dsel, setDsel] = useState<Set<string>>(new Set());
   const [ssel, setSsel] = useState<Set<Urgency>>(new Set());
-  const [kinds, setKinds] = useState<Set<Kind>>(new Set(['projects', 'content', 'tasks']));
+  const [kinds, setKinds] = useState<Set<Kind>>(new Set(ALL_KINDS));
   const [showParked, setShowParked] = useState(false);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   // Live text filter (Wave 2 #3) — narrows sections/cards/rows as you type.
@@ -59,10 +60,12 @@ export function WorkView({
   // Apply the active facets to a domain, returning a filtered copy or null if
   // it drops out. Status is the four-state multi-select.
   const applyFacets = (d: WorkDomain): WorkDomain | null => {
+    let assets = kinds.has('assets') ? d.assets : [];
     let projects = kinds.has('projects') ? d.projects : [];
     let content = kinds.has('content') ? d.content : [];
 
     if (ssel.size) {
+      assets = assets.filter((a) => ssel.has(a.urgency));
       projects = projects.filter((p) => ssel.has(p.urgency));
       content = content.filter((c) => ssel.has(c.urgency));
     }
@@ -72,16 +75,17 @@ export function WorkView({
     // section drops when nothing survives (direct-task counts aren't
     // searchable text, so they don't hold a section open).
     if (q.trim() && !textMatches(q, d.name)) {
-      projects = projects.filter((p) => textMatches(q, p.name, p.client));
+      assets = assets.filter((a) => textMatches(q, a.name));
+      projects = projects.filter((p) => textMatches(q, p.name, p.client, p.asset?.name));
       content = content.filter((c) => textMatches(q, c.title));
-      if (!projects.length && !content.length) return null;
+      if (!assets.length && !projects.length && !content.length) return null;
     }
 
     // Domain drops out when nothing survives AND it has no other reason to show.
-    if (ssel.size && !ssel.has(d.urgency) && !projects.length && !content.length) {
+    if (ssel.size && !ssel.has(d.urgency) && !assets.length && !projects.length && !content.length) {
       return null;
     }
-    return { ...d, projects, content };
+    return { ...d, assets, projects, content };
   };
 
   const visibleDomains = useMemo(() => {
@@ -118,11 +122,11 @@ export function WorkView({
     return out;
   }, [payload.domains]);
 
-  const activeFilters = dsel.size + ssel.size + (3 - kinds.size) + (q.trim() ? 1 : 0);
+  const activeFilters = dsel.size + ssel.size + (ALL_KINDS.length - kinds.size) + (q.trim() ? 1 : 0);
   const resetFilters = () => {
     setDsel(new Set());
     setSsel(new Set());
-    setKinds(new Set(['projects', 'content', 'tasks']));
+    setKinds(new Set(ALL_KINDS));
     setQ('');
   };
 
@@ -149,7 +153,7 @@ export function WorkView({
               onClick={() => toggle(setDsel, d.id)}
               color={domainColor(d.name)}
               name={d.name}
-              count={d.projects.length + d.content.length + d.rollup.open}
+              count={d.assets.length + d.projects.length + d.content.length + d.rollup.open}
             />
           ))}
         </FacetGroup>
@@ -174,7 +178,7 @@ export function WorkView({
         <FacetSep />
 
         <FacetGroup label="Show">
-          {([['projects', 'Projects'], ['content', 'Content'], ['tasks', 'Direct tasks']] as [Kind, string][]).map(
+          {([['assets', 'Assets'], ['projects', 'Projects'], ['content', 'Content'], ['tasks', 'Direct tasks']] as [Kind, string][]).map(
             ([k, label]) => (
               <FacetRow key={k} on={kinds.has(k)} onClick={() => toggle(setKinds, k)} name={label} />
             ),
@@ -272,7 +276,7 @@ function DomainSection({
   const color = domainColor(domain.name);
   const showDirect = kinds.has('tasks') && (domain.direct.open > 0 || domain.direct.waiting > 0);
   const empty =
-    domain.projects.length === 0 && domain.content.length === 0 && !showDirect;
+    domain.assets.length === 0 && domain.projects.length === 0 && domain.content.length === 0 && !showDirect;
 
   return (
     <section className="mb-8">
@@ -326,6 +330,16 @@ function DomainSection({
 
       {!collapsed && (
         <div className="pt-3.5">
+          {/* Assets band (0049): the domain's assigned assets, above the
+              projects grid in the same card shell so the scan rhythm holds. */}
+          {domain.assets.length > 0 && (
+            <div
+              className="grid gap-3.5 mb-3"
+              style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(258px, 1fr))' }}
+            >
+              {domain.assets.map((a) => <AssetCard key={a.id} a={a} color={color} />)}
+            </div>
+          )}
           {domain.projects.length > 0 && (
             <div
               className="grid gap-3.5 mb-3"
@@ -349,6 +363,9 @@ function DomainSection({
             )}
             <Link href={`/projects/new?domain_id=${domain.id}`} className="font-mono text-[9px] uppercase tracking-[0.09em] text-ink-3 hover:text-accent transition-colors">
               + Project in {domain.name}
+            </Link>
+            <Link href={`/maintenance/assets?domain_id=${domain.id}`} className="font-mono text-[9px] uppercase tracking-[0.09em] text-ink-3 hover:text-accent transition-colors">
+              + Asset in {domain.name}
             </Link>
             {/* Quick task capture (Wave 2 #2) — title straight into this
                 domain or one of its projects, no page hop. */}

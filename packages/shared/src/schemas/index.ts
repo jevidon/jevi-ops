@@ -18,3 +18,6 @@ export * from './pin.js';
 export * from './work.js';
 export * from './company.js';
 export * from './conversation.js';
+export * from './maintenance.js';
+export * from './doc.js';
+export * from './visit.js';

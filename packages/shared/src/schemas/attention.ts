@@ -20,6 +20,9 @@ export const AttentionSourceTypeSchema = z.enum([
   'conversation',
   'task',
   'content',
+  // Maintenance module (migration 0047).
+  'maintenance_item',
+  'asset',
 ]);
 
 export const AttentionItemSchema = z.object({

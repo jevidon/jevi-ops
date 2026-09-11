@@ -18,7 +18,7 @@ interface InitialValues {
   description: string;
   domain_id: string;
   type: '' | 'client' | 'internal' | 'content';
-  status: 'active' | 'paused' | 'done' | 'archived';
+  status: 'idea' | 'active' | 'paused' | 'done' | 'archived';
   engagement_type: 'project' | 'retainer';
   kind: 'project' | 'area';
   quoted_hours: string;   // input value is always string
@@ -35,7 +35,8 @@ const TYPE_OPTIONS: Array<{ value: string; label: string }> = [
   { value: 'content', label: 'Content' },
 ];
 
-const STATUS_OPTIONS: Array<{ value: 'active' | 'paused' | 'done' | 'archived'; label: string }> = [
+const STATUS_OPTIONS: Array<{ value: 'idea' | 'active' | 'paused' | 'done' | 'archived'; label: string }> = [
+  { value: 'idea', label: 'Idea — a candidate, off the board' },
   { value: 'active', label: 'Active' },
   { value: 'paused', label: 'Paused' },
   { value: 'done', label: 'Done' },

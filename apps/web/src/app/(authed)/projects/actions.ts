@@ -7,7 +7,7 @@ import { projectsApi, ApiError, type ProjectCreate, type ProjectUpdate } from '@
 export type SaveResult = { ok: true } | { ok: false; error: string };
 
 const VALID_TYPES = ['client', 'internal', 'content'] as const;
-const VALID_STATUSES = ['active', 'paused', 'done', 'archived'] as const;
+const VALID_STATUSES = ['idea', 'active', 'paused', 'done', 'archived'] as const;
 const VALID_ENGAGEMENTS = ['project', 'retainer'] as const;
 const VALID_KINDS = ['project', 'area'] as const;
 
@@ -16,7 +16,7 @@ function readFields(formData: FormData): {
   description: string | null;
   domain_id: string | null;
   type: 'client' | 'internal' | 'content' | null;
-  status: 'active' | 'paused' | 'done' | 'archived' | null;
+  status: 'idea' | 'active' | 'paused' | 'done' | 'archived' | null;
   engagement_type: 'project' | 'retainer';
   kind: 'project' | 'area';
   quoted_hours: number | null;
@@ -24,6 +24,7 @@ function readFields(formData: FormData): {
   start_date: string | null;
   target_date: string | null;
   color: string | null;
+  asset_id: string | null;
 } {
   const name = String(formData.get('name') ?? '').trim();
   const description = String(formData.get('description') ?? '').trim() || null;
@@ -34,7 +35,7 @@ function readFields(formData: FormData): {
     : null;
   const rawStatus = String(formData.get('status') ?? '').trim();
   const status = (VALID_STATUSES as readonly string[]).includes(rawStatus)
-    ? (rawStatus as 'active' | 'paused' | 'done' | 'archived')
+    ? (rawStatus as 'idea' | 'active' | 'paused' | 'done' | 'archived')
     : null;
   const rawEngagement = String(formData.get('engagement_type') ?? '').trim();
   const engagement_type = (VALID_ENGAGEMENTS as readonly string[]).includes(rawEngagement)
@@ -57,8 +58,11 @@ function readFields(formData: FormData): {
   const start_date = String(formData.get('start_date') ?? '').trim() || null;
   const target_date = String(formData.get('target_date') ?? '').trim() || null;
   const color = String(formData.get('color') ?? '').trim() || null;
+  // The asset this work groups under (0049); the domain page's quick-create
+  // and the asset page pass it as a hidden field.
+  const asset_id = String(formData.get('asset_id') ?? '').trim() || null;
 
-  return { name, description, domain_id, type, status, engagement_type, kind, quoted_hours, retainer_anchor_day, start_date, target_date, color };
+  return { name, description, domain_id, type, status, engagement_type, kind, quoted_hours, retainer_anchor_day, start_date, target_date, color, asset_id };
 }
 
 export async function createProjectAction(
@@ -67,13 +71,19 @@ export async function createProjectAction(
 ): Promise<SaveResult> {
   const fields = readFields(formData);
   if (!fields.name) return { ok: false, error: 'Name is required.' };
-  // Status only applies on update; create defaults to 'active' via DB.
+  // On create the only status that means anything is 'idea' (0050) — a
+  // candidate, off the board; everything else defaults to 'active' via DB.
   const isArea = fields.kind === 'area';
+  // Return-to-origin: same-origin paths only (the asset page's idea
+  // quick-add stays on the asset page).
+  const rawReturn = String(formData.get('return_to') ?? '');
+  const returnTo = rawReturn.startsWith('/') && !rawReturn.startsWith('//') ? rawReturn : null;
   const payload: ProjectCreate = {
     name: fields.name,
     description: fields.description,
     domain_id: fields.domain_id,
     type: fields.type,
+    ...(fields.status === 'idea' ? { status: 'idea' as const } : {}),
     // Areas don't have a billing model — force engagement_type to
     // 'project' (the column default) regardless of any stale value
     // that might be in the form.
@@ -86,6 +96,7 @@ export async function createProjectAction(
     start_date: isArea ? null : fields.start_date,
     target_date: isArea ? null : fields.target_date,
     color: fields.color,
+    asset_id: fields.asset_id,
   };
   let created;
   try {
@@ -102,7 +113,34 @@ export async function createProjectAction(
   }
   revalidatePath('/projects');
   revalidatePath('/');
-  redirect(`/projects/${created.id}`);
+  if (fields.asset_id) revalidatePath(`/assets/${fields.asset_id}`);
+  if (returnTo) revalidatePath(returnTo.split('?')[0] ?? returnTo);
+  redirect(returnTo ?? `/projects/${created.id}`);
+}
+
+// Promote an idea (0050): the flip to 'active' is the whole operation —
+// notes, document, and attachments come along untouched. ActionForm-shaped.
+export async function promoteIdeaAction(
+  _prev: { ok: true; message?: string } | { ok: false; error: string } | null,
+  formData: FormData,
+): Promise<{ ok: true; message?: string } | { ok: false; error: string }> {
+  const id = String(formData.get('id') ?? '');
+  const assetId = String(formData.get('asset_id') ?? '').trim();
+  if (!id) return { ok: false, error: 'Missing id.' };
+  try {
+    await projectsApi.update(id, { status: 'active' });
+  } catch (err) {
+    if (err instanceof ApiError) {
+      const body = err.body as { error?: string; message?: string } | null;
+      return { ok: false, error: body?.message ?? body?.error ?? `API ${err.status}` };
+    }
+    return { ok: false, error: (err as Error).message };
+  }
+  revalidatePath(`/projects/${id}`);
+  revalidatePath('/work');
+  revalidatePath('/domains/[id]', 'page');
+  if (assetId) revalidatePath(`/assets/${assetId}`);
+  return { ok: true, message: 'Promoted — it is a project now.' };
 }
 
 export async function updateProjectAction(

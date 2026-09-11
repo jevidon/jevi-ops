@@ -4,6 +4,7 @@ import { useActionState } from 'react';
 import { useFormStatus } from 'react-dom';
 import {
   toggleHealthModuleAction,
+  toggleMaintenanceModuleAction,
   toggleRoutinesModuleAction,
   toggleRuleModuleAction,
 } from './actions';
@@ -73,10 +74,12 @@ export function ModulesForm({
   healthEnabled,
   routinesEnabled,
   ruleEnabled,
+  maintenanceEnabled,
 }: {
   healthEnabled: boolean;
   routinesEnabled: boolean;
   ruleEnabled: boolean;
+  maintenanceEnabled: boolean;
 }) {
   return (
     <div className="flex flex-col">
@@ -91,6 +94,12 @@ export function ModulesForm({
         description="Daily habit check-off with streaks. When disabled it's hidden from the nav + Today, its routes 404, and its reminders + chat answers go quiet. Data is retained — turn it back on anytime. (Practices replaces this in v1.1.)"
         enabled={routinesEnabled}
         action={toggleRoutinesModuleAction}
+      />
+      <ModuleRow
+        name="Maintenance"
+        description="Recurring upkeep on assets — filter swaps, vehicle service, anything on a date or meter cadence. Due items still create tasks and attention nags with this off; the toggle only hides the module pages from the nav."
+        enabled={maintenanceEnabled}
+        action={toggleMaintenanceModuleAction}
       />
       <ModuleRow
         name="Daily Rule (retired)"

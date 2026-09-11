@@ -6,7 +6,8 @@ import { getAppTz } from '../lib/app-settings.js';
 import { todayInTz } from '../lib/tz.js';
 import { getDb, type Db } from '../lib/db.js';
 import { clearAttentionForSource } from '../lib/attention.js';
-import { milestones, projects, tasks } from '../db/schema.js';
+import { MaintenanceNeedsDetails, clearMaintenanceAttention, completeMaintenanceItem } from '../lib/maintenance.js';
+import { maintenance_items, milestones, projects, tasks } from '../db/schema.js';
 
 // Tasks CRUD. Auth-gated.
 
@@ -227,7 +228,12 @@ export const taskRoutes: FastifyPluginAsync = async (app) => {
 
       const ruleRaw = existing?.recurrence_rule;
       if (ruleRaw && isRecurrencePattern(ruleRaw)) {
-        const todayIso = new Date().toISOString().slice(0, 10);
+        // App-tz today, not UTC — a UTC date is already "tomorrow" for
+        // evening completions in a behind-UTC zone, which advances the
+        // roll-forward one occurrence too far (and one short in the
+        // ahead-of-UTC morning case). Same convention as waiting_since
+        // below and every other date consumer.
+        const todayIso = todayInTz(await getAppTz());
         const next = nextDueDate({
           currentDue: existing?.due_date ?? null,
           rule: ruleRaw,
@@ -265,7 +271,53 @@ export const taskRoutes: FastifyPluginAsync = async (app) => {
         update.waiting_since = todayInTz(await getAppTz());
       }
     }
-    const [row] = await db.update(tasks).set(update).where(eq(tasks.id, req.params.id)).returning();
+    // Checking off a maintenance-generated task completes the maintenance
+    // item behind it — in ONE transaction with the task update, through the
+    // same lib the module's own complete endpoint uses, so "task done but
+    // item not logged" can't happen. Attention live-clear follows commit.
+    const linkedItem =
+      parsed.data.status === 'done' && !rolledOver
+        ? await db.query.maintenance_items.findFirst({
+            columns: { id: true },
+            where: eq(maintenance_items.generated_task_id, req.params.id),
+          })
+        : undefined;
+
+    let row: typeof tasks.$inferSelect | undefined;
+    if (linkedItem) {
+      const completedOn = todayInTz(await getAppTz());
+      try {
+        row = await db.transaction(async (tx) => {
+          const [r] = await tx.update(tasks).set(update).where(eq(tasks.id, req.params.id)).returning();
+          if (!r) return undefined;
+          await completeMaintenanceItem(tx, linkedItem.id, {
+            completedOn,
+            today: completedOn,
+            source: 'task',
+            actor: req.authMethod === 'api_token' ? req.user!.email : `session:${req.user!.email}`,
+            eventKey: `task:${req.params.id}:${completedOn}`,
+          });
+          return r;
+        });
+      } catch (err) {
+        // A checkbox can't carry the evidence an expiry/prepaid/inspection
+        // item requires. The transaction rolled back — the task stays open —
+        // and the client is told what the item needs and where to say it.
+        if (err instanceof MaintenanceNeedsDetails) {
+          return reply.code(409).send({
+            error: 'needs_details',
+            item_id: linkedItem.id,
+            policy: err.policy,
+            fields: err.fields,
+            message: err.message,
+          });
+        }
+        throw err;
+      }
+      if (row) await clearMaintenanceAttention(db, linkedItem.id);
+    } else {
+      [row] = await db.update(tasks).set(update).where(eq(tasks.id, req.params.id)).returning();
+    }
     if (!row) return reply.code(404).send({ error: 'not_found' });
 
     // Live-reconcile this task's Attention items so a status/date change

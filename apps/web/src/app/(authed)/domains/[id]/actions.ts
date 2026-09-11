@@ -1,7 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { domainsApi, ApiError } from '@/lib/api';
+import { assetsApi, domainsApi, ApiError } from '@/lib/api';
 import {
   CADENCE_RULE_TYPES,
   PRIMARY_CADENCE_RULES,
@@ -227,4 +227,33 @@ export async function markShippedAction(
   revalidatePath('/domains');
   revalidatePath('/');
   return { ok: true, at };
+}
+
+// ─── Assets (0049) ────────────────────────────────────────────────────────
+// Assigning an existing asset to this domain promotes it into the domain's
+// Assets band (and the Work board). Assignment is the asset's domain_id —
+// there is no link entity.
+export type AssignAssetResult = { ok: true } | { ok: false; error: string };
+
+export async function assignAssetAction(
+  _prev: AssignAssetResult | null,
+  formData: FormData,
+): Promise<AssignAssetResult> {
+  const domainId = String(formData.get('domain_id') ?? '').trim();
+  const assetId = String(formData.get('asset_id') ?? '').trim();
+  if (!domainId || !assetId) return { ok: false, error: 'Pick an asset.' };
+  try {
+    await assetsApi.update(assetId, { domain_id: domainId });
+  } catch (err) {
+    if (err instanceof ApiError) {
+      const body = err.body as { error?: string; message?: string } | null;
+      return { ok: false, error: body?.message ?? body?.error ?? `HTTP ${err.status}` };
+    }
+    return { ok: false, error: (err as Error).message };
+  }
+  revalidatePath(`/domains/${domainId}`);
+  revalidatePath('/work');
+  revalidatePath('/maintenance/assets');
+  revalidatePath(`/assets/${assetId}`);
+  return { ok: true };
 }

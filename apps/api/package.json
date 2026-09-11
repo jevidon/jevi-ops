@@ -8,6 +8,7 @@
     "build": "tsc --noEmit",
     "start": "tsx src/server.ts",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
     "drizzle:generate": "drizzle-kit generate",
     "drizzle:push": "drizzle-kit push",
     "drizzle:studio": "drizzle-kit studio"
@@ -41,6 +42,7 @@
     "@types/node": "^22.10.0",
     "drizzle-kit": "^0.31.10",
     "pino-pretty": "^11.3.0",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "vitest": "^3"
   }
 }

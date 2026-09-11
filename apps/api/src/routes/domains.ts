@@ -1,6 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { asc, eq } from 'drizzle-orm';
 import { CreateDomainSchema, UpdateDomainSchema } from '@jevi-ops/shared/schemas';
+import { DocConflict, DocVersionRequired, saveDoc } from '../lib/docs.js';
 import { getDb } from '../lib/db.js';
 import { clearAttentionForSource } from '../lib/attention.js';
 import { composeDomainIllustration } from '../lib/illustration.js';
@@ -46,6 +47,7 @@ export const domainRoutes: FastifyPluginAsync = async (app) => {
         name: parsed.data.name,
         description: parsed.data.description ?? null,
         expected_cadence: parsed.data.expected_cadence ?? null,
+        doc_md: parsed.data.doc_md || null,
       })
       .returning();
     if (!row) throw app.httpErrors.internalServerError('insert_returned_no_row');
@@ -87,11 +89,30 @@ export const domainRoutes: FastifyPluginAsync = async (app) => {
       }
     }
 
-    const [row] = await db
-      .update(stewardship_domains)
-      .set(parsed.data)
-      .where(eq(stewardship_domains.id, req.params.id))
-      .returning();
+    // The overview document (0050) rides in the same transaction: a stale
+    // doc_version rolls everything back and answers 409 doc_conflict.
+    const { doc_md, doc_version, doc_force, ...patch } = parsed.data;
+    const actor = req.authMethod === 'api_token' ? req.user!.email : `session:${req.user!.email}`;
+    let row: typeof stewardship_domains.$inferSelect | undefined;
+    try {
+      row = await db.transaction(async (tx) => {
+        const [r] = Object.keys(patch).length > 0
+          ? await tx.update(stewardship_domains).set(patch).where(eq(stewardship_domains.id, req.params.id)).returning()
+          : await tx.select().from(stewardship_domains).where(eq(stewardship_domains.id, req.params.id));
+        if (!r) return undefined;
+        if (doc_md === undefined) return r;
+        const saved = await saveDoc(tx, { entityType: 'domain', id: r.id, body: doc_md, expectedVersion: doc_version ?? null, force: doc_force, actor });
+        return saved ? { ...r, doc_md: saved.doc_md, doc_version: saved.doc_version } : r;
+      });
+    } catch (err) {
+      if (err instanceof DocConflict) {
+        return reply.code(409).send({ error: 'doc_conflict', ...err.current, message: err.message });
+      }
+      if (err instanceof DocVersionRequired) {
+        return reply.code(400).send({ error: 'doc_version_required', message: err.message });
+      }
+      throw err;
+    }
     if (!row) return reply.code(404).send({ error: 'not_found' });
 
     // Marking a domain shipped (setting last_shipped_at) clears its

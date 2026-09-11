@@ -51,6 +51,9 @@ create table if not exists stewardship_domains (
   last_shipped_at timestamptz,
   illustration jsonb,
   illustration_draft jsonb,
+  -- Markdown overview + optimistic-concurrency version (0050); history in doc_revisions.
+  doc_md text,
+  doc_version integer not null default 1,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -124,8 +127,9 @@ create table if not exists projects (
   name text not null,
   description text,
   domain_id uuid references stewardship_domains(id) on delete set null,
+  -- 'idea' (0050): a candidate grouped under an asset/domain, not yet work.
   status text not null default 'active' check (status in
-    ('active','paused','done','archived')),
+    ('idea','active','paused','done','archived')),
   type text check (type in ('client','internal','content')),
   -- The primary contact person (named client_id pre-0041 on migrated DBs).
   primary_contact_id uuid references people(id) on delete set null,
@@ -140,6 +144,9 @@ create table if not exists projects (
   -- Retainer cycle anchor day-of-month (migration 0038); null until set.
   retainer_anchor_day int check (retainer_anchor_day between 1 and 31),
   kind text not null default 'project' check (kind in ('project','area')),
+  -- Markdown overview + optimistic-concurrency version (0050); history in doc_revisions.
+  doc_md text,
+  doc_version integer not null default 1,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -299,7 +306,10 @@ create table if not exists tasks (
   reminder_offsets jsonb not null default '[]'::jsonb,
   reminders_sent jsonb not null default '{}'::jsonb,
   source text not null default 'manual' check (source in
-    ('manual','voice','email','observation','import')),
+    ('manual','voice','email','observation','import','maintenance')),
+  -- Durable occurrence identity for generated tasks (migration 0048):
+  -- maintenance uses maint:<item>:<due_date>:<due_meter>. Unique per source.
+  source_ref text,
   top3_for_date date,
   -- Waiting state (migration 0038): who it's blocked on + the aging anchor.
   waiting_on text,
@@ -318,6 +328,8 @@ create index if not exists idx_tasks_top3 on tasks(top3_for_date)
 create index if not exists idx_tasks_content_item on tasks(content_item_id)
   where content_item_id is not null;
 create index if not exists tasks_milestone_id_idx on tasks(milestone_id);
+create unique index if not exists idx_tasks_source_ref
+  on tasks(source, source_ref) where source_ref is not null;
 
 drop trigger if exists trg_tasks_updated_at on tasks;
 create trigger trg_tasks_updated_at
@@ -707,6 +719,14 @@ create table if not exists app_settings (
   health_module_enabled boolean not null default false,
   routines_module_enabled boolean not null default true,
   rule_module_enabled boolean not null default false,
+  -- Maintenance module (migration 0047). Default on — core home-ops.
+  maintenance_module_enabled boolean not null default true,
+  -- Reading-staleness policy (migration 0048): days without a meter reading
+  -- before a metered asset with meter-cadence items gets the reading nag.
+  meter_stale_days integer not null default 14 check (meter_stale_days > 0),
+  -- Household currency (0052): spend totals are stated in it; foreign
+  -- invoices are listed apart, never converted.
+  currency text not null default 'USD' check (currency ~ '^[A-Z]{3}$'),
   -- Briefing panel visibility/order (migration 0044): ordered array of
   -- {id, enabled}. Null → registry defaults (web mergePanelConfig).
   briefing_panels jsonb,
@@ -1013,7 +1033,8 @@ create table if not exists attention_items (
   id uuid primary key default gen_random_uuid(),
   rule_type text not null,
   source_type text not null check (source_type in
-    ('person','company','domain','project','conversation','task','content')),
+    ('person','company','domain','project','conversation','task','content',
+     'maintenance_item','asset')),
   source_id uuid not null,
   title text not null,
   detail text,
@@ -1212,6 +1233,230 @@ create table if not exists pinned_items (
 );
 
 create index if not exists idx_pinned_items_position on pinned_items (position);
+
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- Maintenance module (migration 0047)
+-- ─────────────────────────────────────────────────────────────────────────
+-- Recurring upkeep as a first-class entity: assets (kind is display-only;
+-- meter behavior gates on meter_unit), an append-only meter log, items with
+-- date and/or meter cadence (whichever first), and a completion history.
+-- next_due_* are materialized and recomputed only on completion / cadence
+-- edits; completion RE-ANCHORS the schedule (unlike task recurrence, which
+-- anchors to the original due date). See migration 0047 for the rationale.
+
+create table if not exists assets (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  kind text not null default 'other' check (kind in
+    ('vehicle','appliance','home','device','equipment','other')),
+  domain_id uuid references stewardship_domains(id) on delete set null,
+  -- Free text ('km','mi','hours'…). Null = date-only asset. Locked once a
+  -- reading exists (app-enforced) — relabelling would change history.
+  meter_unit text,
+  metadata jsonb not null default '{}'::jsonb,
+  notes text,
+  -- Only active assets generate tasks, attention, and reading nags (0048).
+  lifecycle text not null default 'active' check (lifecycle in
+    ('active','stored','sold','archived')),
+  -- Photos (0049): StoredAttachment[] like notes/journal; [0] is the hero.
+  attachments jsonb not null default '[]'::jsonb,
+  -- Markdown overview + optimistic-concurrency version (0050); history in doc_revisions.
+  doc_md text,
+  doc_version integer not null default 1,
+  archived_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_assets_attachments on assets using gin(attachments);
+
+-- Every saved version of an entity's doc_md (0050). No FK — polymorphic.
+create table if not exists doc_revisions (
+  id uuid primary key default gen_random_uuid(),
+  entity_type text not null check (entity_type in ('asset','project','domain')),
+  entity_id uuid not null,
+  version integer not null,
+  body text,
+  actor text,
+  created_at timestamptz not null default now(),
+  constraint doc_revisions_entity_version_unique unique (entity_type, entity_id, version)
+);
+
+create index if not exists idx_doc_revisions_entity
+  on doc_revisions(entity_type, entity_id, version desc);
+
+drop trigger if exists trg_assets_updated_at on assets;
+create trigger trg_assets_updated_at
+  before update on assets
+  for each row execute function set_updated_at();
+
+-- The asset is the area (0049): improvement work groups under it. projects
+-- is declared before assets, so the FK lands here rather than inline.
+alter table projects
+  add column if not exists asset_id uuid references assets(id) on delete set null;
+create index if not exists idx_projects_asset
+  on projects(asset_id) where asset_id is not null;
+
+create table if not exists asset_meter_readings (
+  id uuid primary key default gen_random_uuid(),
+  asset_id uuid not null references assets(id) on delete cascade,
+  reading numeric not null check (reading >= 0),
+  recorded_on date not null,
+  source text not null default 'manual' check (source in
+    ('manual','completion','agent','import')),
+  notes text,
+  -- Idempotency + provenance + corrections (migration 0048). Corrections
+  -- VOID rather than delete so history keeps its meaning.
+  event_key text,
+  actor text,
+  voided_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_asset_meter_readings_asset
+  on asset_meter_readings(asset_id, recorded_on desc);
+create unique index if not exists idx_asset_meter_readings_event_key
+  on asset_meter_readings(event_key) where event_key is not null;
+
+create table if not exists maintenance_items (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  notes text,
+  asset_id uuid references assets(id) on delete set null,
+  -- Null = inherit the asset's domain at read time, else Inbox (0048).
+  domain_id uuid references stewardship_domains(id),
+  -- Obligation policy (0048). interval: re-anchor from completion. expiry:
+  -- next due = issued_until. prepaid_meter: next due meter = purchased_to.
+  -- on_condition: no interval; completion records a finding + next review.
+  policy text not null default 'interval' check (policy in
+    ('interval','expiry','prepaid_meter','on_condition')),
+  -- Grouping for the per-asset schedule view (Fluids, Brakes, Legal…).
+  system text,
+  -- One date unit (days XOR months) and/or a meter interval. App-enforced:
+  -- interval_meter requires the asset to have a meter_unit (cross-table).
+  interval_days integer check (interval_days > 0),
+  interval_months integer check (interval_months > 0),
+  interval_meter numeric check (interval_meter > 0),
+  lead_days integer not null default 14 check (lead_days >= 0),
+  -- Null → 10% of interval_meter at read time.
+  lead_meter numeric check (lead_meter >= 0),
+  next_due_date date,
+  next_due_meter numeric,
+  last_completed_on date,
+  last_completed_meter numeric,
+  generated_task_id uuid references tasks(id) on delete set null,
+  active boolean not null default true,
+  metadata jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint maintenance_items_has_interval check (
+    policy <> 'interval'
+    or interval_days is not null or interval_months is not null
+    or interval_meter is not null
+  ),
+  constraint maintenance_items_one_date_unit check (
+    interval_days is null or interval_months is null
+  )
+);
+
+create index if not exists idx_maintenance_items_due
+  on maintenance_items(active, next_due_date);
+create index if not exists idx_maintenance_items_asset
+  on maintenance_items(asset_id) where asset_id is not null;
+
+drop trigger if exists trg_maintenance_items_updated_at on maintenance_items;
+create trigger trg_maintenance_items_updated_at
+  before update on maintenance_items
+  for each row execute function set_updated_at();
+
+create table if not exists maintenance_logs (
+  id uuid primary key default gen_random_uuid(),
+  item_id uuid not null references maintenance_items(id) on delete cascade,
+  completed_on date not null,
+  meter_at_completion numeric check (meter_at_completion >= 0),
+  notes text,
+  cost numeric check (cost >= 0),
+  source text not null default 'manual' check (source in
+    ('manual','task','agent','import')),
+  -- Idempotent events with provenance + linked evidence (migration 0048).
+  event_key text,
+  actor text,
+  run_id text,
+  reading_id uuid references asset_meter_readings(id) on delete set null,
+  -- Seed evidence entered at item creation; editable, not deletable.
+  is_baseline boolean not null default false,
+  -- Policy-specific completion facts: expiry / prepaid_meter / on_condition.
+  issued_until date,
+  purchased_to numeric,
+  finding text,
+  next_review_on date,
+  next_review_meter numeric,
+  -- The service visit this completion happened at (0051); FK added below.
+  visit_id uuid,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_maintenance_logs_item
+  on maintenance_logs(item_id, completed_on desc);
+create unique index if not exists idx_maintenance_logs_event_key
+  on maintenance_logs(event_key) where event_key is not null;
+create index if not exists idx_maintenance_logs_visit
+  on maintenance_logs(visit_id) where visit_id is not null;
+
+-- Service visits (0051): one event — several items on one odometer with
+-- one invoice. planned = a saved work order; done = the record. The
+-- visit's `total` is the invoice; each log's `cost` is the allocated line.
+create table if not exists maintenance_visits (
+  id uuid primary key default gen_random_uuid(),
+  asset_id uuid not null references assets(id) on delete cascade,
+  status text not null default 'planned' check (status in ('planned','done')),
+  planned_on date,
+  visited_on date,
+  meter numeric check (meter >= 0),
+  reading_id uuid references asset_meter_readings(id) on delete set null,
+  provider text,
+  invoice_number text,
+  currency text,
+  total numeric check (total >= 0),
+  notes text,
+  attachments jsonb not null default '[]'::jsonb,
+  event_key text,
+  actor text,
+  run_id text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint maintenance_visits_done_has_date check (status <> 'done' or visited_on is not null)
+);
+
+create index if not exists idx_maintenance_visits_asset
+  on maintenance_visits(asset_id, visited_on desc);
+create index if not exists idx_maintenance_visits_asset_status
+  on maintenance_visits(asset_id, status);
+create unique index if not exists idx_maintenance_visits_event_key
+  on maintenance_visits(event_key) where event_key is not null;
+
+drop trigger if exists trg_maintenance_visits_updated_at on maintenance_visits;
+create trigger trg_maintenance_visits_updated_at
+  before update on maintenance_visits
+  for each row execute function set_updated_at();
+
+create table if not exists maintenance_visit_items (
+  visit_id uuid not null references maintenance_visits(id) on delete cascade,
+  item_id uuid not null references maintenance_items(id) on delete cascade,
+  notes text,
+  position integer not null default 0,
+  -- Null while planned; done or skipped once recorded (0052).
+  outcome text check (outcome is null or outcome in ('done','skipped')),
+  skip_reason text,
+  primary key (visit_id, item_id)
+);
+
+alter table maintenance_logs
+  drop constraint if exists maintenance_logs_visit_id_fkey;
+alter table maintenance_logs
+  add constraint maintenance_logs_visit_id_fkey
+  foreign key (visit_id) references maintenance_visits(id) on delete set null;
 
 
 -- ─────────────────────────────────────────────────────────────────────────

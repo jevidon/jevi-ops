@@ -7,7 +7,7 @@ import {
 } from '@/components/detail/DetailShell';
 import { EditDrawer } from '@/components/detail/EditDrawer';
 import { PinButton } from '@/components/PinButton';
-import { domainsApi, tasksApi, workApi, ApiError, type WorkDomain } from '@/lib/api';
+import { assetsApi, domainsApi, tasksApi, workApi, ApiError, type WorkDomain } from '@/lib/api';
 import type { Domain, Task } from '@jevi-ops/shared';
 import { domainColor } from '@/lib/domain-colors';
 import { EditDomainForm } from './edit-domain-form';
@@ -15,8 +15,10 @@ import { CadenceEditor } from './cadence-editor';
 import { MarkShipped } from './mark-shipped';
 import { IllustrationControls } from './illustration-controls';
 import { ProjectQuickCreate } from './quick-create';
+import { AssignAsset } from './assign-asset';
+import { DocPanel } from '@/components/doc/DocPanel';
 import { DomainIllustration } from '../domain-illustration';
-import { ProjectCard, ContentRow, FittedArt } from '../../work/cards';
+import { ProjectCard, ContentRow, AssetCard, FittedArt } from '../../work/cards';
 import { PRIMARY_CADENCE_RULES, type CadenceRuleType } from './cadence-rules';
 import { getAppTimezone } from '@/lib/app-settings';
 import { todayIsoDate } from '@/lib/today';
@@ -94,14 +96,22 @@ export default async function DomainDetailPage({
   let openTasks: Task[] = [];
   let waitingTasks: Task[] = [];
   let work: WorkDomain | null = null;
+  // Unassigned, active assets — the "Assign existing…" picker's options.
+  let unassignedAssets: Array<{ id: string; name: string; kind: string }> = [];
   let errorMessage: string | null = null;
 
-  const [domainRes, tasksRes, waitingRes, workRes] = await Promise.allSettled([
+  const [domainRes, tasksRes, waitingRes, workRes, assetsRes] = await Promise.allSettled([
     domainsApi.get(id),
     tasksApi.list({ domain_id: id, status: 'open' }),
     tasksApi.list({ domain_id: id, status: 'waiting' }),
     workApi.get(),
+    assetsApi.list(),
   ]);
+  if (assetsRes.status === 'fulfilled') {
+    unassignedAssets = assetsRes.value.assets
+      .filter((a) => a.domain_id == null && a.lifecycle === 'active')
+      .map(({ id: aid, name, kind }) => ({ id: aid, name, kind }));
+  }
 
   if (domainRes.status === 'fulfilled') {
     domain = domainRes.value;
@@ -226,6 +236,7 @@ export default async function DomainDetailPage({
             <>
               {/* Inbox is a system domain — pinning it would be noise. */}
               <PinButton targetType="domain" targetId={domain.id} path={`/domains/${domain.id}`} />
+              <ActionButton href={`/maintenance/assets?domain_id=${domain.id}`}>＋ Asset</ActionButton>
               <ActionButton href={`/projects/new?domain_id=${domain.id}`}>＋ Project</ActionButton>
               <ActionButton href={`/tasks/new?domain_id=${domain.id}&from=/domains/${domain.id}`}>＋ Task</ActionButton>
               <EditDrawer title="Edit domain">
@@ -246,7 +257,14 @@ export default async function DomainDetailPage({
           <Stat
             label="Projects"
             value={work ? work.projects.length : '—'}
-            sub={work && work.content.length > 0 ? `${work.content.length} content in motion` : undefined}
+            sub={
+              work && (work.assets.length > 0 || work.content.length > 0)
+                ? [
+                    work.assets.length > 0 ? `${work.assets.length} asset${work.assets.length === 1 ? '' : 's'}` : null,
+                    work.content.length > 0 ? `${work.content.length} content in motion` : null,
+                  ].filter(Boolean).join(' · ')
+                : undefined
+            }
           />
         )}
         <Stat
@@ -276,10 +294,44 @@ export default async function DomainDetailPage({
                 </p>
               </div>
             ) : (
+              <>
+              {/* The overview document (0050) — the domain's living page. */}
+              <DetailSection label="Overview" className="mt-0">
+                <DocPanel
+                  entity="domain"
+                  id={domain.id}
+                  body={domain.doc_md ?? null}
+                  version={domain.doc_version ?? 1}
+                  promote={{ domainId: domain.id, source: `overview of ${domain.name}`, revalidate: `/domains/${domain.id}` }}
+                  emptyHint="The living page for this domain — what it is for, how it runs, standing decisions, links. Markdown; a checklist line can become a task with → task."
+                />
+              </DetailSection>
+              {/* Assets band (0049): the domain's assigned assets — the asset
+                  is the area. Shown when the domain has any, or when there's
+                  an unassigned asset to offer. */}
+              {work && (work.assets.length > 0 || unassignedAssets.length > 0) && (
+                <DetailSection
+                  label="Assets"
+                  count={work.assets.length}
+                  action={<AssignAsset domainId={domain.id} unassigned={unassignedAssets} />}
+                >
+                  {work.assets.length > 0 ? (
+                    <div
+                      className="grid gap-3.5 mb-3"
+                      style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(258px, 1fr))' }}
+                    >
+                      {work.assets.map((a) => <AssetCard key={a.id} a={a} color={color} />)}
+                    </div>
+                  ) : (
+                    <p className="font-sans text-[13px] text-ink-3 italic py-1 mb-3">
+                      No assets assigned here yet — assign one above, or create one with ＋ Asset.
+                    </p>
+                  )}
+                </DetailSection>
+              )}
               <DetailSection
                 label="Projects & content"
                 count={work ? work.projects.length + work.content.length : undefined}
-                className="mt-0"
               >
                 {work && work.projects.length > 0 && (
                   <div
@@ -313,6 +365,7 @@ export default async function DomainDetailPage({
                   </Link>
                 </div>
               </DetailSection>
+              </>
             )}
 
             {/* Task lists render only for Inbox — triage IS the page there.

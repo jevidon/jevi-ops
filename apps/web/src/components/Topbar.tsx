@@ -24,11 +24,15 @@ const CRUMBS: Record<string, { label: string; sub?: string }> = {
   companies: { label: 'Companies', sub: 'CRM' },
   library: { label: 'Library', sub: 'Archive' },
   routines: { label: 'Routines', sub: 'Daily habits' },
+  maintenance: { label: 'Maintenance', sub: 'Recurring upkeep' },
   // Detail routes whose indexes redirect to /work — pages under these register
   // live trails when they have ancestors; this fallback covers the rest
   // (domain pages, /projects/new).
   domains: { label: 'Domains', sub: 'Domain' },
   projects: { label: 'Domains', sub: 'Project' },
+  // The asset is the area (0049): an assigned asset trails its domain; an
+  // unassigned one falls back to this.
+  assets: { label: 'Maintenance', sub: 'Asset' },
   attention: { label: 'Attention' },
   notifications: { label: 'Notifications' },
   settings: { label: 'Settings' },
@@ -45,7 +49,8 @@ const CRUMBS: Record<string, { label: string; sub?: string }> = {
 const TRAIL_ROUTES = [
   /^\/tasks\/new$/,          // registers [Tasks]
   /^\/tasks\/[0-9a-f-]{8,}$/,    // task detail — full ancestor trail
-  /^\/projects\/[0-9a-f-]{8,}$/, // project detail — domain trail
+  /^\/projects\/[0-9a-f-]{8,}$/, // project detail — domain (/ asset) trail
+  /^\/assets\/[0-9a-f-]{8,}$/,   // asset detail — domain trail (0049)
 ];
 
 function dispatchOpenCapture() {

@@ -134,7 +134,7 @@ export const ingestRoutes: FastifyPluginAsync = async (app) => {
 
     let result;
     try {
-      result = await parseTranscript(transcript, db);
+      result = await parseTranscript(transcript, db, { log: req.log });
     } catch (err) {
       req.log.error({ err }, 'webhook capture parser failed');
       return reply.code(502).send({

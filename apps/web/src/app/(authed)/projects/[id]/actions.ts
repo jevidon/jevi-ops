@@ -31,7 +31,7 @@ export async function setProjectColorAction(formData: FormData) {
 // dropdown, but burying status three clicks deep meant users couldn't
 // find it. Surfacing it as a chip row near the header makes the lifecycle
 // (active → done / archived) a visible affordance.
-const VALID_STATUSES = ['active', 'paused', 'done', 'archived'] as const;
+const VALID_STATUSES = ['idea', 'active', 'paused', 'done', 'archived'] as const;
 type ProjectStatus = (typeof VALID_STATUSES)[number];
 
 export async function setProjectStatusAction(formData: FormData) {

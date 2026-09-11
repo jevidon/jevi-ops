@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { BottomSheet } from '../BottomSheet';
-import { submitVoiceAudio, type VoiceResult } from '@/lib/voice-actions';
+import { submitVoiceAudio, warmCapture, type VoiceResult } from '@/lib/voice-actions';
 import { useAudioCapture, getAudioSupport, type AudioSupport } from '@/lib/use-audio-capture';
 import { CaptureTypeGrid } from './CaptureTypeGrid';
 import { CaptureTextBox } from './CaptureTextBox';
@@ -44,6 +44,13 @@ export function CapturePortal() {
   }, []);
 
   const close = useCallback(() => setOpen(false), []);
+
+  // Warm the parser's prompt cache the moment capture becomes likely —
+  // portal open (typing) or recording start — so the local model's prefill
+  // of the system prompt + context runs while the user is still composing.
+  useEffect(() => {
+    if (open || recording) void warmCapture();
+  }, [open, recording]);
 
   // Broadcast recorder state so the tab bar's mark can pulse its disc while
   // listening (the star stays a dumb dispatcher with no shared state).

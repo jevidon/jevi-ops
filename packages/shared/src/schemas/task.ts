@@ -4,7 +4,8 @@ import { z } from 'zod';
 // tasks route ships its waiting ripple, the API rejects 'waiting' writes —
 // this shared enum leads the route by one PR so the web types can build.
 export const TaskStatusSchema = z.enum(['open', 'waiting', 'done']);
-export const TaskSourceSchema = z.enum(['manual', 'voice', 'email', 'observation', 'import']);
+// 'maintenance' = auto-created by the maintenance awareness sweep (0047).
+export const TaskSourceSchema = z.enum(['manual', 'voice', 'email', 'observation', 'import', 'maintenance']);
 
 // Fields that can be explicitly cleared in updates need .nullable() —
 // .optional() alone only accepts undefined (omit the field). Sending null
@@ -33,6 +34,8 @@ export const TaskSchema = z.object({
   recurrence_rule: nullableString(),
   reminder_offsets: z.array(z.number()).default([]),
   source: TaskSourceSchema,
+  // Durable occurrence identity for generated tasks (0048).
+  source_ref: nullableString(),
   top3_for_date: nullableDate(),
   created_at: z.string().datetime({ offset: true }),
   completed_at: z.string().datetime({ offset: true }).nullable().optional(),

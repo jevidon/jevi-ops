@@ -70,7 +70,7 @@ export function extensionForImage(mime: string): string | null {
 export async function uploadImage(params: {
   bytes: Buffer;
   contentType: string;
-  prefix: 'notes' | 'journal' | 'other';
+  prefix: 'notes' | 'journal' | 'assets' | 'other';
   alt?: string | null;
   titleHint?: string | null;
 }): Promise<StoredAttachment> {

@@ -2,9 +2,10 @@
 
 import { useLayoutEffect, useRef, useState, useTransition } from 'react';
 import Link from 'next/link';
-import type { WorkProjectCard, WorkContentRow } from '@/lib/api';
+import type { WorkProjectCard, WorkContentRow, WorkAssetCard } from '@/lib/api';
 import { proceduralIllustration } from '@jevi-ops/shared';
 import { Pill } from '@/components/Pill';
+import { Icon } from '@/components/Icon';
 import { flipHolderAction } from './actions';
 
 // Shared Work-map building blocks (extracted from work-view.tsx when the
@@ -102,6 +103,9 @@ export function ProjectCard({ p, color }: { p: WorkProjectCard; color: string })
           {p.kind === 'retainer'
             ? p.cycle ? `Retainer · day ${p.cycle.day}/${p.cycle.length}` : 'Retainer'
             : p.target ? `Target ${p.target.slice(5)}` : 'No target'}
+          {/* The asset this work groups under (0049) — stays in the flat
+              grid, chipped, rather than nesting under the asset card. */}
+          {p.asset && ` · ${p.asset.name}`}
           {p.paused && ' · paused'}
         </div>
         {pct != null && (
@@ -123,6 +127,77 @@ export function ProjectCard({ p, color }: { p: WorkProjectCard; color: string })
             waiting on {p.waitOn} <span className={ageClass(p.waitDays)}>{p.waitDays}d</span>
           </div>
         )}
+      </div>
+    </Link>
+  );
+}
+
+// The asset card (0049) — the ProjectCard shell (3px domain cap, serif
+// name, mono meta, counts) for an asset assigned to the domain. Meta line is
+// the meter; the foot is maintenance due counts and grouped projects. The
+// pill is the server-derived urgency; "Due soon" overrides the label when
+// the worst item is inside its lead window but not yet due. Data confidence
+// (no baseline / no reading / stale) prints separately — an unknown meter
+// axis is a question, never a calm card.
+const DATA_NOTE: Record<WorkAssetCard['data'], string | null> = {
+  complete: null,
+  needs_baseline: 'needs a baseline reading',
+  needs_reading: 'no reading yet',
+  stale_reading: 'reading stale',
+};
+
+export function AssetCard({ a, color }: { a: WorkAssetCard; color: string }) {
+  const m = a.maintenance;
+  const due = m.overdue + m.due;
+  const dataNote = DATA_NOTE[a.data];
+  const meter =
+    a.meter_unit == null
+      ? null
+      : a.latest_reading != null
+        ? `${a.latest_reading.toLocaleString('en-US')} ${a.meter_unit}`
+        : `no ${a.meter_unit} reading`;
+  return (
+    <Link
+      href={`/assets/${a.id}`}
+      className={`block rounded overflow-hidden border bg-bg transition-colors ${
+        a.flagged ? 'border-[color:rgb(var(--accent)_/_0.55)] hover:border-accent' : 'border-line hover:border-line-strong'
+      }`}
+    >
+      <div className="h-[3px]" style={{ background: color }} />
+      <div className="px-3.5 pt-3.5 pb-3">
+        <div className="flex items-center justify-between gap-2.5 mb-2">
+          <span className="inline-flex items-center gap-2.5 min-w-0">
+            {a.hero ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={a.hero} alt="" className="w-10 h-10 rounded object-cover shrink-0 border border-line" />
+            ) : (
+              <span className="w-10 h-10 rounded bg-surface-2 border border-line shrink-0 grid place-items-center text-ink-3" aria-hidden>
+                <Icon name="maintenance" size={18} />
+              </span>
+            )}
+            <span className="inline-flex items-baseline gap-1.5 min-w-0">
+              {a.flagged && <span className="w-1.5 h-1.5 rounded-full bg-accent shrink-0 translate-y-[-1px]" aria-hidden />}
+              <span className="font-serif text-[16.5px] font-medium leading-[1.2] tracking-[-0.01em] text-ink truncate">{a.name}</span>
+            </span>
+          </span>
+          <Pill state={a.urgency}>{a.worst === 'due_soon' ? 'Due soon' : undefined}</Pill>
+        </div>
+        <div className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3 mb-[11px] whitespace-nowrap overflow-hidden text-ellipsis">
+          {a.kind}
+          {meter && ` · ${meter}`}
+          {a.latest_reading_days_ago != null && a.latest_reading_days_ago > 0 && ` · ${a.latest_reading_days_ago}d ago`}
+        </div>
+        <div className="flex items-center justify-between mt-2.5">
+          <span className="font-mono text-[11px] text-ink-3">
+            {due > 0 && <span className="text-accent">{due} due · </span>}
+            {m.due_soon > 0 && `${m.due_soon} soon · `}
+            {m.total} item{m.total === 1 ? '' : 's'}
+          </span>
+          <span className="font-mono text-[10.5px] text-ink-4">
+            {a.projects} project{a.projects === 1 ? '' : 's'}
+          </span>
+        </div>
+        {dataNote && <div className="mt-1 font-mono text-[10px] text-ink-3">{dataNote}</div>}
       </div>
     </Link>
   );

@@ -251,9 +251,9 @@ export function TasksView({
             <h1 className="font-serif text-[40px] font-medium leading-[1.02] tracking-[-0.022em] text-ink">Tasks</h1>
           </div>
           <div className="flex items-center gap-4 shrink-0">
-            {/* Fork: recurring-upkeep rotation subview. */}
+            {/* Fork: the maintenance module (0047) owns recurring upkeep. */}
             <Link
-              href="/tasks/maintenance"
+              href="/maintenance"
               className="font-mono text-[10px] uppercase tracking-[0.09em] text-ink-3 hover:text-accent transition-colors"
             >
               Maintenance ↻

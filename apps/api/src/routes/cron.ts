@@ -9,6 +9,7 @@ import { runRoutineReminders, runRoutineMissed } from '../lib/routine-reminders.
 import { runOverdue } from '../lib/overdue.js';
 import { runDailySummary } from '../lib/daily-summary.js';
 import { runCalendarSync } from '../lib/calendar-sync.js';
+import { runMaintenanceSweep } from '../lib/maintenance-sweep.js';
 import { isPushoverConfigured } from '../lib/pushover.js';
 
 // /api/cron/* — secret-gated endpoints external schedulers hit on a cadence.
@@ -286,4 +287,34 @@ export const cronRoutes: FastifyPluginAsync = async (app) => {
   };
   app.get('/api/cron/attention', attentionHandler);
   app.post('/api/cron/attention', attentionHandler);
+
+  // /api/cron/maintenance — daily (schedule alongside /api/cron/attention).
+  // Creates a real task for every maintenance item entering its due window
+  // (lib/maintenance-sweep.ts). Deliberately NOT folded into runAttention:
+  // attention rules are pure candidate generators, and this creates rows.
+  // Idempotent — an item with a live generated task is skipped.
+  const maintenanceHandler = async (req: FastifyRequest, reply: import('fastify').FastifyReply) => {
+    if (!env.CRON_SECRET) {
+      return reply.code(503).send({ error: 'cron_disabled', reason: 'CRON_SECRET not set' });
+    }
+    if (!checkSecret(readSecret(req))) {
+      return reply.code(401).send({ error: 'unauthorized' });
+    }
+    if (!isDatabaseConfigured()) {
+      return reply.code(503).send({ error: 'database_not_configured' });
+    }
+    try {
+      const result = await runMaintenanceSweep(getDb());
+      req.log.info({ event: 'maintenance_sweep', ...result }, 'maintenance cron complete');
+      return reply.code(200).send(result);
+    } catch (err) {
+      req.log.error({ err }, 'maintenance cron failed');
+      return reply.code(500).send({
+        error: 'maintenance_failed',
+        message: err instanceof Error ? err.message : 'unknown',
+      });
+    }
+  };
+  app.get('/api/cron/maintenance', maintenanceHandler);
+  app.post('/api/cron/maintenance', maintenanceHandler);
 };
