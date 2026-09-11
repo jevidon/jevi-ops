@@ -1,5 +1,6 @@
 'use client';
 
+import { createClientId } from '../../lib/client-id';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { OnboardingModuleDefinition, OnboardingPreview, OnboardingSession, OnboardingStepDefinition, OnboardingStepState } from '@jevi-ops/shared/schemas';
 import { completeOnboardingAction, loadOnboardingAction, previewOnboardingAction, saveOnboardingStepAction, transitionOnboardingAction } from '../../app/(authed)/onboarding/actions';
@@ -208,7 +209,7 @@ export function OnboardingShell({ initialSession, module, renderStep, exitHref =
       const result = await previewOnboardingAction({ id: saved.id, expected_revision: saved.revision });
       if (!result.ok) { await report(result); return; }
       setPreview(result.value);
-      operationKey.current = crypto.randomUUID();
+      operationKey.current = createClientId();
       setError(null);
     } finally { setBusy(false); }
   };

@@ -1,5 +1,6 @@
 'use client';
 
+import { createClientId } from '../../../lib/client-id';
 import { useCallback, useEffect, useRef, useState, useTransition } from 'react';
 import { askAction, transcribeAudioAction, type AskResult } from './actions';
 
@@ -48,7 +49,7 @@ export function ChatThread() {
   const submit = useCallback(() => {
     const question = input.trim();
     if (!question || pending) return;
-    const id = crypto.randomUUID();
+    const id = createClientId();
 
     // Build the history we'll send from the closure-captured `turns`
     // (NOT from inside a setState updater — startTransition can't be

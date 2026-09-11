@@ -1,5 +1,6 @@
 'use client';
-import { createContext, useContext, useId, useCallback, useEffect, useRef, useState, useTransition } from 'react';
+
+import { createClientId } from '../../lib/client-id';import { createContext, useContext, useId, useCallback, useEffect, useRef, useState, useTransition } from 'react';
 import type { CompleteVisitBody, MaintenanceItem, Visit, VisitLineInput } from '@/lib/api';
 import type { SourceCandidate, SourceCandidateRow, SourceSubject, SourceWithCandidates } from './types';
 import { acceptSourceCandidateAction, addSourceAction, loadSourcesAction, removeSourceAction, removeSourceCandidateAction, saveSourceCandidateAction } from './actions';
@@ -7,7 +8,7 @@ import { acceptSourceCandidateAction, addSourceAction, loadSourcesAction, remove
 const input = 'block w-full border border-line bg-transparent px-2 py-1.5 text-sm text-ink';
 const button = 'border border-line px-3 py-2 text-sm text-ink disabled:opacity-40 hover:border-ink';
 const numberOrNull = (value: string) => value.trim() === '' ? null : Number(value);
-const newKey = () => crypto.randomUUID();
+const newKey = () => createClientId();
 type Guard = { dirty?: boolean; busy?: boolean };
 const SourceGuardContext = createContext<(id: string, patch: Guard | null) => void>(() => {});
 function useSourceGuard(pending: boolean) {

@@ -1,5 +1,6 @@
 'use client';
 
+import { createClientId } from '../../../lib/client-id';
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -121,7 +122,7 @@ function StructureStep({ values, onChange, context, refresh, save, session, onSe
   return <div className="space-y-4">
     <p>A domain is a long-lived part of life or work, such as Home. A vehicle is an asset within a domain. A project has a finite outcome, such as fitting a roof rack; an ongoing general area remains available for contexts that are not assets. Routine maintenance uses the maintenance schedule.</p>
     <p>Choose existing records explicitly to reuse them. Similar names never merge or rename records. Applying this structure saves it immediately.</p>
-    <div className="flex flex-wrap gap-2">{['Home', 'Family', 'Vehicles'].map((name) => <button key={name} type="button" className={button} disabled={busy} onClick={() => edit({ ...structure, domains: [...structure.domains, { key: crypto.randomUUID(), name, selected: true }] })}>Suggest {name}</button>)}</div>
+    <div className="flex flex-wrap gap-2">{['Home', 'Family', 'Vehicles'].map((name) => <button key={name} type="button" className={button} disabled={busy} onClick={() => edit({ ...structure, domains: [...structure.domains, { key: createClientId(), name, selected: true }] })}>Suggest {name}</button>)}</div>
     {structure.domains.map((domain, index) => <fieldset key={domain.key} disabled={busy || Boolean(preview)} className="space-y-2 rounded border border-line p-3">
       <legend>Domain {index + 1}</legend>
       <label><input type="checkbox" checked={domain.selected} onChange={(e) => edit({ ...structure, domains: structure.domains.map((d, i) => i === index ? { ...d, selected: e.target.checked } : d) })} /> Include this domain</label>
@@ -132,7 +133,7 @@ function StructureStep({ values, onChange, context, refresh, save, session, onSe
       <label className="block">Domain name<input className={input} value={domain.name} readOnly={Boolean(domain.existing_id) || previouslyApplied.has(domain.key)} onChange={(e) => edit({ ...structure, domains: structure.domains.map((d, i) => i === index ? { ...d, name: e.target.value } : d) })} /></label>
       {previouslyApplied.has(domain.key) && <p className="text-sm">Already saved. This setup will reuse its stable record. Rename it through the normal domain editor.</p>}
     </fieldset>)}
-    <button type="button" className={button} disabled={busy || Boolean(preview)} onClick={() => edit({ ...structure, domains: [...structure.domains, { key: crypto.randomUUID(), name: '', selected: true }] })}>Add domain</button>
+    <button type="button" className={button} disabled={busy || Boolean(preview)} onClick={() => edit({ ...structure, domains: [...structure.domains, { key: createClientId(), name: '', selected: true }] })}>Add domain</button>
     {structure.areas.map((area, index) => <fieldset key={area.key} disabled={busy || Boolean(preview)} className="space-y-2 rounded border border-line p-3">
       <legend>General area {index + 1}</legend>
       <label><input type="checkbox" checked={area.selected} onChange={(e) => edit({ ...structure, areas: structure.areas.map((a, i) => i === index ? { ...a, selected: e.target.checked } : a) })} /> Include this area</label>
@@ -143,7 +144,7 @@ function StructureStep({ values, onChange, context, refresh, save, session, onSe
       <label className="block">Area name<input className={input} value={area.name} readOnly={Boolean(area.existing_id)} onChange={(e) => edit({ ...structure, areas: structure.areas.map((a, i) => i === index ? { ...a, name: e.target.value } : a) })} /></label>
       <label className="block">Domain<select className={input} value={area.domain_key ?? ''} onChange={(e) => edit({ ...structure, areas: structure.areas.map((a, i) => i === index ? { ...a, domain_key: e.target.value || null } : a) })}><option value="">Unassigned</option>{structure.domains.filter((d) => d.selected).map((d) => <option key={d.key} value={d.key}>{d.name}</option>)}</select></label>
     </fieldset>)}
-    <button type="button" className={button} disabled={busy || Boolean(preview)} onClick={() => edit({ ...structure, areas: [...structure.areas, { key: crypto.randomUUID(), name: '', selected: true }] })}>Add general area</button>
+    <button type="button" className={button} disabled={busy || Boolean(preview)} onClick={() => edit({ ...structure, areas: [...structure.areas, { key: createClientId(), name: '', selected: true }] })}>Add general area</button>
     {context.capabilities.some((c) => c.id === 'structured_interpretation' && c.status === 'tested') && <div className="space-y-3 rounded border border-line p-3">
       <label className="block">Describe the structure you want<textarea className={input} value={text} onChange={(e) => setText(e.target.value)} /></label>
       <p className="text-sm">This text is sent to your configured model only when you request suggestions.</p>
@@ -153,7 +154,7 @@ function StructureStep({ values, onChange, context, refresh, save, session, onSe
     <button type="button" className={button} disabled={busy} onClick={async () => {
       setBusy(true); setError(null);
       try { const saved = await save(); if (!saved) return; const result = await previewOnboardingAction({ id: session.id, expected_revision: saved.revision, action_id: 'structure' });
-        if (result.ok) { setPreview(result.value); key.current = crypto.randomUUID(); } else setError(result.error.replaceAll('_', ' '));
+        if (result.ok) { setPreview(result.value); key.current = createClientId(); } else setError(result.error.replaceAll('_', ' '));
       } finally { setBusy(false); }
     }}>Preview structure</button>
     {preview && <div className="space-y-3 rounded border border-line p-3"><h3 className="font-semibold">Structure to save now</h3><ul>{preview.changes.map((change, index) => <li key={index}>{change.label}</li>)}</ul>
@@ -180,7 +181,7 @@ function VehicleStep({ values, onChange, session, save, context, blockNavigation
     {context.children.length > 0 && <ul>{context.children.map((child) => <li key={child.id}><Link className="underline" href={`/onboarding/${child.id}`}>Vehicle setup — {child.status.replaceAll('_', ' ')}</Link></li>)}</ul>}
     <label className="block">Vehicle domain (optional)<select className={input} value={String(values.domain_id ?? '')} onChange={(event) => onChange({ ...values, domain_id: event.target.value || null })}><option value="">Choose later</option>{context.domains.map((domain) => <option key={domain.id} value={domain.id}>{domain.name}</option>)}</select></label>
     <button type="button" className={button} disabled={busy} onClick={async () => {
-      setBusy(true); key.current ??= crypto.randomUUID();
+      setBusy(true); key.current ??= createClientId();
       try {
         if (!await save()) return;
         const result = await startOnboardingAction({ module_id: 'vehicle', creation_key: key.current, entry_point: 'first_run', parent_session_id: session.id,
