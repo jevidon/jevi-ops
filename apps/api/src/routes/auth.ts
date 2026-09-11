@@ -2,6 +2,8 @@ import type { FastifyPluginAsync } from 'fastify';
 import { createHash, randomBytes } from 'node:crypto';
 import { desc, eq } from 'drizzle-orm';
 import { z } from 'zod';
+import { RESEARCH_WORKER_SCOPES, ResearchWorkerScopeSchema } from '@jevi-ops/shared';
+import { research_workers } from '../db/research-schema.js';
 import { getDb } from '../lib/db.js';
 import { api_tokens, auth_user } from '../db/schema.js';
 import { verifyPassword } from '../lib/passwords.js';
@@ -26,6 +28,12 @@ const LoginSchema = z.object({
 const CreateTokenSchema = z.object({
   name: z.string().trim().min(1).max(80),
   kind: z.enum(['agent', 'device']).default('agent'),
+  permission_profile: z.enum(['legacy', 'research_worker']).default('legacy'),
+  worker_id: z.string().uuid().optional(),
+  scopes: z.array(ResearchWorkerScopeSchema).min(1).optional(),
+}).superRefine((value, ctx) => {
+  if (value.permission_profile === 'research_worker' && !value.worker_id) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['worker_id'], message: 'A research credential must be bound to a worker.' });
+  if (value.permission_profile === 'legacy' && (value.worker_id || value.scopes)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['permission_profile'], message: 'Research permissions require a dedicated research_worker credential.' });
 });
 
 // Tiny in-memory lockout: after MAX_FAILS failed logins, refuse attempts
@@ -101,6 +109,10 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
     if (!parsed.success) {
       return reply.code(400).send({ error: 'invalid_payload', details: parsed.error.flatten().fieldErrors });
     }
+    if (parsed.data.permission_profile === 'research_worker') {
+      const [worker] = await getDb().select({ id: research_workers.id }).from(research_workers).where(eq(research_workers.id, parsed.data.worker_id!));
+      if (!worker) return reply.code(400).send({ error: 'worker_not_found' });
+    }
     // ops_ prefix makes tokens greppable and lets the auth plugin route
     // them without attempting JWT parsing.
     const value = `ops_${randomBytes(32).toString('base64url')}`;
@@ -109,9 +121,12 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
       .values({
         name: parsed.data.name,
         kind: parsed.data.kind,
+        permission_profile: parsed.data.permission_profile,
+        worker_id: parsed.data.worker_id ?? null,
+        scopes: parsed.data.permission_profile === 'research_worker' ? [...new Set(parsed.data.scopes ?? RESEARCH_WORKER_SCOPES)] : [],
         token_hash: hashApiToken(value),
       })
-      .returning({ id: api_tokens.id, name: api_tokens.name, kind: api_tokens.kind, created_at: api_tokens.created_at });
+      .returning({ id: api_tokens.id, name: api_tokens.name, kind: api_tokens.kind, permission_profile: api_tokens.permission_profile, worker_id: api_tokens.worker_id, scopes: api_tokens.scopes, created_at: api_tokens.created_at });
     if (!row) throw app.httpErrors.internalServerError('insert_returned_no_row');
     // The token value is returned exactly once. Only the hash is stored.
     return reply.code(201).send({ ...row, token: value });
@@ -119,7 +134,7 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
 
   app.get('/api/auth/tokens', { preHandler: requireSession }, async () => {
     const rows = await getDb().query.api_tokens.findMany({
-      columns: { id: true, name: true, kind: true, created_at: true, last_used_at: true, revoked_at: true },
+      columns: { id: true, name: true, kind: true, permission_profile: true, worker_id: true, scopes: true, created_at: true, last_used_at: true, revoked_at: true },
       orderBy: desc(api_tokens.created_at),
     });
     return { tokens: rows };

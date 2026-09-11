@@ -4,6 +4,7 @@ import { getDb, isDatabaseConfigured } from './db.js';
 import { getAppSettings, getAppTz } from './app-settings.js';
 import { todayInTz } from './tz.js';
 import { processKnowledgeTransitions } from './knowledge.js';
+import { runMonitoringSweep } from './monitoring.js';
 import { isPushoverConfigured } from './pushover.js';
 import { runReminders } from './reminders.js';
 import { runRoutineReminders, runRoutineMissed } from './routine-reminders.js';
@@ -39,6 +40,13 @@ interface Job {
 // exactly how the maintenance sweep went unscheduled in 0047).
 export function buildJobs(log: FastifyBaseLogger): Job[] {
   return [
+    {
+      name: 'vehicle-monitoring', pattern: '* * * * *', catchUpOnStart: true,
+      handler: async () => {
+        const result = await runMonitoringSweep(getDb());
+        log.debug({ event: 'vehicle_monitoring', ...result }, 'vehicle monitoring checked');
+      },
+    },
     {
       name: 'knowledge-transitions', pattern: '* * * * *', catchUpOnStart: true,
       handler: async () => {

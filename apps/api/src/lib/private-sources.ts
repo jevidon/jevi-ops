@@ -154,6 +154,7 @@ export async function attachSessionSources(tx: Tx, sessionId: string, assetId: s
 async function sourceHasKnowledgeReferences(tx: Tx, sourceId: string): Promise<boolean> {
   const rows = await tx.execute(sql`select exists (
     select 1 from responsibility_rule_sources where source_id = ${sourceId}::uuid
+    union all select 1 from research_result_sources where source_id = ${sourceId}::uuid
     union all select 1 from vehicle_assessments a where a::text like ${`%${sourceId}%`}
     union all select 1 from vehicle_assessment_history h where h::text like ${`%${sourceId}%`}
     union all select 1 from knowledge_change_previews p where p::text like ${`%${sourceId}%`}

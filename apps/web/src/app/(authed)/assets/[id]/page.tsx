@@ -29,6 +29,7 @@ import { ServiceSchedule } from './service-schedule';
 import { SourcePanel } from '@/components/sources/SourcePanel';
 import { StartSetup } from '../../onboarding/start-setup';
 import { AssetKnowledgePanel } from '@/components/knowledge/AssetKnowledgePanel';
+import { AssetResearchPanel } from '@/components/research/AssetResearchPanel';
 
 // /assets/[id] — the asset as an area (0049). The same anatomy as a
 // project or domain page: header band → stat strip → two-column read
@@ -338,6 +339,9 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
 
             {asset.kind === 'vehicle' && <DetailSection label="Responsibilities and knowledge">
               <AssetKnowledgePanel assetId={asset.id} meterUnit={unit} items={items} factKeys={Object.keys(asset.metadata ?? {})} />
+            </DetailSection>}
+            {asset.kind === 'vehicle' && <DetailSection label="Research and monitoring">
+              <AssetResearchPanel assetId={asset.id} lifecycle={asset.lifecycle} />
             </DetailSection>}
 
             <DetailSection

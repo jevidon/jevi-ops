@@ -1,9 +1,12 @@
 import { pgTable, index, uniqueIndex, foreignKey, primaryKey, check, uuid, text, numeric, date, timestamp, unique, jsonb, boolean, integer, real, time, smallint, bigint } from "drizzle-orm/pg-core"
 import { sql } from "drizzle-orm"
+import { research_workers } from "./research-schema.js"
 
 export * from './onboarding-schema.js';
 export * from './source-schema.js';
 export * from './knowledge-schema.js';
+export * from './research-schema.js';
+export * from './monitoring-schema.js';
 
 // ─── Typed jsonb payload shapes ────────────────────────────────────────────
 // Stored as jsonb in Postgres; the app reads/writes them with these shapes.
@@ -1181,10 +1184,14 @@ export const api_tokens = pgTable("api_tokens", {
 	name: text().notNull(),
 	token_hash: text().notNull(),
 	kind: text().default('agent').notNull(),
+	permission_profile: text().$type<'legacy' | 'research_worker'>().default('legacy').notNull(),
+	scopes: jsonb().$type<string[]>().default([]).notNull(),
+	worker_id: uuid().references(() => research_workers.id),
 	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	last_used_at: timestamp({ withTimezone: true, mode: 'string' }),
 	revoked_at: timestamp({ withTimezone: true, mode: 'string' }),
 }, (table) => [
+	check("api_tokens_permission_profile_check", sql`(permission_profile = 'legacy' and worker_id is null) or (permission_profile = 'research_worker' and worker_id is not null)`),
 	unique("api_tokens_token_hash_key").on(table.token_hash),
 	check("api_tokens_kind_check", sql`kind = ANY (ARRAY['agent'::text, 'device'::text])`),
 ]);

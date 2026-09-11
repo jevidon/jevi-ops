@@ -25,7 +25,9 @@ beforeEach(async () => {
                    onboarding_operation_receipts, onboarding_sessions,
                    responsibility_rules, responsibility_rule_versions, responsibility_rule_sources,
                    vehicle_assessments, vehicle_assessment_history, knowledge_change_previews,
-                   knowledge_transitions, knowledge_transition_history
+                   knowledge_transitions, knowledge_transition_history,
+                   research_audit, research_proposals, research_result_sources, research_results, research_jobs, research_workers,
+                   monitoring_policies, monitoring_signals, monitoring_review_runs, monitoring_notifications
     restart identity cascade
   `);
   // Locale changes are test fixtures too; they must not leak into later files.

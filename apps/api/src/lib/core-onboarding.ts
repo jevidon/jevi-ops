@@ -15,11 +15,18 @@ import { publicSettings } from './settings-config.js';
 import { chatComplete } from './llm.js';
 import { createDomain, createProject } from './structure-commands.js';
 import { privateSourcesDirectory } from './private-sources.js';
+import { listResearchWorkers } from './research.js';
+import { listMonitoringPolicies } from './monitoring.js';
 import type { Tx } from './maintenance-tx.js';
 import { OnboardingError, onboardingFingerprint, type OnboardingContext, type OnboardingModuleAdapter, type OnboardingReview } from './onboarding.js';
 
 export async function getCoreCapabilities(): Promise<OnboardingCapability[]> {
   const settings = publicSettings(await getAppSettings());
+  const [workerResult, policyResult] = await Promise.allSettled([listResearchWorkers(getDb()), listMonitoringPolicies(getDb())]);
+  const workers = workerResult.status === 'fulfilled' ? workerResult.value.filter((worker) => worker.enabled) : [];
+  const readyWorker = workers.find((worker) => worker.connection_state === 'ready');
+  const policies = policyResult.status === 'fulfilled' ? policyResult.value.filter((policy) => policy.config.enabled) : [];
+  const successfulPolicy = policies.find((policy) => policy.last_successful_at && policy.monitoring_state === 'enabled');
   const llm = settings.capabilities.llm;
   const fromTest = (id: OnboardingCapability['id'], capability: string, detail: string): OnboardingCapability => {
     const test = llm?.tests.find((t) => t.capability === capability);
@@ -32,8 +39,10 @@ export async function getCoreCapabilities(): Promise<OnboardingCapability[]> {
     fromTest('structured_interpretation', 'structured', 'Interpreted suggestions must be reviewed before they become records.'),
     { id: 'transcription', status: settings.capabilities.stt?.configured ? 'configured' : 'unavailable', detail: 'Speech configuration is separate. A reachability check does not verify an audio transcription.' },
     { id: 'document_extraction', status: 'unavailable', detail: 'Manual source review remains available; no extraction service has been tested.' },
-    { id: 'external_research', status: 'unavailable', detail: 'Research needs a configured worker and a successful sourced job. Manual setup works without one.' },
-    { id: 'active_monitoring', status: 'unavailable', detail: 'Monitoring requires explicit per-vehicle setup; it is optional.' },
+    { id: 'external_research', status: readyWorker ? 'tested' : workers.some((worker) => worker.connection_state === 'degraded') ? 'degraded' : workers.length ? 'configured' : 'unavailable',
+      last_success_at: readyWorker?.last_successful_at ?? null, detail: readyWorker ? 'A connected worker has completed sourced research. Each vehicle question still needs its own evidence review.' : 'Research needs a configured worker and a successful sourced job. Manual setup works without one.' },
+    { id: 'active_monitoring', status: successfulPolicy ? 'tested' : policies.some((policy) => policy.monitoring_state === 'monitoring_unavailable') ? 'degraded' : policies.length ? 'configured' : 'unavailable',
+      last_success_at: successfulPolicy?.last_successful_at ?? null, detail: policies.length ? 'Monitoring is enabled for explicitly selected vehicles. Policy history separates successful checks, attempts and proposals awaiting owner approval.' : 'Monitoring requires explicit per-vehicle setup; it is optional.' },
   ];
 }
 

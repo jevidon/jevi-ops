@@ -4,6 +4,8 @@ import { eq } from 'drizzle-orm';
 import { verifySession } from '../lib/jwt.js';
 import { getDb } from '../lib/db.js';
 import { api_tokens } from '../db/schema.js';
+import { research_workers } from '../db/research-schema.js';
+import type { ResearchWorkerScope } from '@jevi-ops/shared';
 import { hashApiToken } from '../routes/auth.js';
 
 // Fastify plugin: verifies the Authorization bearer on protected routes.
@@ -24,7 +26,11 @@ declare module 'fastify' {
   interface FastifyRequest {
     user?: AuthUser;
     authMethod?: 'session' | 'api_token';
+    permissionProfile?: 'legacy' | 'research_worker';
+    workerId?: string;
+    workerScopes?: string[];
   }
+  interface FastifyContextConfig { researchScope?: ResearchWorkerScope }
   interface FastifyInstance {
     requireAuth: (req: FastifyRequest, reply: import('fastify').FastifyReply) => Promise<void>;
   }
@@ -50,6 +56,20 @@ const authPlugin: FastifyPluginAsync = async (app) => {
         req.log.warn('api token rejected');
         return reply.code(401).send({ error: 'invalid_token' });
       }
+      // Default-deny on the entire existing API: a worker credential must
+      // never gain a generic write/read capability because a route forgot
+      // its own scope check. Only explicitly scoped research routes opt in.
+      if (row.permission_profile === 'research_worker') {
+        const scope = req.routeOptions.config.researchScope;
+        if (!scope || !row.scopes.includes(scope) || !row.worker_id) {
+          return reply.code(403).send({ error: 'worker_scope_denied' });
+        }
+        const [worker] = await getDb().select({ enabled: research_workers.enabled }).from(research_workers).where(eq(research_workers.id, row.worker_id));
+        if (!worker?.enabled) return reply.code(403).send({ error: 'worker_disabled' });
+        req.workerId = row.worker_id;
+        req.workerScopes = row.scopes;
+      }
+      req.permissionProfile = row.permission_profile;
       // Touch last_used_at without blocking the request. Coarse (per
       // request) is fine — it's a "when was this credential last alive"
       // signal for the settings page, not an audit log.
