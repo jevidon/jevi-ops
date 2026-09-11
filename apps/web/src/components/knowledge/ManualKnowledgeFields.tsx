@@ -1,11 +1,12 @@
 'use client';
 
+import { createClientId } from '../../lib/client-id';
 import { useId } from 'react';
 import type { VehicleTrackingDraft } from '@jevi-ops/shared/schemas';
 
 const input = 'block w-full rounded border border-line bg-transparent px-3 py-2 text-sm';
 export function newManualKnowledgeDraft(): VehicleTrackingDraft {
-  return { key: crypto.randomUUID(), name: '', kind: 'user_reminder', applicability: 'unknown', evidence_basis: 'user_reported', source_ids: [], source_note: '', policy: 'expiry', lead_days: 0, track: false };
+  return { key: createClientId(), name: '', kind: 'user_reminder', applicability: 'unknown', evidence_basis: 'user_reported', source_ids: [], source_note: '', policy: 'expiry', lead_days: 0, track: false };
 }
 /** Shared by vehicle onboarding and the ordinary asset responsibility editor. */
 export function ManualKnowledgeFields({ value, onChange, meterUnit, sources = [], showReference = true, showSchedule = true, disabled = false }: {

@@ -1,5 +1,6 @@
 'use client';
 
+import { createClientId } from '../../../lib/client-id';
 import { useEffect, useState } from 'react';
 import { factValue, type OnboardingJson, type OnboardingModuleDefinition, type OnboardingSession, type VehicleTrackingDraft } from '@jevi-ops/shared';
 import { OnboardingShell, type OnboardingStepProps } from '@/components/onboarding/OnboardingShell';
@@ -99,7 +100,7 @@ function VehicleStep({ step, values, onChange, session, blockNavigation, setUnsa
         const change = (patch: Values) => set('projects', entries.map((old, j) => i === j ? { ...old, ...patch } : old));
         return <fieldset key={string(entry.key)} className="border border-line p-3 space-y-3"><legend className="text-sm">Plan {i + 1}</legend><Text label="Name" value={entry.name} change={(v) => change({ name: v })} /><Select label="Current state" value={entry.state} change={(v) => change({ state: v || 'idea' })} options={[['idea', 'An idea'], ['ordered', 'Ordered, not installed'], ['approved', 'Approved project']]} />
           <Notes label="Description / order details" value={entry.description} change={(v) => change({ description: v })} /><button className={button} type="button" onClick={() => set('projects', entries.filter((_, j) => j !== i))}>Remove draft plan</button></fieldset>;
-      })}<button className={button} type="button" onClick={() => set('projects', [...entries, { key: crypto.randomUUID(), name: '', state: 'idea' }])}>Add a plan</button><p className="text-sm text-ink-3">Ideas and orders are saved as idea projects. Approved plans become active projects. None changes the installed equipment list.</p></div></details></div>;
+      })}<button className={button} type="button" onClick={() => set('projects', [...entries, { key: createClientId(), name: '', state: 'idea' }])}>Add a plan</button><p className="text-sm text-ink-3">Ideas and orders are saved as idea projects. Approved plans become active projects. None changes the installed equipment list.</p></div></details></div>;
   }
   if (step.id === 'tracking') return <TrackingStep values={values} onChange={onChange} unit={unit} sessionId={session.id} />;
   const metadata = (baseline?.asset as Values | null)?.metadata as Values | undefined;

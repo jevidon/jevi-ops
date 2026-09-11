@@ -1,5 +1,6 @@
 'use client';
 
+import { createClientId } from '../../../lib/client-id';
 import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { startOnboardingAction } from './actions';
@@ -15,8 +16,8 @@ export function StartSetup({ moduleId, title, firstRun = false, subjectId, paren
   return <div className="space-y-2"><button type="button" disabled={busy} className="rounded border border-line px-4 py-2 disabled:opacity-50" onClick={async () => {
     if (busy) return;
     setBusy(true);
-    creationKey.current ??= crypto.randomUUID();
     try {
+      creationKey.current ??= createClientId();
       const result = await startOnboardingAction({ module_id: moduleId, creation_key: creationKey.current,
         entry_point: firstRun ? 'first_run' : moduleId === 'core' ? 'settings' : subjectId ? 'asset_detail' : 'add_asset',
         ...(subjectId ? { subject_id: subjectId } : {}), ...(parentSessionId ? { parent_session_id: parentSessionId } : {}),

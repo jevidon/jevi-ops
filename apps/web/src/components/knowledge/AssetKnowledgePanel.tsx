@@ -1,5 +1,6 @@
 'use client';
 
+import { createClientId } from '../../lib/client-id';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import type { KnowledgeChangeInput, KnowledgeEffectiveTime, ResponsibilityVersionInput, VehicleTrackingDraft } from '@jevi-ops/shared';
@@ -135,7 +136,7 @@ function KnowledgeEditor({ assetId, meterUnit, items, factKeys, data, initialAss
   const [trackingActive, setTrackingActive] = useState(pendingTracking?.action === 'update' ? pendingTracking.patch.active ?? linkedItem?.active ?? true : linkedItem?.active ?? true);
   const [preview, setPreview] = useState<KnowledgePreview | null>(null);
   const key = useRef<string | null>(null);
-  const creationKey = useRef<string>(crypto.randomUUID());
+  const creationKey = useRef<string>(createClientId());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -164,7 +165,7 @@ function KnowledgeEditor({ assetId, meterUnit, items, factKeys, data, initialAss
   function selectRule(id: string) {
     const rule = data.rules.find((r) => r.rule.id === id) ?? null;
     setSelected(rule); setEditingDefinition(!rule); setDefinition(null); setPreview(null); setDirty(true);
-    if (!rule) creationKey.current = crypto.randomUUID();
+    if (!rule) creationKey.current = createClientId();
     if (rule) setDraft((current) => ({ ...current, name: rule.version.title, kind: rule.version.kind }));
   }
   function selectTrackingItem(id: string) {
@@ -244,7 +245,7 @@ function KnowledgeEditor({ assetId, meterUnit, items, factKeys, data, initialAss
       <EffectiveTime label="Apply this accepted vehicle change" value={effective} onChange={setEffective} immediate />
       <button type="button" className={button} disabled={!selected || editingDefinition} onClick={async () => {
         setBusy(true); setError(null);
-        try { const result = await previewKnowledgeAction(makeChange()); if (result.ok) { setPreview(result.value.preview); key.current = crypto.randomUUID(); } else setError(result.error); }
+        try { const result = await previewKnowledgeAction(makeChange()); if (result.ok) { setPreview(result.value.preview); key.current = createClientId(); } else setError(result.error); }
         catch (err) { setError(err instanceof Error ? err.message : 'Check your inputs.'); }
         finally { setBusy(false); }
       }}>Preview assessment and tracking changes</button>
