@@ -1889,55 +1889,25 @@ export interface IntegrationItem {
   purpose: string;
 }
 
-export interface AppSettings {
-  timezone: string;
-  // Module flags (v2, migration 0036).
-  health_module_enabled: boolean;
-  routines_module_enabled: boolean;
-  // Daily Rule (Addendum 06), retired by Addendum 09 — defaults false.
-  rule_module_enabled: boolean;
-  // Maintenance module (migration 0047). Default on — core home-ops.
-  maintenance_module_enabled: boolean;
-  // Reading-staleness policy (0048): days before the reading nag fires.
-  meter_stale_days?: number;
-  // Household currency (0052), ISO 4217.
-  currency?: string;
-  // Briefing panel visibility/order (migration 0044). Null → registry
-  // defaults; resolved by mergePanelConfig in the panel registry.
-  briefing_panels?: Array<{ id: string; enabled: boolean }> | null;
-  // Frame panel image URL (migration 0045); null hides the panel.
-  agenda_image_url?: string | null;
-  // Weather panel data-bundle URL (migration 0046); null hides the panel.
-  agenda_data_url?: string | null;
-  // Fork: self-hosted AI + Immich configuration.
-  llm_provider?: 'openai_compatible' | 'anthropic' | null;
-  llm_base_url?: string | null;
-  llm_model?: string | null;
-  llm_api_key?: string | null;
-  stt_base_url?: string | null;
-  stt_model?: string | null;
-  immich_base_url?: string | null;
-  immich_api_key?: string | null;
-  updated_at?: string;
-}
-
-export type UpdateAppSettingsBody = Partial<Omit<AppSettings, 'updated_at'>>;
-
-export interface ConnectionTestResult {
+export type { CredentialAction, CredentialStatus, CapabilityTest } from '@jevi-ops/shared/schemas';
+export type AppSettings = import('@jevi-ops/shared/schemas').AppSettings;
+export type UpdateAppSettingsBody = import('@jevi-ops/shared/schemas').UpdateAppSettings;
+export interface ConnectionTestResult extends importCapabilityTest {
   ok: boolean;
-  latency_ms: number;
   detail: string;
-  sample?: string;
 }
-
+type importCapabilityTest = import('@jevi-ops/shared/schemas').CapabilityTest;
+export interface CandidateSettingsTest {
+  candidate?: UpdateAppSettingsBody;
+  capability?: 'text' | 'structured' | 'tools';
+}
 export const settingsApi = {
-  integrationsStatus: () =>
-    api.get<{ items: IntegrationItem[] }>('/api/settings/integrations-status'),
+  integrationsStatus: () => api.get<{ items: IntegrationItem[] }>('/api/settings/integrations-status'),
   getApp: () => api.get<AppSettings>('/api/settings/app'),
-  updateApp: (body: UpdateAppSettingsBody) =>
-    api.patch<AppSettings>('/api/settings/app', body),
-  testLlm: () => api.post<ConnectionTestResult>('/api/settings/test-llm'),
-  testStt: () => api.post<ConnectionTestResult>('/api/settings/test-stt'),
+  updateApp: (body: UpdateAppSettingsBody) => api.patch<AppSettings>('/api/settings/app', body),
+  testLlm: (body: CandidateSettingsTest = {}) => api.post<ConnectionTestResult>('/api/settings/test-llm', body),
+  testStt: (body: CandidateSettingsTest = {}) => api.post<ConnectionTestResult>('/api/settings/test-stt', body),
+  testImmich: (body: CandidateSettingsTest = {}) => api.post<ConnectionTestResult>('/api/settings/test-immich', body),
 };
 
 // ─── Immich (journal photo suggestions) ──────────────────────────────────

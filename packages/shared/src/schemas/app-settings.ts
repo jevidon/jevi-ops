@@ -14,7 +14,7 @@ const TimezoneSchema = z
   .min(1)
   // Later segments allow digits for the Etc/GMT+N family, which the
   // settings picker now lists (it offers every Intl.supportedValuesOf zone).
-  .regex(/^[A-Za-z_]+(?:\/[A-Za-z0-9_+-]+){0,2}$/, 'Must be an IANA timezone string.');
+  .refine((v) => { try { new Intl.DateTimeFormat('en', { timeZone: v }); return true; } catch { return false; } }, 'Must be an IANA timezone string.');
 
 // Nullable-on-write string: empty string or null clears the column back to
 // "use the env fallback".
@@ -29,7 +29,7 @@ const ClearableUrl = z
   .trim()
   .transform((v) => (v === '' ? null : v))
   .nullable()
-  .refine((v) => v === null || /^https?:\/\//.test(v), 'Must be an http(s) URL.');
+  .refine((v) => { if (v === null) return true; try { const u = new URL(v); return ['http:', 'https:'].includes(u.protocol) && !u.username && !u.password && !u.search && !u.hash; } catch { return false; } }, 'Use an http(s) URL without credentials, query or fragment.');
 
 // Briefing panel visibility/order (migration 0044): an ordered array of
 // {id, enabled}. Strictly validated on write — malformed config must never
@@ -41,17 +41,42 @@ export const BriefingPanelConfigSchema = z
   .max(32);
 export type BriefingPanelConfig = z.infer<typeof BriefingPanelConfigSchema>;
 
+export const CredentialActionSchema = z.discriminatedUnion('action', [
+  z.object({ action: z.literal('keep') }).strict(),
+  z.object({ action: z.literal('clear') }).strict(),
+  z.object({ action: z.literal('use_environment') }).strict(),
+  z.object({ action: z.literal('replace'), value: z.string().trim().min(1).max(8192) }).strict(),
+]);
+export const CredentialStatusSchema = z.object({
+  source: z.enum(['environment', 'managed', 'none']),
+  configured: z.boolean(),
+  state: z.enum(['ready', 'missing', 'locked', 'binding_mismatch', 'migration_required', 'insecure_transport', 'invalid_endpoint']),
+  endpoint: z.string().nullable(),
+  allow_insecure: z.boolean(),
+});
+export const CapabilityTestSchema = z.object({
+  capability: z.enum(['text', 'structured', 'tools', 'stt_reachability', 'immich_reachability']),
+  fingerprint: z.string(),
+  status: z.enum(['passed', 'failed']),
+  tested_at: z.string(),
+  error: z.string().nullable(),
+  latency_ms: z.number(),
+});
+export type CredentialAction = z.infer<typeof CredentialActionSchema>;
+export type CredentialStatus = z.infer<typeof CredentialStatusSchema>;
+export type CapabilityTest = z.infer<typeof CapabilityTestSchema>;
+
 export const AppSettingsSchema = z.object({
-  id: z.literal(true),
+  revision: z.number().int().positive(),
+  credentials: z.object({ llm: CredentialStatusSchema, stt: CredentialStatusSchema, immich: CredentialStatusSchema }),
+  capabilities: z.record(z.object({ configured: z.boolean(), fingerprint: z.string(), tests: z.array(CapabilityTestSchema) })),
   timezone: TimezoneSchema,
   llm_provider: z.enum(['openai_compatible', 'anthropic']).nullable(),
   llm_base_url: z.string().nullable(),
   llm_model: z.string().nullable(),
-  llm_api_key: z.string().nullable(),
   stt_base_url: z.string().nullable(),
   stt_model: z.string().nullable(),
   immich_base_url: z.string().nullable(),
-  immich_api_key: z.string().nullable(),
   // Module feature flags (migration 0036). The Editorial v2 layout gates
   // nav items and routes on these; rule_module_enabled stays false (the
   // upstream Daily Rule module isn't ported).
@@ -71,22 +96,26 @@ export const AppSettingsSchema = z.object({
   agenda_image_url: z.string().nullable(),
   // Weather panel data-bundle URL (migration 0046); null hides the panel.
   agenda_data_url: z.string().nullable(),
-  updated_at: z.string().datetime({ offset: true }),
 });
 
 // Dashboard-editable integration config. Every field is optional (PATCH
 // semantics); explicit null / empty string clears the override so the env
 // value applies again.
 export const UpdateAppSettingsSchema = z.object({
+  expected_revision: z.number().int().positive(),
+  llm_credential: CredentialActionSchema.optional(),
+  stt_credential: CredentialActionSchema.optional(),
+  immich_credential: CredentialActionSchema.optional(),
+  llm_allow_insecure_credentials: z.boolean().optional(),
+  stt_allow_insecure_credentials: z.boolean().optional(),
+  immich_allow_insecure_credentials: z.boolean().optional(),
   timezone: TimezoneSchema.optional(),
   llm_provider: z.enum(['openai_compatible', 'anthropic']).nullable().optional(),
   llm_base_url: ClearableUrl.optional(),
   llm_model: ClearableString.optional(),
-  llm_api_key: ClearableString.optional(),
   stt_base_url: ClearableUrl.optional(),
   stt_model: ClearableString.optional(),
   immich_base_url: ClearableUrl.optional(),
-  immich_api_key: ClearableString.optional(),
   health_module_enabled: z.boolean().optional(),
   routines_module_enabled: z.boolean().optional(),
   rule_module_enabled: z.boolean().optional(),
@@ -96,7 +125,12 @@ export const UpdateAppSettingsSchema = z.object({
   briefing_panels: BriefingPanelConfigSchema.nullable().optional(),
   agenda_image_url: ClearableUrl.optional(),
   agenda_data_url: ClearableUrl.optional(),
-});
+}).strict();
+
+export const CandidateSettingsTestSchema = z.object({
+  candidate: UpdateAppSettingsSchema.optional(),
+  capability: z.enum(['text', 'structured', 'tools']).default('text'),
+}).strict();
 
 export type AppSettings = z.infer<typeof AppSettingsSchema>;
 export type UpdateAppSettings = z.infer<typeof UpdateAppSettingsSchema>;

@@ -42,7 +42,7 @@ function zoneOffset(tz: string): string {
 // "America/Denver" all match.
 const canon = (s: string) => s.toLowerCase().replace(/[_/]+/g, ' ').trim();
 
-export function TimezoneForm({ current }: { current: string }) {
+export function TimezoneForm({ current, revision }: { current: string; revision: number }) {
   const [state, formAction, pending] = useActionState<SyncResult | null, FormData>(
     async (_prev, formData) => updateTimezoneAction(formData),
     null,
@@ -104,6 +104,7 @@ export function TimezoneForm({ current }: { current: string }) {
 
   return (
     <form action={formAction} className="flex flex-col gap-3">
+      <input type="hidden" name="expected_revision" value={revision} />
       <p className="font-sans text-[13px] text-ink-2 leading-relaxed">
         Used everywhere the app needs to know &ldquo;what day is it&rdquo; — task due
         dates, routine completions, the daily-summary cron, photo

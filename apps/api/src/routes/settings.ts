@@ -1,16 +1,17 @@
 import type { FastifyPluginAsync } from 'fastify';
-import { eq } from 'drizzle-orm';
 import { env } from '../lib/env.js';
 import { isDatabaseConfigured } from '../lib/db.js';
 import { isAuthConfigured } from '../lib/jwt.js';
-import { chatComplete, isLlmConfigured, llmDescription } from '../lib/llm.js';
+import { isLlmConfigured, llmDescription } from '../lib/llm.js';
 import { isSttConfigured, sttDescription } from '../lib/stt.js';
 import { isStorageConfigured } from '../lib/storage.js';
 import { isImmichConfigured, immichDescription } from '../lib/immich.js';
-import { getDb } from '../lib/db.js';
-import { app_settings } from '../db/schema.js';
-import { getAppSettings, invalidateAppSettings } from '../lib/app-settings.js';
-import { UpdateAppSettingsSchema } from '@jevi-ops/shared/schemas';
+import { getAppSettings } from '../lib/app-settings.js';
+import { UpdateAppSettingsSchema, CandidateSettingsTestSchema } from '@jevi-ops/shared/schemas';
+import { prepareSettings, publicSettings, recordCapabilityTest, resolveIntegration, updateSettings, type Integration } from '../lib/settings-config.js';
+import { requireOwnerSession } from '../lib/owner-session.js';
+import { SettingsError } from '../lib/settings-crypto.js';
+import { testIntegration } from '../lib/settings-tests.js';
 
 // /api/settings/integrations-status — read-only inventory of which env-var
 // backed integrations are configured. Never returns the actual values —
@@ -35,108 +36,38 @@ function statusForAll(present: boolean[]): 'configured' | 'partial' | 'missing' 
 
 export const settingsRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', app.requireAuth);
-
-  // App-wide settings (timezone + integration config) — single-row table.
-  // GET reads the cached value; PATCH writes through and invalidates the
-  // cache. API keys are returned as-is: single-user system, auth-gated,
-  // and the settings form needs to show what's set.
-  app.get('/api/settings/app', async () => {
-    const settings = await getAppSettings();
-    return settings;
+  app.addHook('preHandler', requireOwnerSession);
+  // Settings endpoints never expose exceptions originating in SDKs, URLs,
+  // database writes, or crypto, including error handler logs.
+  app.setErrorHandler((error, _req, reply) => {
+    const code = error as { code?: string; cause?: { code?: string } };
+    if (error instanceof SettingsError) return reply.code(error.status).send({ error: error.code });
+    if (code.code === '42703' || code.cause?.code === '42703') return reply.code(503).send({ error: 'schema_out_of_date', message: 'Run scripts/db-migrate.sh, then restart the API.' });
+    return reply.code(503).send({ error: 'settings_unavailable' });
   });
-
-  // Connection tests for the AI section — cheap round-trips so the
-  // dashboard "Test" buttons give a real signal, not just presence checks.
-  app.post('/api/settings/test-llm', async (_req, reply) => {
-    if (!(await isLlmConfigured())) {
-      return reply.code(503).send({ ok: false, error: 'llm_not_configured' });
-    }
-    const started = Date.now();
-    try {
-      const res = await chatComplete({
-        system: 'You are a connectivity check. Reply with the single word: ok',
-        messages: [{ role: 'user', content: 'ping' }],
-        maxTokens: 8,
-        effort: 'low',
-      });
-      return {
-        ok: true,
-        latency_ms: Date.now() - started,
-        detail: await llmDescription(),
-        sample: res.text.slice(0, 40),
-      };
-    } catch (err) {
-      return reply.code(502).send({
-        ok: false,
-        error: 'llm_unreachable',
-        message: err instanceof Error ? err.message : 'unknown',
-        detail: await llmDescription(),
-      });
-    }
-  });
-
-  app.post('/api/settings/test-stt', async (_req, reply) => {
-    if (!(await isSttConfigured())) {
-      return reply.code(503).send({ ok: false, error: 'stt_not_configured' });
-    }
-    const started = Date.now();
-    try {
-      const detail = await sttDescription();
-      // Probe the server's models listing — supported by OpenAI cloud,
-      // speaches, and faster-whisper-server. Proves reachability + auth
-      // without shipping an audio sample.
-      const base = detail.split(' · ')[0]!;
-      const res = await fetch(`${base}/models`, { signal: AbortSignal.timeout(5000) });
-      if (!res.ok && res.status !== 401 && res.status !== 403) {
-        return reply.code(502).send({ ok: false, error: `stt_probe_http_${res.status}`, detail });
-      }
-      return { ok: true, latency_ms: Date.now() - started, detail };
-    } catch (err) {
-      return reply.code(502).send({
-        ok: false,
-        error: 'stt_unreachable',
-        message: err instanceof Error ? err.message : 'unknown',
-      });
-    }
-  });
-
+  app.get('/api/settings/app', async () => publicSettings(await getAppSettings()));
   app.patch('/api/settings/app', async (req, reply) => {
     const parsed = UpdateAppSettingsSchema.safeParse(req.body);
-    if (!parsed.success) {
-      return reply.code(400).send({
-        error: 'invalid_payload',
-        details: parsed.error.flatten().fieldErrors,
-      });
-    }
-    if (Object.keys(parsed.data).length === 0) {
-      return reply.code(400).send({ error: 'empty_payload' });
-    }
-    let row;
-    try {
-      [row] = await getDb()
-        .update(app_settings)
-        .set(parsed.data)
-        .where(eq(app_settings.id, true))
-        .returning();
-    } catch (err) {
-      // Postgres 42703 = undefined column: the Drizzle schema knows a column
-      // the database doesn't — i.e. a migration is pending. Every settings
-      // write RETURNs all mapped columns, so this breaks ALL saves at once;
-      // name the cure instead of a generic 500 (this exact failure has been
-      // mis-diagnosed three times).
-      const code = (err as { code?: string; cause?: { code?: string } });
-      if (code?.code === '42703' || code?.cause?.code === '42703') {
-        return reply.code(503).send({
-          error: 'schema_out_of_date',
-          message: 'A database migration is pending — run scripts/db-migrate.sh, then restart the API.',
-        });
-      }
-      throw err;
-    }
-    if (!row) throw app.httpErrors.internalServerError('settings_row_missing');
-    invalidateAppSettings();
-    return row;
+    if (!parsed.success) return reply.code(400).send({ error: 'invalid_payload' });
+    if (Object.keys(parsed.data).length <= 1) return reply.code(400).send({ error: 'empty_payload' });
+    return updateSettings(parsed.data);
   });
+  for (const integration of ['llm', 'stt', 'immich'] as Integration[]) {
+    app.post(`/api/settings/test-${integration}`, { bodyLimit: 20_000 }, async (req, reply) => {
+      const parsed = CandidateSettingsTestSchema.safeParse(req.body ?? {});
+      if (!parsed.success) return reply.code(400).send({ error: 'invalid_payload' });
+      const active = await getAppSettings();
+      const candidate = parsed.data.candidate ? prepareSettings(active, parsed.data.candidate) : active;
+      const cfg = resolveIntegration(candidate, integration);
+      const capability = integration === 'llm' ? parsed.data.capability : integration === 'stt' ? 'stt_reachability' : 'immich_reachability';
+      const result = await testIntegration(cfg, capability);
+      await recordCapabilityTest(result);
+      return reply.code(result.status === 'passed' ? 200 : 502).send({
+        ok: result.status === 'passed', ...result,
+        detail: integration === 'stt' ? 'Authenticated models endpoint only; transcription is untested.' : integration === 'immich' ? 'Authenticated account endpoint only; photo access is untested.' : `${capability} capability only; external research is untested.`,
+      });
+    });
+  }
 
   app.get('/api/settings/integrations-status', async () => {
     const items: IntegrationStatus[] = [
@@ -168,7 +99,7 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
         detail: env.CRON_SECRET
           ? 'CRON_SECRET set (length OK).'
           : 'CRON_SECRET missing — /api/cron/* endpoints return 503.',
-        required: true,
+        required: false,
         purpose: 'Gates the cron endpoints (reminders, observations, etc.).',
       },
       {
@@ -277,7 +208,7 @@ function detailForGoogle(): string {
   const parts: string[] = [];
   parts.push(env.GOOGLE_OAUTH_CLIENT_ID ? 'client id set' : 'client id missing');
   parts.push(env.GOOGLE_OAUTH_CLIENT_SECRET ? 'client secret set' : 'client secret missing');
-  if (env.GOOGLE_OAUTH_REDIRECT_URI) parts.push(`redirect: ${env.GOOGLE_OAUTH_REDIRECT_URI}`);
+  if (env.GOOGLE_OAUTH_REDIRECT_URI) parts.push('redirect URI set');
   else parts.push('redirect URI missing');
   return parts.join(' · ');
 }

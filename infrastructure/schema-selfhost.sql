@@ -702,6 +702,9 @@ create trigger trg_google_oauth_tokens_updated_at
 -- ─────────────────────────────────────────────────────────────────────────
 
 create table if not exists app_settings (
+  revision integer not null default 1 check (revision > 0),
+  credential_settings jsonb not null default '{}' check (jsonb_typeof(credential_settings) = 'object'),
+  capability_tests jsonb not null default '{}' check (jsonb_typeof(capability_tests) = 'object'),
   id boolean primary key default true check (id),
   timezone text not null default 'America/Denver',
   -- Dashboard-editable integration config (env vars act as fallback):

@@ -1,0 +1,14 @@
+.git
+.dev-run
+**/node_modules
+**/.next
+**/.next-validation
+**/.next-smoke
+**/dist
+**/.venv
+**/__pycache__
+**/*.pyc
+**/.env
+**/.env.*
+!**/.env.example
+**/.DS_Store

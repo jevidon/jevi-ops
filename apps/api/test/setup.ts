@@ -24,6 +24,8 @@ beforeEach(async () => {
                    attention_items, tasks, api_tokens
     restart identity cascade
   `);
+  // Locale changes are test fixtures too; they must not leak into later files.
+  await db.execute("update app_settings set timezone = 'America/Denver', currency = 'USD', meter_stale_days = 14 where id = true");
   invalidateAppSettings();
 });
 
