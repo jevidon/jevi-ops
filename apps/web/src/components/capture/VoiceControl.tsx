@@ -3,7 +3,7 @@
 import { useRef, useState } from 'react';
 import { Icon } from '../Icon';
 import type { AudioPhase, AudioSupport } from '@/lib/use-audio-capture';
-import type { VoiceResult } from '@/lib/voice-actions';
+import type { CaptureOutcome } from '@/lib/capture-result';
 import { ResultChip } from './ResultChip';
 
 // Client-side ceiling for uploaded recordings — just under the 25MB server
@@ -28,15 +28,17 @@ export function VoiceControl({
   onStop,
   onCancel,
   onUploadFile,
+  onRetry,
   mobileHint,
 }: {
-  state: AudioPhase<VoiceResult>;
+  state: AudioPhase<CaptureOutcome>;
   elapsed: number;
   support: AudioSupport;
   onStart: () => void;
   onStop: () => void;
   onCancel: () => void;
   onUploadFile: (file: File) => void;
+  onRetry: () => void;
   mobileHint?: boolean;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
@@ -44,7 +46,7 @@ export function VoiceControl({
 
   function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
-    e.target.value = ''; // allow re-picking the same file
+    e.target.value = '';
     if (!file) return;
     if (file.size > MAX_UPLOAD_BYTES) {
       setTooBig(true);
@@ -85,26 +87,26 @@ export function VoiceControl({
     return (
       <div className="flex items-center gap-3 font-sans text-[13px] text-ink-2">
         <span className="h-3.5 w-3.5 shrink-0 rounded-full border-2 border-ink-3 border-t-transparent motion-safe:animate-spin" />
-        Transcribing…
+        Saving recording…
       </div>
     );
   }
 
-  if (state.phase === 'done' || state.phase === 'error') {
+  if (state.phase === 'reporting' || state.phase === 'done' || state.phase === 'error') {
     return (
       <div className="-mx-4">
-        {state.phase === 'done' ? (
-          <ResultChip result={state.result} />
-        ) : (
+        {state.phase === 'error' ? (
           <ResultChip result={{ kind: 'http_error', message: state.message }} />
+        ) : (
+          <ResultChip result={state.result} onRetryUpload={onRetry} />
+        )}
+        {state.phase === 'reporting' && (
+          <div className="px-4 pt-2 font-mono text-[10px] uppercase tracking-wider text-ink-3">Interpreting…</div>
         )}
       </div>
     );
   }
 
-  // Idle. Where live recording is impossible, be honest about why and offer
-  // the failover: an audio-file upload into the same STT pipeline (record in
-  // Voice Memos → upload works).
   if (!support.ok) {
     return (
       <div className="flex flex-col gap-2">

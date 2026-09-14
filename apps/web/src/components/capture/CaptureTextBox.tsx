@@ -1,19 +1,23 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState, useTransition } from 'react';
-import { submitVoiceTranscript, type VoiceResult } from '@/lib/voice-actions';
+import { interpretSavedCapture, saveTextCapture } from '@/lib/capture-actions';
+import type { CaptureOutcome } from '@/lib/capture-result';
+import { createClientId } from '@/lib/client-id';
 import { ResultChip } from './ResultChip';
 
-// Free-text capture — the old ⌘J palette's textarea, extracted. Pipes text
-// through submitVoiceTranscript (the same Claude parser the voice path
-// uses), so anything you can say to the mic you can type here. The draft
-// (`text`) is owned by CapturePortal so both hosts (sheet + modal) stay in
-// sync; submit phase is local — only the visible instance submits.
+// Free-text capture — the old ⌘J palette's textarea, extracted. Two steps
+// on submit: (1) durable save, rendered as "Saved to Jevi Ops" the moment
+// the receipt arrives; (2) interpretation, a separate call that updates the
+// same chip when the local model answers. A cold or hung model never delays
+// the receipt. The draft (`text`) is owned by CapturePortal so both hosts
+// (sheet + modal) stay in sync; submit phase is local.
 
 type Phase =
   | { kind: 'idle' }
-  | { kind: 'submitting' }
-  | { kind: 'done'; result: VoiceResult };
+  | { kind: 'saving' }
+  | { kind: 'interpreting'; result: CaptureOutcome }
+  | { kind: 'done'; result: CaptureOutcome };
 
 export function CaptureTextBox({
   text,
@@ -27,10 +31,10 @@ export function CaptureTextBox({
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
   const [, startTransition] = useTransition();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // Ids live until the save is confirmed, so retrying a failed save replays
+  // the same operation instead of creating a second capture.
+  const idsRef = useRef<{ operationId: string; captureId: string; capturedAt: string } | null>(null);
 
-  // Autofocus with cursor at the end so a preserved draft is editable
-  // without re-clicking. Desktop host only — on mobile this would pop the
-  // keyboard over the type grid.
   useEffect(() => {
     if (!autoFocus) return;
     setTimeout(() => {
@@ -46,16 +50,21 @@ export function CaptureTextBox({
     (e?: React.FormEvent) => {
       e?.preventDefault();
       const transcript = text.trim();
-      if (!transcript || phase.kind === 'submitting') return;
-      setPhase({ kind: 'submitting' });
+      if (!transcript || phase.kind === 'saving') return;
+      setPhase({ kind: 'saving' });
       startTransition(async () => {
-        // Tagged 'text' so the executor stamps tasks/activity rows with
-        // source='manual' and journal entries with source='typed'.
-        const result = await submitVoiceTranscript(transcript, 'text');
-        setPhase({ kind: 'done', result });
-        // Successful actions clear the draft so chained captures are easy;
-        // disambiguation / parse errors keep it for editing.
-        if (result.kind === 'executed') onTextChange('');
+        const ids = idsRef.current ?? { operationId: createClientId(), captureId: createClientId(), capturedAt: new Date().toISOString() };
+        idsRef.current = ids;
+        const saved = await saveTextCapture(transcript, ids);
+        if (saved.kind !== 'server_saved') {
+          setPhase({ kind: 'done', result: saved }); // ids kept: the next submit replays
+          return;
+        }
+        idsRef.current = null;
+        onTextChange('');
+        setPhase({ kind: 'interpreting', result: saved });
+        const outcome = await interpretSavedCapture(saved.captureId);
+        setPhase({ kind: 'done', result: outcome });
       });
     },
     [text, phase.kind, onTextChange],
@@ -71,6 +80,8 @@ export function CaptureTextBox({
     [handleSubmit],
   );
 
+  const chip = phase.kind === 'interpreting' || phase.kind === 'done' ? phase.result : null;
+
   return (
     <div>
       <form onSubmit={handleSubmit}>
@@ -79,7 +90,7 @@ export function CaptureTextBox({
           value={text}
           onChange={(e) => onTextChange(e.target.value)}
           onKeyDown={onTextareaKeyDown}
-          disabled={phase.kind === 'submitting'}
+          disabled={phase.kind === 'saving'}
           placeholder="Say what you would say to the mic &mdash; &ldquo;add a task to Homestead: fix the gate, due Saturday.&rdquo;"
           rows={3}
           className="w-full bg-transparent border border-line focus:border-accent focus:outline-none p-3 font-sans text-[15px] text-ink placeholder:text-ink-3 leading-snug resize-none"
@@ -87,20 +98,22 @@ export function CaptureTextBox({
         />
         <div className="mt-2 flex items-center justify-between gap-3">
           <div className="font-mono text-[10px] uppercase tracking-wider text-ink-3">
-            {text.trim().length > 0 ? `${text.trim().length} chars` : '⌘↵ submits'}
+            {phase.kind === 'interpreting'
+              ? 'Saved · interpreting…'
+              : text.trim().length > 0 ? `${text.trim().length} chars` : '⌘↵ submits'}
           </div>
           <button
             type="submit"
-            disabled={!text.trim() || phase.kind === 'submitting'}
+            disabled={!text.trim() || phase.kind === 'saving'}
             className="px-3 py-1.5 bg-ink text-bg font-mono text-[10px] uppercase tracking-wider disabled:opacity-40 disabled:cursor-not-allowed hover:bg-ink-2 transition-colors"
           >
-            {phase.kind === 'submitting' ? 'Parsing…' : 'Capture'}
+            {phase.kind === 'saving' ? 'Saving…' : 'Capture'}
           </button>
         </div>
       </form>
-      {phase.kind === 'done' && (
+      {chip && (
         <div className="mt-3 -mx-4 lg:-mx-4">
-          <ResultChip result={phase.result} />
+          <ResultChip result={chip} />
         </div>
       )}
     </div>

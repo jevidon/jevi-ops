@@ -5,9 +5,10 @@ import {
 } from '@jevi-ops/shared/schemas';
 import { parseTranscript, warmParser } from '../lib/parser.js';
 import { executeActions } from '../lib/executor.js';
-import { isLlmConfigured } from '../lib/llm.js';
+import { isLlmConfigured, llmBaseUrl } from '../lib/llm.js';
 import { transcribeAudio, isSttConfigured } from '../lib/stt.js';
 import { getDb } from '../lib/db.js';
+import { isApprovedEndpoint } from '../lib/inference-policy.js';
 
 // POST /api/capture/voice         — pre-transcribed text path (Web Speech API)
 // POST /api/capture/voice-audio   — multipart audio path (MediaRecorder → Whisper)
@@ -168,6 +169,11 @@ export const captureRoutes: FastifyPluginAsync = async (app) => {
   app.post('/api/capture/warm', async (req, reply) => {
     if (!(await isLlmConfigured())) {
       return reply.code(503).send({ error: 'llm_not_configured' });
+    }
+    // Local-only policy (lib/inference-policy.ts): never prefill a prompt
+    // that carries private context into an unapproved endpoint.
+    if (!isApprovedEndpoint(await llmBaseUrl())) {
+      return reply.code(503).send({ error: 'endpoint_not_approved' });
     }
     void warmParser(getDb()).then((usage) => {
       if (usage) req.log.info(usage, 'parser prompt cache warmed');

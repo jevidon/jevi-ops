@@ -25,6 +25,11 @@ async function resolveConfig(): Promise<ResolvedSttConfig> {
   };
 }
 
+/** The origin private audio would be sent to (lib/inference-policy.ts checks it). */
+export async function sttBaseUrl(): Promise<string> {
+  return (await resolveConfig()).baseUrl;
+}
+
 export async function isSttConfigured(): Promise<boolean> {
   const cfg = await resolveConfig();
   // A local server needs no key; OpenAI cloud does.

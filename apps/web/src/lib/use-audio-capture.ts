@@ -7,19 +7,21 @@ import { useCallback, useEffect, useRef, useState, useTransition } from 'react';
 // MediaRecorder → Blob → caller-supplied submit. We deliberately avoid the
 // Web Speech API: it relies on Google's cloud speech endpoint, which
 // DNS-level ad blockers, VPNs, and strict firewalls often block.
+//
+// Two-step reporting: `submit` receives a `report` callback so the durable
+// storage receipt can be shown ("reporting" phase) while a later, slower
+// step (interpretation) is still running; the final result lands in "done".
+// The last FormData (blob + client ids) is retained so an incomplete upload
+// can be retried with the same identities.
 
 export type AudioPhase<T> =
   | { phase: 'idle' }
   | { phase: 'recording'; startedAt: number }
   | { phase: 'submitting' }
+  | { phase: 'reporting'; result: T }
   | { phase: 'done'; result: T }
   | { phase: 'error'; message: string };
 
-// Whether LIVE recording is possible here, and if not, why. The big gotcha:
-// navigator.mediaDevices exists only in secure contexts (HTTPS or
-// localhost), so a phone reaching a dev box over plain http://<LAN-IP> has
-// no mic API at all — that's an environment problem, not a browser one,
-// and the copy should say so.
 export type AudioSupport =
   | { ok: true }
   | { ok: false; reason: 'insecure-context' | 'no-media-api' };
@@ -64,22 +66,25 @@ function extensionFor(mime: string): string {
 
 export function useAudioCapture<T>(opts: {
   // Receives FormData with the recording under field name `audio`
-  // (`voice.<ext>`) — the shape POST /api/capture/voice-audio expects.
-  submit: (formData: FormData) => Promise<T>;
+  // (`voice.<ext>`) plus whatever the caller sets on it, and a `report`
+  // callback for an interim result (the storage receipt).
+  submit: (formData: FormData, report: (interim: T) => void) => Promise<T>;
   // done/error → idle after this long. 0 disables.
   autoDismissMs?: number;
+  // Which final results may auto-dismiss (default: all). Results that need
+  // the user (an incomplete upload, a review request) should return false.
+  shouldAutoDismiss?: (result: T) => boolean;
 }): {
   state: AudioPhase<T>;
   elapsed: number; // seconds, ticks while recording
   start: () => Promise<void>;
   stop: () => void; // stop → blob → submit
   cancel: () => void; // stop + discard, no submit
-  // Feed a pre-recorded file/blob straight into the submitting→done/error
-  // machine — the upload failover for contexts where live recording is
-  // impossible (plain-HTTP origins, old browsers).
   submitBlob: (blob: Blob, filename: string) => void;
+  // Re-submit the last recording with the same FormData (same ids).
+  retry: () => void;
 } {
-  const { submit, autoDismissMs = 5000 } = opts;
+  const { submit, autoDismissMs = 5000, shouldAutoDismiss } = opts;
   const [state, setState] = useState<AudioPhase<T>>({ phase: 'idle' });
   const [elapsed, setElapsed] = useState(0);
   const [, startTransition] = useTransition();
@@ -91,8 +96,8 @@ export function useAudioCapture<T>(opts: {
   const cancelledRef = useRef(false);
   const submitRef = useRef(submit);
   submitRef.current = submit;
+  const lastFormRef = useRef<FormData | null>(null);
 
-  // Tick a duration counter while recording.
   useEffect(() => {
     if (state.phase !== 'recording') return;
     const started = state.startedAt;
@@ -100,15 +105,14 @@ export function useAudioCapture<T>(opts: {
     return () => clearInterval(interval);
   }, [state]);
 
-  // Auto-dismiss result/error after the timeout.
   useEffect(() => {
     if (!autoDismissMs) return;
     if (state.phase !== 'done' && state.phase !== 'error') return;
+    if (state.phase === 'done' && shouldAutoDismiss && !shouldAutoDismiss(state.result)) return;
     const t = setTimeout(() => setState({ phase: 'idle' }), autoDismissMs);
     return () => clearTimeout(t);
-  }, [state.phase, autoDismissMs]);
+  }, [state, autoDismissMs, shouldAutoDismiss]);
 
-  // Cleanup if the owner unmounts mid-recording.
   useEffect(() => {
     return () => {
       cancelledRef.current = true;
@@ -120,6 +124,15 @@ export function useAudioCapture<T>(opts: {
   const stopTracks = useCallback(() => {
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
+  }, []);
+
+  const run = useCallback((formData: FormData) => {
+    lastFormRef.current = formData;
+    setState({ phase: 'submitting' });
+    startTransition(async () => {
+      const result = await submitRef.current(formData, (interim) => setState({ phase: 'reporting', result: interim }));
+      setState({ phase: 'done', result });
+    });
   }, []);
 
   const start = useCallback(async () => {
@@ -161,8 +174,7 @@ export function useAudioCapture<T>(opts: {
     try {
       recorder = new MediaRecorder(stream, {
         ...(mime ? { mimeType: mime } : {}),
-        // 32 kbps Opus is the speech-quality sweet spot for Whisper. Browser
-        // defaults vary (~20-32kbps); pinning makes file sizes predictable.
+        // 32 kbps Opus is the speech-quality sweet spot for Whisper.
         audioBitsPerSecond: 32000,
       });
     } catch (err) {
@@ -179,18 +191,14 @@ export function useAudioCapture<T>(opts: {
       const discarded = cancelledRef.current;
       const blob = new Blob(chunksRef.current, { type: mimeRef.current || 'audio/webm' });
       chunksRef.current = [];
-      if (discarded) return; // cancel() or unmount — no submit, state set by cancel
+      if (discarded) return;
       if (blob.size === 0) {
         setState({ phase: 'error', message: 'No audio captured. Try again.' });
         return;
       }
-      setState({ phase: 'submitting' });
       const formData = new FormData();
       formData.append('audio', blob, `voice.${extensionFor(blob.type)}`);
-      startTransition(async () => {
-        const result = await submitRef.current(formData);
-        setState({ phase: 'done', result });
-      });
+      run(formData);
     };
     recorder.onerror = () => {
       stopTracks();
@@ -199,12 +207,10 @@ export function useAudioCapture<T>(opts: {
 
     streamRef.current = stream;
     recorderRef.current = recorder;
-    // 1s timeslice = ondataavailable fires every second. Helps catch all
-    // chunks reliably (some browsers only emit on stop without a timeslice).
     recorder.start(1000);
     setElapsed(0);
     setState({ phase: 'recording', startedAt: Date.now() });
-  }, [stopTracks]);
+  }, [stopTracks, run]);
 
   const stop = useCallback(() => {
     const r = recorderRef.current;
@@ -228,14 +234,14 @@ export function useAudioCapture<T>(opts: {
       setState({ phase: 'error', message: 'That file is empty.' });
       return;
     }
-    setState({ phase: 'submitting' });
     const formData = new FormData();
     formData.append('audio', blob, filename);
-    startTransition(async () => {
-      const result = await submitRef.current(formData);
-      setState({ phase: 'done', result });
-    });
-  }, []);
+    run(formData);
+  }, [run]);
 
-  return { state, elapsed, start, stop, cancel, submitBlob };
+  const retry = useCallback(() => {
+    if (lastFormRef.current) run(lastFormRef.current);
+  }, [run]);
+
+  return { state, elapsed, start, stop, cancel, submitBlob, retry };
 }

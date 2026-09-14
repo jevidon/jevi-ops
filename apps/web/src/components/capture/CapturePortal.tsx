@@ -2,7 +2,10 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { BottomSheet } from '../BottomSheet';
-import { submitVoiceAudio, warmCapture, type VoiceResult } from '@/lib/voice-actions';
+import { warmCapture } from '@/lib/voice-actions';
+import { interpretSavedCapture, saveAudioCapture } from '@/lib/capture-actions';
+import type { CaptureOutcome } from '@/lib/capture-result';
+import { createClientId } from '@/lib/client-id';
 import { useAudioCapture, getAudioSupport, type AudioSupport } from '@/lib/use-audio-capture';
 import { CaptureTypeGrid } from './CaptureTypeGrid';
 import { CaptureTextBox } from './CaptureTextBox';
@@ -31,7 +34,25 @@ export function CapturePortal() {
   // survives close (accidental dismiss mid-thought) and clears on submit.
   const [text, setText] = useState('');
 
-  const audio = useAudioCapture<VoiceResult>({ submit: submitVoiceAudio });
+  // Audio: save first (receipt reported immediately), interpret second. The
+  // client ids are stamped on the FormData once, so a retry of an incomplete
+  // upload resends the same recording under the same identities.
+  const audio = useAudioCapture<CaptureOutcome>({
+    submit: async (fd, report) => {
+      if (!fd.has('operation_id')) {
+        fd.set('operation_id', createClientId());
+        fd.set('capture_id', createClientId());
+        fd.set('attachment_id', createClientId());
+        fd.set('finalize_operation_id', createClientId());
+        fd.set('captured_at', new Date().toISOString());
+      }
+      const saved = await saveAudioCapture(fd);
+      if (saved.kind !== 'server_saved') return saved;
+      report(saved);
+      return interpretSavedCapture(saved.captureId);
+    },
+    shouldAutoDismiss: (r) => r.kind === 'executed' || r.kind === 'server_saved',
+  });
   const { state: audioState, start: audioStart, stop: audioStop, cancel: audioCancel } = audio;
   const recording = audioState.phase === 'recording';
 
@@ -126,6 +147,7 @@ export function CapturePortal() {
         onStop={audioStop}
         onCancel={audioCancel}
         onUploadFile={(file) => audio.submitBlob(file, file.name || 'voice-upload')}
+        onRetry={audio.retry}
         mobileHint={mobile}
       />
     </div>
@@ -195,18 +217,22 @@ export function CapturePortal() {
           {audioState.phase === 'submitting' && (
             <div className="flex items-center gap-3 bg-ink/95 text-bg px-4 py-3 rounded-lg shadow-lg font-sans text-[13px]">
               <span className="h-3.5 w-3.5 shrink-0 rounded-full border-2 border-bg/50 border-t-transparent motion-safe:animate-spin" />
-              Transcribing…
+              Saving recording…
             </div>
           )}
-          {(audioState.phase === 'done' || audioState.phase === 'error') && (
+          {(audioState.phase === 'reporting' || audioState.phase === 'done' || audioState.phase === 'error') && (
             <div className="rounded-lg overflow-hidden shadow-lg [&>div]:border-t-0">
               <ResultChip
                 result={
-                  audioState.phase === 'done'
-                    ? audioState.result
-                    : { kind: 'http_error', message: audioState.message }
+                  audioState.phase === 'error'
+                    ? { kind: 'http_error', message: audioState.message }
+                    : audioState.result
                 }
+                onRetryUpload={audio.retry}
               />
+              {audioState.phase === 'reporting' && (
+                <div className="bg-surface-2 px-4 pb-2 font-mono text-[10px] uppercase tracking-wider text-ink-3">Interpreting…</div>
+              )}
             </div>
           )}
         </div>

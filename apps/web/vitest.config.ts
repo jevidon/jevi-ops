@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
 
 // Component tests for the web app (jsdom). The API's integration suite
@@ -9,4 +10,7 @@ export default defineConfig({
     include: ['src/**/*.test.{ts,tsx}'],
   },
   esbuild: { jsx: 'automatic' },
+  // Mirror tsconfig's `@/*` → `src/*` so components that import server
+  // actions by alias can be rendered with those actions mocked.
+  resolve: { alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) } },
 });

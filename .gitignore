@@ -39,3 +39,6 @@ supabase/.temp/
 # tests/coverage
 coverage/
 .nyc_output/
+
+# Next build outputs of the smoke/validation scripts (never source).
+.next-*/
