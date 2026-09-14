@@ -1,0 +1,6 @@
+{
+  "fixture": "create-text.json",
+  "note": "sha256 of canonical JSON (sorted keys, no whitespace, UTF-8) of the envelope with operation_id removed.",
+  "canonical": "{\"command\":\"capture.create\",\"payload\":{\"attachments\":[],\"capture_id\":\"0b9c8d7e-6f5a-4b3c-8d2e-1f0a9b8c7d6e\",\"captured_at\":\"2026-09-14T10:12:00+12:00\",\"client\":{\"name\":\"hermes\",\"surface\":\"desktop-slash\",\"version\":\"0.1.0\"},\"intent\":\"capture_only\",\"kind\":\"text\",\"modality\":\"typed\",\"source_item_id\":\"session-a:turn-17\",\"tags\":[],\"text\":\"Remember to compare the underbody protection options — Ōtaki quote first.\",\"time_zone\":\"Pacific/Auckland\"},\"protocol_version\":1}",
+  "sha256": "351b028560c9328991f9275bd9068a4f8fa80985c89f0e2235dfe4f97eac8525"
+}

@@ -41,6 +41,11 @@ export interface AppSettings {
   agenda_image_url: string | null;
   // Weather panel data-bundle URL (migration 0046); null hides the panel.
   agenda_data_url: string | null;
+  // Durable capture (migration 0053): async-consumer ownership flag, plus
+  // the installation's data-space id and epoch (read-only, server-generated).
+  capture_async_enabled: boolean;
+  data_space_id: string;
+  server_epoch: number;
 }
 
 const DEFAULTS: AppSettings = {
@@ -62,6 +67,11 @@ const DEFAULTS: AppSettings = {
   briefing_panels: null,
   agenda_image_url: null,
   agenda_data_url: null,
+  capture_async_enabled: false,
+  // Placeholder until migration 0053 has run; the capture ledger reads the
+  // real value from the row inside its transaction.
+  data_space_id: '00000000-0000-4000-8000-000000000000',
+  server_epoch: 1,
 };
 
 // In-memory cache. Reset by invalidateAppSettings() when /api/settings/app
@@ -94,6 +104,9 @@ async function load(): Promise<AppSettings> {
       briefing_panels: row.briefing_panels ?? null,
       agenda_image_url: row.agenda_image_url ?? null,
       agenda_data_url: row.agenda_data_url ?? null,
+      capture_async_enabled: row.capture_async_enabled ?? false,
+      data_space_id: row.data_space_id ?? DEFAULTS.data_space_id,
+      server_epoch: row.server_epoch ?? 1,
     };
   } catch {
     // Pre-migration or transient DB error — keep the app running with

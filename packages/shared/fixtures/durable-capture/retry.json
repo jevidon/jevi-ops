@@ -1,0 +1,6 @@
+{
+  "protocol_version": 1,
+  "operation_id": "8f7e6d5c-4b3a-4291-8f7e-6d5c4b3a2918",
+  "command": "capture.retry_interpretation",
+  "payload": { "capture_id": "0b9c8d7e-6f5a-4b3c-8d2e-1f0a9b8c7d6e", "expected_attempt_no": 1 }
+}

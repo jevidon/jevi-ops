@@ -27,4 +27,7 @@ export const IngestRequestSchema = z.object({
   tags: z.array(z.string()).optional(),
   display_hint: DisplayHintSchema.optional(),
   source_ref: z.string().optional(),
+  // Optional client-supplied idempotency key (migration 0053). Same id +
+  // same body replays the original {id, created_at}; omitted → one-shot.
+  operation_id: z.string().uuid().optional(),
 });

@@ -12,6 +12,7 @@ export function ApiTokensPanel({ tokens }: { tokens: ApiTokenRow[] }) {
   const [pending, startTransition] = useTransition();
   const [name, setName] = useState('');
   const [kind, setKind] = useState<'agent' | 'device'>('agent');
+  const [profile, setProfile] = useState<'legacy' | 'capture_client'>('legacy');
   const [state, setState] = useState<(SyncResult & { token?: string }) | null>(null);
 
   const create = () =>
@@ -19,6 +20,7 @@ export function ApiTokensPanel({ tokens }: { tokens: ApiTokenRow[] }) {
       const fd = new FormData();
       fd.set('name', name);
       fd.set('kind', kind);
+      fd.set('permission_profile', profile);
       const result = await createApiTokenAction(fd);
       setState(result);
       if (result.ok) setName('');
@@ -36,8 +38,9 @@ export function ApiTokensPanel({ tokens }: { tokens: ApiTokenRow[] }) {
     <div className="flex flex-col gap-4">
       <p className="font-sans text-[13px] text-ink-2 leading-relaxed">
         Give an agent or capture device its own credential instead of your session.
-        Tokens carry full API access, can be revoked here any time, and can never
-        mint further tokens.
+        Full-access tokens reach the whole API; capture-only tokens can save and
+        read captures and nothing else. Both can be revoked here any time and can
+        never mint further tokens.
       </p>
 
       <div className="flex flex-wrap items-end gap-2">
@@ -59,6 +62,17 @@ export function ApiTokensPanel({ tokens }: { tokens: ApiTokenRow[] }) {
           >
             <option value="agent">agent</option>
             <option value="device">device</option>
+          </select>
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="eyebrow">Access</span>
+          <select
+            value={profile}
+            onChange={(e) => setProfile(e.target.value === 'capture_client' ? 'capture_client' : 'legacy')}
+            className="bg-transparent border border-line focus:border-accent focus:outline-none p-2 font-sans text-[14px] text-ink"
+          >
+            <option value="legacy">full access</option>
+            <option value="capture_client">capture only</option>
           </select>
         </label>
         <button
@@ -87,6 +101,11 @@ export function ApiTokensPanel({ tokens }: { tokens: ApiTokenRow[] }) {
             <li key={t.id} className="flex items-center gap-3 py-2">
               <span className="font-sans text-[13px] text-ink">{t.name}</span>
               <span className="font-mono text-[10px] uppercase tracking-wider text-ink-3">{t.kind}</span>
+              {t.permission_profile !== 'legacy' && (
+                <span className="font-mono text-[10px] uppercase tracking-wider text-ink-3">
+                  {t.permission_profile === 'capture_client' ? 'capture only' : 'research'}
+                </span>
+              )}
               <span className="ml-auto font-mono text-[10px] text-ink-3">
                 {t.last_used_at
                   ? `last used ${new Date(t.last_used_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`

@@ -72,6 +72,12 @@ export const AppSettingsSchema = z.object({
   // Weather panel data-bundle URL (migration 0046); null hides the panel.
   agenda_data_url: z.string().nullable(),
   updated_at: z.string().datetime({ offset: true }),
+  // Durable capture (migration 0053). capture_async_enabled hands queued
+  // captures to the asynchronous consumer (Gate C) instead of the inline
+  // bridge. data_space_id/server_epoch are read-only installation identity.
+  capture_async_enabled: z.boolean(),
+  data_space_id: z.string().uuid(),
+  server_epoch: z.number().int().positive(),
 });
 
 // Dashboard-editable integration config. Every field is optional (PATCH
@@ -96,6 +102,7 @@ export const UpdateAppSettingsSchema = z.object({
   briefing_panels: BriefingPanelConfigSchema.nullable().optional(),
   agenda_image_url: ClearableUrl.optional(),
   agenda_data_url: ClearableUrl.optional(),
+  capture_async_enabled: z.boolean().optional(),
 });
 
 export type AppSettings = z.infer<typeof AppSettingsSchema>;

@@ -406,6 +406,35 @@ export const captureApi = {
   warm: () => api.post<{ status: string }>('/api/capture/warm'),
 };
 
+// ─── Durable capture (capture program, Gate B) ──────────────────────────
+//
+// Save first, interpret second. create/finalize take command envelopes with
+// client-generated operation ids so a retry after a lost response replays
+// instead of duplicating. See packages/shared/src/schemas/durable-capture.ts.
+
+export type CaptureCreateEnvelope = import('@jevi-ops/shared').CaptureCreateEnvelope;
+export type CaptureFinalizeEnvelope = import('@jevi-ops/shared').CaptureFinalizeEnvelope;
+export type CaptureRetryEnvelope = import('@jevi-ops/shared').CaptureRetryEnvelope;
+export type CaptureReceiptResponse = import('@jevi-ops/shared').CaptureReceiptResponse;
+export type CaptureDetail = import('@jevi-ops/shared').CaptureDetail;
+export type InterpretResponse = import('@jevi-ops/shared').InterpretResponse;
+export type OperationReceipt = import('@jevi-ops/shared').OperationReceipt;
+
+export const capturesApi = {
+  create: (envelope: CaptureCreateEnvelope) => api.post<CaptureReceiptResponse>('/api/captures', envelope),
+  upload: (attachmentId: string, bytes: Uint8Array) =>
+    call<{ attachment_id: string; state: 'verified'; replayed: boolean }>(`/api/capture-uploads/${attachmentId}`, {
+      method: 'PUT', body: bytes as unknown as BodyInit, json: false, headers: { 'Content-Type': 'application/octet-stream' },
+    }),
+  finalize: (captureId: string, envelope: CaptureFinalizeEnvelope) => api.post<CaptureReceiptResponse>(`/api/captures/${captureId}/finalize`, envelope),
+  get: (captureId: string) => api.get<{ capture: CaptureDetail }>(`/api/captures/${captureId}`),
+  list: (states: string[], limit = 50) => api.get<{ captures: CaptureDetail[] }>(`/api/captures?state=${states.join(',')}&limit=${limit}`),
+  interpret: (captureId: string) => api.post<InterpretResponse>(`/api/captures/${captureId}/interpret`),
+  retry: (captureId: string, envelope: CaptureRetryEnvelope) => api.post<InterpretResponse>(`/api/captures/${captureId}/retry-interpretation`, envelope),
+  operation: (operationId: string) => api.get<{ operation: OperationReceipt }>(`/api/operations/${operationId}`),
+};
+
+
 // ─── Image uploads ──────────────────────────────────────────────────────
 //
 // Server-proxied uploads to Bunny Storage. Returns the StoredAttachment
@@ -1969,6 +1998,8 @@ export interface ApiTokenRow {
   id: string;
   name: string;
   kind: 'agent' | 'device';
+  permission_profile: 'legacy' | 'capture_client';
+  scopes: string[];
   created_at: string;
   last_used_at: string | null;
   revoked_at: string | null;
@@ -1976,7 +2007,7 @@ export interface ApiTokenRow {
 
 export const authApi = {
   listTokens: () => api.get<{ tokens: ApiTokenRow[] }>('/api/auth/tokens'),
-  createToken: (body: { name: string; kind: 'agent' | 'device' }) =>
+  createToken: (body: { name: string; kind: 'agent' | 'device'; permission_profile?: 'legacy' | 'capture_client'; scopes?: string[] }) =>
     api.post<ApiTokenRow & { token: string }>('/api/auth/tokens', body),
   revokeToken: (id: string) => api.delete<{ revoked: string }>(`/api/auth/tokens/${id}`),
 };

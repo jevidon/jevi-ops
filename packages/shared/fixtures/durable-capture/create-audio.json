@@ -1,0 +1,22 @@
+{
+  "protocol_version": 1,
+  "operation_id": "3c2b1a09-8f7e-4d6c-9b5a-4c3d2e1f0a9b",
+  "command": "capture.create",
+  "payload": {
+    "capture_id": "7a6b5c4d-3e2f-4a1b-8c9d-0e1f2a3b4c5d",
+    "kind": "audio",
+    "intent": "capture_only",
+    "modality": "spoken",
+    "captured_at": "2026-09-14T10:15:30.250+12:00",
+    "time_zone": "Pacific/Auckland",
+    "client": { "name": "web", "version": "2026.09", "surface": "portal-voice" },
+    "attachments": [
+      {
+        "attachment_id": "9d8c7b6a-5f4e-4d3c-8b2a-1f0e9d8c7b6a",
+        "media_type": "audio/webm",
+        "size_bytes": 48213,
+        "sha256": "a3f1c2e4b5d6a7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f70"
+      }
+    ]
+  }
+}
