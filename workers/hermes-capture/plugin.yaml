@@ -1,0 +1,4 @@
+name: jevi-capture
+version: 0.1.0
+description: "/capture <text> — save a thought to Jevi Ops before any model runs. Deterministic: no LLM turn, honest receipt, pending envelope kept until the outcome is known."
+author: "jevi-ops"
