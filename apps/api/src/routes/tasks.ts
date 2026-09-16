@@ -1,13 +1,14 @@
 import type { FastifyPluginAsync } from 'fastify';
-import { and, desc, eq, type SQL } from 'drizzle-orm';
+import { and, desc, eq, sql, type SQL } from 'drizzle-orm';
 import { CreateTaskSchema, UpdateTaskSchema } from '@jevi-ops/shared/schemas';
 import { INBOX_DOMAIN_ID, isRecurrencePattern, nextDueDate } from '@jevi-ops/shared';
 import { getAppTz } from '../lib/app-settings.js';
 import { todayInTz } from '../lib/tz.js';
-import { getDb, type Db } from '../lib/db.js';
+import { getDb } from '../lib/db.js';
+import type { DbOrTx } from '../lib/maintenance-tx.js';
 import { clearAttentionForSource } from '../lib/attention.js';
 import { MaintenanceNeedsDetails, clearMaintenanceAttention, completeMaintenanceItem } from '../lib/maintenance.js';
-import { maintenance_items, milestones, projects, tasks } from '../db/schema.js';
+import { maintenance_items, milestones, projects, stewardship_domains, tasks } from '../db/schema.js';
 
 // Tasks CRUD. Auth-gated.
 
@@ -32,7 +33,7 @@ const TASK_EMBEDS = {
 // project.domain_id wins on conflict-with-mismatch (returned as an error,
 // not silently corrected, so a buggy client surfaces immediately).
 async function resolveTaskDomain(
-  db: Db,
+  db: DbOrTx,
   body: { project_id?: string | null; domain_id?: string | null },
 ): Promise<{ ok: true; domain_id: string } | { ok: false; error: string }> {
   let projectDomainId: string | null = null;
@@ -78,7 +79,7 @@ async function resolveTaskDomain(
 // task can never hold a milestone. Best-effort — any lookup failure parks the
 // task under General rather than blocking the save.
 async function resolveMilestone(
-  db: Db,
+  db: DbOrTx,
   milestoneId: string,
   projectId: string | null,
 ): Promise<string | null> {
@@ -160,166 +161,197 @@ export const taskRoutes: FastifyPluginAsync = async (app) => {
         details: parsed.error.flatten().fieldErrors,
       });
     }
-    const db = getDb();
-    // domain_id is excluded from the spread: the Zod schema allows null (as
-    // "recompute for me") but the column is NOT NULL — the resolver below
-    // sets the definitive value whenever the patch touches routing.
-    const { domain_id: _ignoredDomainId, ...patchRest } = parsed.data;
-    const update: Partial<typeof tasks.$inferInsert> = { ...patchRest };
-    let rolledOver = false;
-
-    // Re-resolve domain routing when project_id or domain_id is being
-    // changed. Skip when neither key is in the patch — most PATCHes are
-    // status flips, title edits, etc. and shouldn't pay for a project
-    // lookup. When project_id is being touched (set or cleared), we have
-    // to recompute because the old domain_id might no longer be right.
-    if ('project_id' in parsed.data || 'domain_id' in parsed.data || 'milestone_id' in parsed.data) {
-      // Pull the existing row so we know the current project/domain/milestone
-      // when the patch only changes one of them.
-      const existing = await db.query.tasks.findFirst({
-        columns: { project_id: true, domain_id: true, milestone_id: true },
-        where: eq(tasks.id, req.params.id),
-      });
-      if (!existing) return reply.code(404).send({ error: 'not_found' });
-
-      const nextProjectId = 'project_id' in parsed.data
-        ? (parsed.data.project_id ?? null)
-        : existing.project_id;
-
-      // Domain routing only re-resolves when project/domain actually change —
-      // a milestone-only patch keeps the existing domain.
-      if ('project_id' in parsed.data || 'domain_id' in parsed.data) {
-        const nextDomainId = 'domain_id' in parsed.data
-          ? (parsed.data.domain_id ?? null)
-          : null; // explicit override only — don't keep the old domain when the project is changing
-        const resolved = await resolveTaskDomain(db, {
-          project_id: nextProjectId,
-          domain_id: nextDomainId,
-        });
-        if (!resolved.ok) {
-          return reply.code(400).send({ error: resolved.error });
+    let completedItemId: string | undefined;
+    const result = await getDb().transaction(async (db) => {
+      await db.execute(sql`lock table tasks in row exclusive mode`);
+      const [current] = await db.select().from(tasks).where(eq(tasks.id, req.params.id)).for('update');
+      if (!current) return reply.code(404).send({ error: 'not_found' });
+      if (parsed.data.workflow_status_id) {
+        if ('project_id' in parsed.data || 'domain_id' in parsed.data) {
+          return reply.code(400).send({ error: 'move_then_set_status', message: 'Move the task first, then select its new status.' });
         }
-        update.domain_id = resolved.domain_id;
+        const scope = current.project_id
+          ? await db.query.projects.findFirst({ where: eq(projects.id, current.project_id) })
+          : await db.query.stewardship_domains.findFirst({ where: eq(stewardship_domains.id, current.domain_id) });
+        if (!scope?.task_workflow || scope.workflow_revision !== parsed.data.workflow_revision) {
+          return reply.code(409).send({ error: 'workflow_changed', message: 'Workflow changed. Refresh and select a status again.' });
+        }
+        const selected = scope.task_workflow.statuses.find(s => s.id === parsed.data.workflow_status_id);
+        if (!selected) return reply.code(400).send({ error: 'invalid_workflow_status' });
+        if (parsed.data.status && parsed.data.status !== selected.category) return reply.code(400).send({ error: 'status_category_mismatch' });
+        // A move between two labels in the same category is not another completion.
+        if (selected.category !== current.status) parsed.data.status = selected.category;
+        else delete parsed.data.status;
+      }
+      // domain_id is excluded from the spread: the Zod schema allows null (as
+      // "recompute for me") but the column is NOT NULL — the resolver below
+      // sets the definitive value whenever the patch touches routing.
+      const { domain_id: _ignoredDomainId, workflow_revision: _revision, ...patchRest } = parsed.data;
+      const update: Partial<typeof tasks.$inferInsert> = { ...patchRest };
+      let rolledOver = false;
+
+      // Re-resolve domain routing when project_id or domain_id is being
+      // changed. Skip when neither key is in the patch — most PATCHes are
+      // status flips, title edits, etc. and shouldn't pay for a project
+      // lookup. When project_id is being touched (set or cleared), we have
+      // to recompute because the old domain_id might no longer be right.
+      if ('project_id' in parsed.data || 'domain_id' in parsed.data || 'milestone_id' in parsed.data) {
+        // Pull the existing row so we know the current project/domain/milestone
+        // when the patch only changes one of them.
+        const existing = await db.query.tasks.findFirst({
+          columns: { project_id: true, domain_id: true, milestone_id: true },
+          where: eq(tasks.id, req.params.id),
+        });
+        if (!existing) return reply.code(404).send({ error: 'not_found' });
+
+        const nextProjectId = 'project_id' in parsed.data
+          ? (parsed.data.project_id ?? null)
+          : existing.project_id;
+
+        // Domain routing only re-resolves when project/domain actually change —
+        // a milestone-only patch keeps the existing domain.
+        if ('project_id' in parsed.data || 'domain_id' in parsed.data) {
+          const nextDomainId = 'domain_id' in parsed.data
+            ? (parsed.data.domain_id ?? null)
+            : null; // explicit override only — don't keep the old domain when the project is changing
+          const resolved = await resolveTaskDomain(db, {
+            project_id: nextProjectId,
+            domain_id: nextDomainId,
+          });
+          if (!resolved.ok) {
+            return reply.code(400).send({ error: resolved.error });
+          }
+          update.domain_id = resolved.domain_id;
+        }
+
+        // Milestone link: re-validate against the effective project (0034). A
+        // project change re-checks the existing link even when the patch didn't
+        // touch milestone_id — a milestone from the old project is parked under
+        // General rather than silently pointing across projects.
+        const candidateMilestoneId = 'milestone_id' in parsed.data
+          ? (parsed.data.milestone_id ?? null)
+          : existing.milestone_id;
+        update.milestone_id = candidateMilestoneId
+          ? await resolveMilestone(db, candidateMilestoneId, nextProjectId)
+          : null;
       }
 
-      // Milestone link: re-validate against the effective project (0034). A
-      // project change re-checks the existing link even when the patch didn't
-      // touch milestone_id — a milestone from the old project is parked under
-      // General rather than silently pointing across projects.
-      const candidateMilestoneId = 'milestone_id' in parsed.data
-        ? (parsed.data.milestone_id ?? null)
-        : existing.milestone_id;
-      update.milestone_id = candidateMilestoneId
-        ? await resolveMilestone(db, candidateMilestoneId, nextProjectId)
-        : null;
-    }
-
-    if (parsed.data.status === 'done') {
-      // Recurring tasks roll forward instead of marking done. Read the
-      // existing recurrence_rule from the DB (don't trust the client to
-      // send it on a plain "check it off" call). If the rule is one we
-      // know how to advance, swap the done → open and bump due_date.
-      // Reminders dedup (reminders_sent) clears so the next occurrence
-      // can fire reminders again.
-      const existing = await db.query.tasks.findFirst({
-        columns: { recurrence_rule: true, due_date: true },
-        where: eq(tasks.id, req.params.id),
-      });
-
-      const ruleRaw = existing?.recurrence_rule;
-      if (ruleRaw && isRecurrencePattern(ruleRaw)) {
-        // App-tz today, not UTC — a UTC date is already "tomorrow" for
-        // evening completions in a behind-UTC zone, which advances the
-        // roll-forward one occurrence too far (and one short in the
-        // ahead-of-UTC morning case). Same convention as waiting_since
-        // below and every other date consumer.
-        const todayIso = todayInTz(await getAppTz());
-        const next = nextDueDate({
-          currentDue: existing?.due_date ?? null,
-          rule: ruleRaw,
-          todayIso,
+      if (parsed.data.status === 'done') {
+        // Recurring tasks roll forward instead of marking done. Read the
+        // existing recurrence_rule from the DB (don't trust the client to
+        // send it on a plain "check it off" call). If the rule is one we
+        // know how to advance, swap the done → open and bump due_date.
+        // Reminders dedup (reminders_sent) clears so the next occurrence
+        // can fire reminders again.
+        const existing = await db.query.tasks.findFirst({
+          columns: { recurrence_rule: true, due_date: true },
+          where: eq(tasks.id, req.params.id),
         });
-        update.status = 'open';
+
+        const ruleRaw = existing?.recurrence_rule;
+        if (ruleRaw && isRecurrencePattern(ruleRaw)) {
+          // App-tz today, not UTC — a UTC date is already "tomorrow" for
+          // evening completions in a behind-UTC zone, which advances the
+          // roll-forward one occurrence too far (and one short in the
+          // ahead-of-UTC morning case). Same convention as waiting_since
+          // below and every other date consumer.
+          const todayIso = todayInTz(await getAppTz());
+          const next = nextDueDate({
+            currentDue: existing?.due_date ?? null,
+            rule: ruleRaw,
+            todayIso,
+          });
+          update.status = 'open';
+          update.workflow_status_id = null;
+          update.completed_at = null;
+          update.due_date = next;
+          update.reminders_sent = {};
+          // top3_for_date is intentionally cleared too — today's instance
+          // is "done", so it shouldn't keep starring tomorrow's spawn.
+          update.top3_for_date = null;
+          rolledOver = true;
+        } else {
+          update.completed_at = new Date().toISOString();
+        }
+        // Completing (or rolling over) leaves the waiting state (0038).
+        update.waiting_on = null;
+        update.waiting_since = null;
+      } else if (parsed.data.status === 'open') {
+        // Reopening — clear completion timestamp so analytics don't see a
+        // stale "completed at" on a row that's actually open. Reopen never
+        // lands in waiting, so clear the waiting fields too.
         update.completed_at = null;
-        update.due_date = next;
-        update.reminders_sent = {};
-        // top3_for_date is intentionally cleared too — today's instance
-        // is "done", so it shouldn't keep starring tomorrow's spawn.
-        update.top3_for_date = null;
-        rolledOver = true;
-      } else {
-        update.completed_at = new Date().toISOString();
-      }
-      // Completing (or rolling over) leaves the waiting state (0038).
-      update.waiting_on = null;
-      update.waiting_since = null;
-    } else if (parsed.data.status === 'open') {
-      // Reopening — clear completion timestamp so analytics don't see a
-      // stale "completed at" on a row that's actually open. Reopen never
-      // lands in waiting, so clear the waiting fields too.
-      update.completed_at = null;
-      update.waiting_on = null;
-      update.waiting_since = null;
-    } else if (parsed.data.status === 'waiting') {
-      // Entering waiting (blocked on someone else): stamp the aging anchor if
-      // the client didn't provide one. Must be the APP-TZ local date — every
-      // consumer (attention rule, /work bucketing, all the UI day-counts)
-      // diffs against todayInTz(tz), so a UTC stamp would read a day off for
-      // evening waits in a behind-UTC zone. waiting_on flows through from the
-      // patch.
-      if (!('waiting_since' in parsed.data) || !parsed.data.waiting_since) {
-        update.waiting_since = todayInTz(await getAppTz());
-      }
-    }
-    // Checking off a maintenance-generated task completes the maintenance
-    // item behind it — in ONE transaction with the task update, through the
-    // same lib the module's own complete endpoint uses, so "task done but
-    // item not logged" can't happen. Attention live-clear follows commit.
-    const linkedItem =
-      parsed.data.status === 'done' && !rolledOver
-        ? await db.query.maintenance_items.findFirst({
-            columns: { id: true },
-            where: eq(maintenance_items.generated_task_id, req.params.id),
-          })
-        : undefined;
-
-    let row: typeof tasks.$inferSelect | undefined;
-    if (linkedItem) {
-      const completedOn = todayInTz(await getAppTz());
-      try {
-        row = await db.transaction(async (tx) => {
-          const [r] = await tx.update(tasks).set(update).where(eq(tasks.id, req.params.id)).returning();
-          if (!r) return undefined;
-          await completeMaintenanceItem(tx, linkedItem.id, {
-            completedOn,
-            today: completedOn,
-            source: 'task',
-            actor: req.authMethod === 'api_token' ? req.user!.email : `session:${req.user!.email}`,
-            eventKey: `task:${req.params.id}:${completedOn}`,
-          });
-          return r;
-        });
-      } catch (err) {
-        // A checkbox can't carry the evidence an expiry/prepaid/inspection
-        // item requires. The transaction rolled back — the task stays open —
-        // and the client is told what the item needs and where to say it.
-        if (err instanceof MaintenanceNeedsDetails) {
-          return reply.code(409).send({
-            error: 'needs_details',
-            item_id: linkedItem.id,
-            policy: err.policy,
-            fields: err.fields,
-            message: err.message,
-          });
+        update.waiting_on = null;
+        update.waiting_since = null;
+      } else if (parsed.data.status === 'waiting') {
+        update.completed_at = null;
+        // Entering waiting (blocked on someone else): stamp the aging anchor if
+        // the client didn't provide one. Must be the APP-TZ local date — every
+        // consumer (attention rule, /work bucketing, all the UI day-counts)
+        // diffs against todayInTz(tz), so a UTC stamp would read a day off for
+        // evening waits in a behind-UTC zone. waiting_on flows through from the
+        // patch.
+        if (!('waiting_since' in parsed.data) || !parsed.data.waiting_since) {
+          update.waiting_since = todayInTz(await getAppTz());
         }
-        throw err;
       }
-      if (row) await clearMaintenanceAttention(db, linkedItem.id);
-    } else {
-      [row] = await db.update(tasks).set(update).where(eq(tasks.id, req.params.id)).returning();
-    }
-    if (!row) return reply.code(404).send({ error: 'not_found' });
+      // Checking off a maintenance-generated task completes the maintenance
+      // item behind it — in ONE transaction with the task update, through the
+      // same lib the module's own complete endpoint uses, so "task done but
+      // item not logged" can't happen. Attention live-clear follows commit.
+      const linkedItem =
+        parsed.data.status === 'done' && !rolledOver
+          ? await db.query.maintenance_items.findFirst({
+              columns: { id: true },
+              where: eq(maintenance_items.generated_task_id, req.params.id),
+            })
+          : undefined;
 
+      let row: typeof tasks.$inferSelect | undefined;
+      if (linkedItem) {
+        const completedOn = todayInTz(await getAppTz());
+        try {
+          row = await db.transaction(async (tx) => {
+            const [r] = await tx.update(tasks).set(update).where(eq(tasks.id, req.params.id)).returning();
+            if (!r) return undefined;
+            await completeMaintenanceItem(tx, linkedItem.id, {
+              completedOn,
+              today: completedOn,
+              source: 'task',
+              actor: req.authMethod === 'api_token' ? req.user!.email : `session:${req.user!.email}`,
+              eventKey: `task:${req.params.id}:${completedOn}`,
+            });
+            return r;
+          });
+        } catch (err) {
+          // A checkbox can't carry the evidence an expiry/prepaid/inspection
+          // item requires. The transaction rolled back — the task stays open —
+          // and the client is told what the item needs and where to say it.
+          if (err instanceof MaintenanceNeedsDetails) {
+            return reply.code(409).send({
+              error: 'needs_details',
+              item_id: linkedItem.id,
+              policy: err.policy,
+              fields: err.fields,
+              message: err.message,
+            });
+          }
+          throw err;
+        }
+        if (row) completedItemId = linkedItem.id;
+      } else {
+        [row] = await db.update(tasks).set(update).where(eq(tasks.id, req.params.id)).returning();
+      }
+      if (!row) return reply.code(404).send({ error: 'not_found' });
+
+      // Surface the rollover so the client can show a "Next: <date>" hint
+      // if it wants to. Adds one field; existing consumers ignore it.
+      return { ...row, recurred: rolledOver };
+    });
+    if (!('recurred' in result)) return result;
+    const db = getDb();
+    const row = result;
+    if (completedItemId) await clearMaintenanceAttention(db, completedItemId);
     // Live-reconcile this task's Attention items so a status/date change
     // shows immediately instead of waiting for the 5am cron. Each managed
     // rule is checked against the task's NEW state; only rules that no
@@ -350,9 +382,7 @@ export const taskRoutes: FastifyPluginAsync = async (app) => {
       req.log.warn({ err, taskId: req.params.id }, 'attention reconcile after task update failed');
     }
 
-    // Surface the rollover so the client can show a "Next: <date>" hint
-    // if it wants to. Adds one field; existing consumers ignore it.
-    return { ...row, recurred: rolledOver };
+    return result;
   });
 
   app.delete<{ Params: { id: string } }>('/api/tasks/:id', async (req, reply) => {

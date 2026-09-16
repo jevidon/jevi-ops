@@ -1829,6 +1829,9 @@ export interface CadenceRow {
 // labels pre-formatted API-side.
 
 export interface AgendaTask {
+  domain_id: string;
+  project_id: string | null;
+  workflow_status_id: string | null;
   id: string;
   title: string;
   status: string;

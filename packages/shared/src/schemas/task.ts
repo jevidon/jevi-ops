@@ -18,6 +18,7 @@ export const TaskSchema = z.object({
   title: z.string().min(1),
   notes: nullableString(),
   status: TaskStatusSchema,
+  workflow_status_id: z.string().nullable().optional(),
   due_date: nullableDate(),
   due_time: nullableString(),
   priority: z.number().int().min(1).max(4),
@@ -88,4 +89,6 @@ export const CreateTaskSchema = z.object({
 
 export const UpdateTaskSchema = CreateTaskSchema.partial().extend({
   status: TaskStatusSchema.optional(),
+  workflow_status_id: z.string().min(1).max(64).optional(),
+  workflow_revision: z.number().int().min(0).optional(),
 });

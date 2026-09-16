@@ -1,3 +1,4 @@
+import { TaskStatusControl } from '@/components/task-workflows/TaskWorkflows';
 import Link from 'next/link';
 import { pinsApi, type ResolvedPin } from '@/lib/api';
 import { Pill } from '@/components/Pill';
@@ -52,6 +53,7 @@ function PinRow({ pin, first, last }: { pin: ResolvedPin; first: boolean; last: 
   return (
     <li className="group flex items-center gap-3 py-2.5 border-b border-line">
       {pin.task ? (
+        <TaskStatusControl task={{ ...pin.task, id: pin.target_id }}>
         <form action={toggleTaskDoneAction} className="shrink-0">
           <input type="hidden" name="taskId" value={pin.target_id} />
           <input type="hidden" name="status" value={pin.task.status} />
@@ -71,6 +73,7 @@ function PinRow({ pin, first, last }: { pin: ResolvedPin; first: boolean; last: 
             )}
           </button>
         </form>
+        </TaskStatusControl>
       ) : pin.routine ? (
         <span
           title={pin.routine.done_today ? 'Done today' : 'Not done yet today'}

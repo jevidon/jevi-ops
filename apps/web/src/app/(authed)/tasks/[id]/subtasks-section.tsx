@@ -9,7 +9,7 @@ import { SubtaskQuickAdd } from './subtask-quick-add';
 // renders for tasks that aren't subtasks themselves.
 export function SubtasksSection({ parent, subtasks }: { parent: Task; subtasks: Task[] }) {
   const open = subtasks
-    .filter((t) => t.status === 'open')
+    .filter((t) => t.status !== 'done')
     .sort((a, b) => a.created_at.localeCompare(b.created_at));
   const done = subtasks
     .filter((t) => t.status === 'done')

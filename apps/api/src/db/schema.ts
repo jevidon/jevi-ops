@@ -1,3 +1,4 @@
+import type { TaskWorkflow } from '@jevi-ops/shared';
 import { pgTable, index, uniqueIndex, foreignKey, primaryKey, check, uuid, text, numeric, date, timestamp, unique, jsonb, boolean, integer, real, time, smallint, bigint } from "drizzle-orm/pg-core"
 import { sql } from "drizzle-orm"
 
@@ -60,6 +61,8 @@ export type HealthHistoryItem = Record<string, unknown> | string;
 
 export const projects = pgTable("projects", {
 	id: uuid().defaultRandom().primaryKey().notNull(),
+	task_workflow: jsonb().$type<TaskWorkflow>(),
+	workflow_revision: integer().default(0).notNull(),
 	name: text().notNull(),
 	description: text(),
 	domain_id: uuid(),
@@ -120,6 +123,8 @@ export const projects = pgTable("projects", {
 
 export const stewardship_domains = pgTable("stewardship_domains", {
 	id: uuid().defaultRandom().primaryKey().notNull(),
+	task_workflow: jsonb().$type<TaskWorkflow>(),
+	workflow_revision: integer().default(0).notNull(),
 	name: text().notNull(),
 	description: text(),
 	fruit_definition: text(),
@@ -451,6 +456,7 @@ export const content_templates = pgTable("content_templates", {
 
 export const tasks = pgTable("tasks", {
 	id: uuid().defaultRandom().primaryKey().notNull(),
+	workflow_status_id: text(),
 	title: text().notNull(),
 	notes: text(),
 	status: text().default('open').notNull(),
@@ -1475,3 +1481,10 @@ export const maintenance_visit_items = pgTable("maintenance_visit_items", {
 			name: "maintenance_visit_items_item_id_fkey"
 		}).onDelete("cascade"),
 ]);
+
+export const task_workflow_presets = pgTable('task_workflow_presets', {
+  id: uuid().defaultRandom().primaryKey().notNull(),
+  name: text().notNull(),
+  definition: jsonb().$type<TaskWorkflow>().notNull(),
+  created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+});

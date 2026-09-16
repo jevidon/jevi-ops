@@ -1,3 +1,6 @@
+import { TaskWorkflowsProvider } from '@/components/task-workflows/TaskWorkflows';
+import type { WorkflowRegistry } from '@jevi-ops/shared';
+import { api } from '@/lib/api';
 import { BottomTabBar } from '@/components/BottomTabBar';
 import { IconRail } from '@/components/IconRail';
 import { Topbar } from '@/components/Topbar';
@@ -48,12 +51,14 @@ export default async function AuthedLayout({ children }: { children: React.React
   // Pull the configured timezone once per request and pass it into a
   // client-side context so date/time-aware UI (DateInput, the routine
   // strip, etc.) doesn't need to hardcode 'America/Denver'.
+  const workflows = await api.get<WorkflowRegistry>('/api/task-workflows');
   const timezone = await getAppTimezone();
   const healthEnabled = await getFeatureFlag('health_module_enabled');
   const routinesEnabled = await getFeatureFlag('routines_module_enabled');
   const maintenanceEnabled = await getFeatureFlag('maintenance_module_enabled');
 
   return (
+    <TaskWorkflowsProvider registry={workflows}>
     <TimezoneProvider timezone={timezone}>
       <CrumbsProvider>
       <ToastProvider>
@@ -115,5 +120,6 @@ export default async function AuthedLayout({ children }: { children: React.React
       </ToastProvider>
       </CrumbsProvider>
     </TimezoneProvider>
+    </TaskWorkflowsProvider>
   );
 }

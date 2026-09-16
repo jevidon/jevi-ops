@@ -1,3 +1,6 @@
+import { TaskItem } from '@/components/TaskItem';
+import { TaskStatusControl } from '@/components/task-workflows/TaskWorkflows';
+import { WorkflowSettings } from '@/components/task-workflows/WorkflowSettings';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { Pill } from '@/components/Pill';
@@ -95,18 +98,21 @@ export default async function DomainDetailPage({
   let domain: Domain | null = null;
   let openTasks: Task[] = [];
   let waitingTasks: Task[] = [];
+  let satisfiedTasks: Task[] = [];
   let work: WorkDomain | null = null;
   // Unassigned, active assets — the "Assign existing…" picker's options.
   let unassignedAssets: Array<{ id: string; name: string; kind: string }> = [];
   let errorMessage: string | null = null;
 
-  const [domainRes, tasksRes, waitingRes, workRes, assetsRes] = await Promise.allSettled([
+  const [domainRes, tasksRes, waitingRes, workRes, assetsRes, doneRes] = await Promise.allSettled([
     domainsApi.get(id),
     tasksApi.list({ domain_id: id, status: 'open' }),
     tasksApi.list({ domain_id: id, status: 'waiting' }),
     workApi.get(),
     assetsApi.list(),
+    tasksApi.list({ domain_id: id, status: 'done' }),
   ]);
+  if (doneRes.status === 'fulfilled') satisfiedTasks = doneRes.value.tasks.filter(t => !t.project_id && t.workflow_status_id);
   if (assetsRes.status === 'fulfilled') {
     unassignedAssets = assetsRes.value.assets
       .filter((a) => a.domain_id == null && a.lifecycle === 'active')
@@ -284,6 +290,7 @@ export default async function DomainDetailPage({
       <DetailBody
         main={
           <>
+            <WorkflowSettings scope="domain" id={domain.id} />
             {isInbox ? (
               <div className="border border-line bg-surface p-4 mb-8">
                 <p className="font-sans text-[13px] text-ink-2 leading-relaxed">
@@ -367,6 +374,14 @@ export default async function DomainDetailPage({
               </DetailSection>
               </>
             )}
+
+            {!isInbox && domain.task_workflow && <DetailSection label="Direct tasks">
+              {[...openTasks, ...waitingTasks].filter(t => !t.project_id).map(t => <TaskItem key={t.id} task={t} showStar={false} />)}
+              <Link href={`/tasks/new?domain_id=${domain.id}`} className="text-[12px] underline">Add task</Link>
+            </DetailSection>}
+            {domain.task_workflow && satisfiedTasks.length > 0 && <DetailSection label="Satisfied">
+              {satisfiedTasks.map(t => <TaskItem key={t.id} task={t} showStar={false} />)}
+            </DetailSection>}
 
             {/* Task lists render only for Inbox — triage IS the page there.
                 Regular domains stopped carrying the raw task list (Aug 2026):
@@ -614,6 +629,7 @@ function TaskRow({ task, tz, today, badge }: { task: Task; tz: string; today: st
   const waitStale = waitDays != null && waitDays >= 7;
   return (
     <li className="py-2 border-b border-line/40">
+      <TaskStatusControl task={task} />
       <Link
         href={`/tasks/${task.id}`}
         className="flex items-baseline justify-between gap-3 hover:opacity-80 transition-opacity"

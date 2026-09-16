@@ -1,3 +1,4 @@
+import { TaskWorkflowSchema } from './task-workflow.js';
 import { z } from 'zod';
 import { docFields, docUpdateFields } from './doc.js';
 
@@ -18,6 +19,8 @@ export const DomainIllustrationSchema = z.object({
 });
 
 export const DomainSchema = z.object({
+  task_workflow: TaskWorkflowSchema.nullable().optional(),
+  workflow_revision: z.number().int().optional(),
   id: z.string().uuid(),
   name: z.string().min(1),
   description: z.string().nullable().optional(),

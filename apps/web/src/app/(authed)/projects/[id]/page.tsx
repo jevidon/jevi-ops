@@ -1,3 +1,4 @@
+import { WorkflowSettings } from '@/components/task-workflows/WorkflowSettings';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { SetCrumbs } from '@/components/crumbs/crumbs';
@@ -293,6 +294,7 @@ export default async function ProjectDetailPage({
               label="Tasks"
               count={<>{openTasks.length} open{overdueCount > 0 && <span className="text-accent"> · {overdueCount} overdue</span>}{waitingTasks.length > 0 && <span> · {waitingTasks.length} waiting</span>}</>}
             >
+              <WorkflowSettings scope="project" id={project.id} />
               {/* Quick capture (Wave 2 #2) — title-only add into this
                   project; the ＋ buttons above stay the full-editor path. */}
               <div className="mb-4">
@@ -348,9 +350,9 @@ export default async function ProjectDetailPage({
             </section>
 
             {doneTasks.length > 0 && (
-              <details className="mt-8 group">
+              <details className="mt-8 group" open={Boolean(project.task_workflow)}>
                 <summary className="eyebrow pb-2 border-b border-line cursor-pointer list-none flex items-center justify-between hover:text-ink-2 transition-colors">
-                  <span>✓ {doneTasks.length} done {doneToday.length > 0 ? `(${doneToday.length} today)` : ''}</span>
+                  <span>✓ {doneTasks.length} {project.task_workflow ? 'satisfied' : 'done'} {doneToday.length > 0 ? `(${doneToday.length} today)` : ''}</span>
                   <span className="font-mono text-[10px] text-ink-3 transition-transform group-open:rotate-90" aria-hidden>▶</span>
                 </summary>
                 <div className="mt-3">{doneTasks.map((t) => (<TaskItem key={t.id} task={t} showStar={false} showProject={false} />))}</div>

@@ -1,3 +1,4 @@
+import { TaskStatusControl } from '@/components/task-workflows/TaskWorkflows';
 import Link from 'next/link';
 import { briefingApi, type AgendaPayload, type AgendaTask } from '@/lib/api';
 import { toggleTaskDoneAction } from '../../today/actions';
@@ -80,6 +81,7 @@ function AgendaTaskRow({ task, timeLabel }: { task: AgendaTask; timeLabel: strin
         <span className="font-mono text-[12px] text-ink-3 tabular-nums shrink-0 w-12">{timeLabel}</span>
       )}
       <span className="flex items-center gap-2.5 flex-1 min-w-0">
+        <TaskStatusControl task={task}>
         <form action={toggleTaskDoneAction} className="shrink-0 self-center">
           <input type="hidden" name="taskId" value={task.id} />
           <input type="hidden" name="status" value={task.status} />
@@ -89,6 +91,7 @@ function AgendaTaskRow({ task, timeLabel }: { task: AgendaTask; timeLabel: strin
             className="grid place-items-center w-[15px] h-[15px] rounded-[3px] border-[1.5px] border-line-strongest hover:border-ink-2 transition-colors"
           />
         </form>
+        </TaskStatusControl>
         <Link href={`/tasks/${task.id}`} className="font-sans text-[13px] text-ink truncate hover:text-accent transition-colors">
           {task.title}
           {task.project && <span className="text-ink-3"> · {task.project.name}</span>}

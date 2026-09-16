@@ -1,3 +1,4 @@
+import { TaskStatusControl, TaskStatusLabel } from '@/components/task-workflows/TaskWorkflows';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { SetCrumbs } from '@/components/crumbs/crumbs';
@@ -152,7 +153,7 @@ export default async function TaskDetailPage({
           </>
         }
         name={task.title}
-        state={<Pill state={state.s}>{state.label}</Pill>}
+        state={<Pill state={state.s}><TaskStatusLabel task={task}>{state.label}</TaskStatusLabel></Pill>}
         actions={
           <>
             <PinButton targetType="task" targetId={task.id} path={`/tasks/${task.id}`} />
@@ -193,6 +194,7 @@ export default async function TaskDetailPage({
         below={
           // Status controls — complete / reopen / waiting (Addendum 08),
           // riding inside the header band under the title.
+          <TaskStatusControl task={task}>
           <div className="mt-4 flex flex-wrap items-center gap-3">
             {task.status === 'done' ? (
               <>
@@ -233,6 +235,7 @@ export default async function TaskDetailPage({
               </>
             )}
           </div>
+          </TaskStatusControl>
         }
       />
 

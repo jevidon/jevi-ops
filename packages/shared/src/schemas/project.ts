@@ -1,3 +1,4 @@
+import { TaskWorkflowSchema } from './task-workflow.js';
 import { z } from 'zod';
 import { docFields, docUpdateFields } from './doc.js';
 
@@ -32,6 +33,8 @@ export const PROJECT_COLOR_PALETTE = [
 const HexColorSchema = z.string().regex(/^#[0-9A-Fa-f]{6}$/);
 
 export const ProjectSchema = z.object({
+  task_workflow: TaskWorkflowSchema.nullable().optional(),
+  workflow_revision: z.number().int().optional(),
   id: z.string().uuid(),
   name: z.string().min(1),
   description: z.string().nullable().optional(),
