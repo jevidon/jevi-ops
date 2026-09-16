@@ -9,12 +9,28 @@ import { changeWorkflowStatus, configureWorkflow } from './actions';
 
 vi.mock('@/app/(authed)/today/actions', () => ({ toggleTaskDoneAction: vi.fn() }));
 vi.mock('./actions', () => ({ changeWorkflowStatus: vi.fn(), configureWorkflow: vi.fn(), saveWorkflowPreset: vi.fn(), deleteWorkflowPreset: vi.fn() }));
-afterEach(() => { cleanup(); vi.resetAllMocks(); });
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.resetAllMocks(); });
 const kit = BUILTIN_WORKFLOW_PRESETS[1]!.definition;
 const registry: WorkflowRegistry = { scopes: [{ id: 'project', scope: 'project', definition: kit, revision: 3 }, { id: 'domain', scope: 'domain', definition: kit, revision: 2 }], presets: BUILTIN_WORKFLOW_PRESETS };
 const task = { id: 'task', status: 'open', project_id: 'project', domain_id: 'domain', workflow_status_id: 'pack' };
 
 describe('task status controls', () => {
+  it.each(['project', 'domain'] as const)('adds and saves a %s status without native randomUUID', async (scope) => {
+    vi.stubGlobal('crypto', { getRandomValues: globalThis.crypto.getRandomValues.bind(globalThis.crypto) });
+    vi.mocked(configureWorkflow).mockResolvedValue({ ok: true });
+    render(<TaskWorkflowsProvider registry={registry}><WorkflowSettings scope={scope} id={scope} /></TaskWorkflowsProvider>);
+    fireEvent.click(screen.getByText('Task statuses · Custom'));
+    fireEvent.click(screen.getByRole('button', { name: 'Add status' }));
+    fireEvent.change(screen.getByLabelText('Status 4 name'), { target: { value: 'Ordered' } });
+    fireEvent.change(screen.getByLabelText('Status 4 category'), { target: { value: 'waiting' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save settings' }));
+
+    await waitFor(() => expect(configureWorkflow).toHaveBeenCalledWith(scope, scope, { statuses: [
+      ...kit.statuses,
+      { id: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/), label: 'Ordered', category: 'waiting' },
+    ] }, scope === 'project' ? 3 : 2));
+    expect(screen.getByRole('status').textContent).toBe('Task status settings saved.');
+  });
   it('keeps the checkbox for an unconfigured project even inside a configured domain', () => {
     render(<TaskWorkflowsProvider registry={registry}><TaskStatusControl task={{ ...task, project_id: 'simple' }}><input type="checkbox" aria-label="Done" /></TaskStatusControl></TaskWorkflowsProvider>);
     expect(screen.queryByRole('combobox')).toBeNull();

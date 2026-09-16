@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState, useTransition } from 'react';
 import { BUILTIN_WORKFLOW_PRESETS, TaskWorkflowSchema, type TaskWorkflow, type WorkflowScope, type WorkflowStatus } from '@jevi-ops/shared';
+import { createClientId } from '@/lib/client-id';
 import { configureWorkflow, deleteWorkflowPreset, saveWorkflowPreset } from './actions';
 import { useTaskWorkflows } from './TaskWorkflows';
 
@@ -38,7 +39,7 @@ export function WorkflowSettings({ scope, id }: { scope: WorkflowScope; id: stri
           <button type="button" aria-label={`Move ${s.label || 'status'} up`} disabled={i === 0} className="px-2 disabled:opacity-30" onClick={() => { const statuses = [...draft.statuses]; [statuses[i - 1], statuses[i]] = [statuses[i]!, statuses[i - 1]!]; setDraft({ statuses }); }}>↑</button>
           <button type="button" className="text-[12px] text-accent" onClick={() => setDraft({ statuses: draft.statuses.filter((_, n) => n !== i) })}>Remove</button>
         </div>)}</div>
-        <button type="button" disabled={draft.statuses.length >= 20} className="text-[12px] underline" onClick={() => setDraft({ statuses: [...draft.statuses, { id: crypto.randomUUID(), label: '', category: 'open' }] })}>Add status</button>
+        <button type="button" disabled={draft.statuses.length >= 20} className="text-[12px] underline" onClick={() => setDraft({ statuses: [...draft.statuses, { id: createClientId(), label: '', category: 'open' }] })}>Add status</button>
         <p className="text-[12px] text-ink-3">Move tasks out of a status before removing it or changing its category. Renaming is safe.</p>
       </> : config?.definition && <p className="text-[12px] text-ink-3">Saving returns these tasks to checkboxes and clears their custom stages. Open, Waiting, and Done categories are preserved. Save a preset first if you want to reuse these labels.</p>}
       <button type="button" className="rounded bg-ink px-3 py-1.5 text-[13px] text-bg" onClick={() => {
