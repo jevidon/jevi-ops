@@ -66,6 +66,17 @@ const EnvSchema = z.object({
   // Unset → uploads disabled (route 503s, UI hides the affordance).
   UPLOADS_DIR: z.string().optional(),
 
+  // Private directory for durable-capture media (audio/images saved before
+  // any model runs). Must not overlap UPLOADS_DIR or PRIVATE_SOURCES_DIR;
+  // never served statically. Unset → media captures 503, text still works.
+  CAPTURE_MEDIA_DIR: z.string().optional(),
+
+  // Local-only inference policy (lib/inference-policy.ts). Loopback is always
+  // approved; list extra self-hosted STT/LLM origins here, comma-separated
+  // (e.g. a tailnet llama.cpp box). Anything else is refused — no cloud
+  // fallback for private capture content.
+  LOCAL_INFERENCE_ORIGINS: z.string().optional(),
+
   // ── LLM (voice parser + chat) ──────────────────────────────────────────
   // Primary: any OpenAI-compatible server (llama.cpp `llama-server --jinja`,
   // MLX, Ollama, vLLM…) reached by base URL. Dashboard settings override

@@ -1,4 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import * as crypto from 'node:crypto';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -8,6 +12,9 @@ import * as shared from '@jevi-ops/shared';
 import { buildServer } from '../src/server.js';
 import { signSession } from '../src/lib/jwt.js';
 import { createAsset } from './helpers.js';
+import { env } from '../src/lib/env.js';
+import { invalidateAppSettings } from '../src/lib/app-settings.js';
+import { startFakeLlm } from './fake-llm.js';
 
 // The web's server actions, run for real against the real Fastify routes and
 // the disposable database. The action file is transpiled on the fly and
@@ -242,5 +249,114 @@ describe('facts action (#1, #2)', () => {
     expect(res.ok).toBe(true);
     const after = await call<{ asset: { metadata: Record<string, unknown> } }>('GET', `/api/assets/${asset.id}`);
     expect(after.asset.metadata).toEqual({ make: 'Lexus' });
+  });
+});
+
+// ─── Durable capture actions (capture program, Gate B) ────────────────────
+//
+// Save-then-interpret from the web's point of view: the storage receipt is
+// what the action returns first, and it never says "saved" for a recording
+// whose bytes did not reach the server.
+
+describe('durable capture actions', () => {
+  let llm: import('./fake-llm.js').FakeLlm;
+  let mediaDir: string;
+  const envBefore = { LLM_PROVIDER: env.LLM_PROVIDER, LLM_BASE_URL: env.LLM_BASE_URL, LLM_MODEL: env.LLM_MODEL, STT_BASE_URL: env.STT_BASE_URL, STT_MODEL: env.STT_MODEL, CAPTURE_MEDIA_DIR: env.CAPTURE_MEDIA_DIR };
+  beforeAll(async () => {
+    llm = await startFakeLlm();
+    mediaDir = await mkdtemp(join(tmpdir(), 'jevi-web-capture-'));
+    env.LLM_PROVIDER = 'openai_compatible'; env.LLM_MODEL = 'test-model'; env.STT_BASE_URL = llm.baseUrl; env.STT_MODEL = 'whisper-test';
+  });
+  afterAll(async () => {
+    await llm.close();
+    Object.assign(env, envBefore);
+    invalidateAppSettings();
+    await rm(mediaDir, { recursive: true, force: true });
+  });
+  function loadCapture(overrides: Record<string, unknown> = {}) {
+    const capturesApi = {
+      create: (b: unknown) => call('POST', '/api/captures', b),
+      upload: async (id: string, bytes: Uint8Array) => {
+        const r = await app.inject({ method: 'PUT', url: `/api/capture-uploads/${id}`, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/octet-stream' }, payload: Buffer.from(bytes) });
+        if (r.statusCode >= 400) throw new ApiError(r.statusCode, r.json());
+        return r.json();
+      },
+      finalize: (id: string, b: unknown) => call('POST', `/api/captures/${id}/finalize`, b),
+      get: (id: string) => call('GET', `/api/captures/${id}`),
+      list: (states: string[]) => call('GET', `/api/captures?state=${states.join(',')}`),
+      interpret: (id: string) => call('POST', `/api/captures/${id}/interpret`),
+      retry: (id: string, b: unknown) => call('POST', `/api/captures/${id}/retry-interpretation`, b),
+      operation: (id: string) => call('GET', `/api/operations/${id}`),
+      ...overrides,
+    };
+    const captureResult = loadWebModule('lib/capture-result.ts', baseMocks);
+    return loadWebModule('lib/capture-actions.ts', { ...baseMocks, 'node:crypto': crypto, '@/lib/api': { ApiError, capturesApi }, '@/lib/capture-result': captureResult }) as {
+      saveTextCapture: (text: string, ids: { operationId: string; captureId: string; capturedAt: string }) => Promise<{ kind: string; captureId?: string; message: string }>;
+      saveAudioCapture: (fd: FormData) => Promise<{ kind: string; captureId?: string; message: string }>;
+      interpretSavedCapture: (id: string) => Promise<{ kind: string; state?: string; errorCode?: string | null; summary?: string }>;
+      retryInterpretationAction: (id: string, n: number) => Promise<{ ok: boolean; message: string }>;
+    };
+  }
+  const wavForm = (ids: Record<string, string>) => {
+    const bytes = Buffer.concat([Buffer.from('RIFF'), Buffer.alloc(4), Buffer.from('WAVE'), Buffer.alloc(300, 9)]);
+    const fd = new FormData();
+    fd.append('audio', new Blob([bytes], { type: 'audio/wav' }), 'voice.wav');
+    for (const [k, v] of Object.entries(ids)) fd.set(k, v);
+    return fd;
+  };
+  const ids = () => ({ operation_id: crypto.randomUUID(), capture_id: crypto.randomUUID(), attachment_id: crypto.randomUUID(), finalize_operation_id: crypto.randomUUID(), captured_at: new Date().toISOString() });
+
+  it('model down: the save is reported as saved and interpretation as pending/blocked', async () => {
+    env.LLM_BASE_URL = 'http://127.0.0.1:1/v1'; invalidateAppSettings();
+    const { saveTextCapture, interpretSavedCapture } = loadCapture();
+    const saved = await saveTextCapture('call the plumber', { operationId: crypto.randomUUID(), captureId: crypto.randomUUID(), capturedAt: new Date().toISOString() });
+    expect(saved).toMatchObject({ kind: 'server_saved', message: 'Saved to Jevi Ops.' });
+    const outcome = await interpretSavedCapture(saved.captureId!);
+    expect(outcome).toMatchObject({ kind: 'pending', state: 'blocked', errorCode: 'llm_unavailable' });
+    const detail = await call<{ capture: { processing_state: string; retry_permitted: boolean } }>('GET', `/api/captures/${saved.captureId}`);
+    expect(detail.capture).toMatchObject({ processing_state: 'blocked', retry_permitted: true });
+  });
+
+  it('model up: the same two steps end in an executed summary, and a retried save replays', async () => {
+    env.LLM_BASE_URL = llm.baseUrl; invalidateAppSettings();
+    llm.state.reply = '{"actions":[{"action":"create_task","title":"Web action task"}]}';
+    const { saveTextCapture, interpretSavedCapture } = loadCapture();
+    const id = { operationId: crypto.randomUUID(), captureId: crypto.randomUUID(), capturedAt: new Date().toISOString() };
+    const first = await saveTextCapture('add a task', id);
+    const again = await saveTextCapture('add a task', id);
+    expect(first.captureId).toBe(again.captureId);
+    expect(await interpretSavedCapture(id.captureId)).toMatchObject({ kind: 'executed', summary: '✓ 1 done' });
+    const tasks = await call<{ tasks: Array<{ title: string }> }>('GET', '/api/tasks?status=open');
+    expect(tasks.tasks.filter((t) => t.title === 'Web action task')).toHaveLength(1);
+  });
+
+  it('audio: saved only after upload + finalize; a failed upload is reported as incomplete, not saved', async () => {
+    env.CAPTURE_MEDIA_DIR = mediaDir; env.LLM_BASE_URL = llm.baseUrl; invalidateAppSettings();
+    const { saveAudioCapture } = loadCapture();
+    const ok = await saveAudioCapture(wavForm(ids()));
+    expect(ok, ok.message).toMatchObject({ kind: 'server_saved' });
+    expect((await call<{ capture: { storage_state: string } }>('GET', `/api/captures/${ok.captureId}`)).capture.storage_state).toBe('complete');
+
+    env.CAPTURE_MEDIA_DIR = undefined;
+    const broken = ids();
+    const incomplete = await saveAudioCapture(wavForm(broken));
+    expect(incomplete.kind).toBe('upload_incomplete');
+    expect(incomplete.message).toMatch(/not yet saved to Jevi Ops/);
+    expect((await call<{ capture: { storage_state: string; processing_state: string } }>('GET', `/api/captures/${broken.capture_id}`)).capture).toMatchObject({ storage_state: 'awaiting_media', processing_state: 'awaiting_media' });
+    // Retry with the same identities once storage is back: replays the reservation, uploads, finalizes.
+    env.CAPTURE_MEDIA_DIR = mediaDir;
+    const retried = await saveAudioCapture(wavForm(broken));
+    expect(retried).toMatchObject({ kind: 'server_saved', captureId: broken.capture_id });
+  });
+
+  it('audio: a lost finalize response is reconciled through the operation ledger', async () => {
+    env.CAPTURE_MEDIA_DIR = mediaDir; invalidateAppSettings();
+    let finalized = 0;
+    const { saveAudioCapture } = loadCapture({
+      finalize: async (id: string, b: unknown) => { await call('POST', `/api/captures/${id}/finalize`, b); finalized += 1; throw new Error('socket hang up'); },
+    });
+    const res = await saveAudioCapture(wavForm(ids()));
+    expect(finalized).toBe(1);
+    expect(res).toMatchObject({ kind: 'server_saved' });
   });
 });

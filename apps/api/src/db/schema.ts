@@ -1,6 +1,8 @@
 import { pgTable, index, uniqueIndex, foreignKey, primaryKey, check, uuid, text, numeric, date, timestamp, unique, jsonb, boolean, integer, real, time, smallint, bigint } from "drizzle-orm/pg-core"
 import { sql } from "drizzle-orm"
 
+export * from './capture-schema.js';
+
 // ─── Typed jsonb payload shapes ────────────────────────────────────────────
 // Stored as jsonb in Postgres; the app reads/writes them with these shapes.
 // StoredAttachment is the persisted attachment record (originally written by
@@ -884,6 +886,12 @@ export const app_settings = pgTable("app_settings", {
 	meter_stale_days: integer().default(14).notNull(),
 	// Household currency (0052): spend totals are stated in it.
 	currency: text().default('USD').notNull(),
+	// Durable capture (migration 0053): server-side flag for the async
+	// pipeline, plus the installation's stable data-space identity and epoch
+	// copied onto every operation receipt.
+	capture_async_enabled: boolean().default(false).notNull(),
+	data_space_id: uuid().defaultRandom().notNull(),
+	server_epoch: integer().default(1).notNull(),
 	// Briefing panel visibility/order (migration 0044): ordered {id, enabled}
 	// array. Null → registry defaults (resolved web-side by mergePanelConfig).
 	briefing_panels: jsonb().$type<Array<{ id: string; enabled: boolean }> | null>(),
@@ -895,6 +903,7 @@ export const app_settings = pgTable("app_settings", {
 }, (table) => [
 	check("app_settings_id_check", sql`id`),
 	check("app_settings_currency_check", sql`currency ~ '^[A-Z]{3}$'::text`),
+	check("app_settings_server_epoch_check", sql`server_epoch > 0`),
 ]);
 
 // Tomorrow's Focus (migration 0037) — one optional pointer per day at a
@@ -1171,11 +1180,17 @@ export const api_tokens = pgTable("api_tokens", {
 	name: text().notNull(),
 	token_hash: text().notNull(),
 	kind: text().default('agent').notNull(),
+	// Capability profile (migration 0053): 'legacy' = full API access;
+	// 'capture_client' = default-denied except routes declaring a captureScope.
+	permission_profile: text().$type<'legacy' | 'capture_client'>().default('legacy').notNull(),
+	scopes: jsonb().$type<string[]>().default([]).notNull(),
 	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	last_used_at: timestamp({ withTimezone: true, mode: 'string' }),
 	revoked_at: timestamp({ withTimezone: true, mode: 'string' }),
 }, (table) => [
 	unique("api_tokens_token_hash_key").on(table.token_hash),
+	check("api_tokens_permission_profile_check", sql`permission_profile in ('legacy', 'capture_client')`),
+	check("api_tokens_scopes_check", sql`jsonb_typeof(scopes) = 'array'`),
 	check("api_tokens_kind_check", sql`kind = ANY (ARRAY['agent'::text, 'device'::text])`),
 ]);
 

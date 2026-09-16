@@ -2,6 +2,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import { createHash, randomBytes } from 'node:crypto';
 import { desc, eq } from 'drizzle-orm';
 import { z } from 'zod';
+import { CAPTURE_CLIENT_SCOPES, CaptureClientScopeSchema } from '@jevi-ops/shared';
 import { getDb } from '../lib/db.js';
 import { api_tokens, auth_user } from '../db/schema.js';
 import { verifyPassword } from '../lib/passwords.js';
@@ -26,6 +27,12 @@ const LoginSchema = z.object({
 const CreateTokenSchema = z.object({
   name: z.string().trim().min(1).max(80),
   kind: z.enum(['agent', 'device']).default('agent'),
+  // 'legacy' = full API access (the historical default); 'capture_client'
+  // = capture routes only (plugins/auth.ts default-denies it elsewhere).
+  permission_profile: z.enum(['legacy', 'capture_client']).default('legacy'),
+  scopes: z.array(CaptureClientScopeSchema).min(1).optional(),
+}).superRefine((value, ctx) => {
+  if (value.permission_profile === 'legacy' && value.scopes) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['scopes'], message: 'Scopes apply to capture_client credentials only.' });
 });
 
 // Tiny in-memory lockout: after MAX_FAILS failed logins, refuse attempts
@@ -109,9 +116,11 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
       .values({
         name: parsed.data.name,
         kind: parsed.data.kind,
+        permission_profile: parsed.data.permission_profile,
+        scopes: parsed.data.permission_profile === 'capture_client' ? [...new Set(parsed.data.scopes ?? CAPTURE_CLIENT_SCOPES)] : [],
         token_hash: hashApiToken(value),
       })
-      .returning({ id: api_tokens.id, name: api_tokens.name, kind: api_tokens.kind, created_at: api_tokens.created_at });
+      .returning({ id: api_tokens.id, name: api_tokens.name, kind: api_tokens.kind, permission_profile: api_tokens.permission_profile, scopes: api_tokens.scopes, created_at: api_tokens.created_at });
     if (!row) throw app.httpErrors.internalServerError('insert_returned_no_row');
     // The token value is returned exactly once. Only the hash is stored.
     return reply.code(201).send({ ...row, token: value });
@@ -119,7 +128,7 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
 
   app.get('/api/auth/tokens', { preHandler: requireSession }, async () => {
     const rows = await getDb().query.api_tokens.findMany({
-      columns: { id: true, name: true, kind: true, created_at: true, last_used_at: true, revoked_at: true },
+      columns: { id: true, name: true, kind: true, permission_profile: true, scopes: true, created_at: true, last_used_at: true, revoked_at: true },
       orderBy: desc(api_tokens.created_at),
     });
     return { tokens: rows };

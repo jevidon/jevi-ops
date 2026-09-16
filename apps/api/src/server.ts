@@ -15,6 +15,8 @@ import { taskRoutes } from './routes/tasks.js';
 import { projectRoutes } from './routes/projects.js';
 import { domainRoutes } from './routes/domains.js';
 import { captureRoutes } from './routes/capture.js';
+import { captureProgramRoutes } from './routes/captures.js';
+import { captureBridgeRoutes } from './routes/capture-bridge.js';
 import { googleAuthRoutes } from './routes/google-auth.js';
 import { calendarRoutes } from './routes/calendar.js';
 import { chatRoutes } from './routes/chat.js';
@@ -102,6 +104,8 @@ export async function buildServer() {
   await app.register(projectRoutes);
   await app.register(domainRoutes);
   await app.register(captureRoutes);
+  await app.register(captureProgramRoutes);
+  await app.register(captureBridgeRoutes);
   await app.register(googleAuthRoutes);
   await app.register(calendarRoutes);
   await app.register(chatRoutes);

@@ -21,7 +21,8 @@ beforeEach(async () => {
   const db = getDb();
   await db.execute(`
     truncate table maintenance_logs, maintenance_items, asset_meter_readings, assets,
-                   attention_items, tasks, api_tokens
+                   attention_items, tasks, api_tokens,
+                   capture_attempts, capture_media, capture_receipts, operation_receipts, captured_data
     restart identity cascade
   `);
   invalidateAppSettings();

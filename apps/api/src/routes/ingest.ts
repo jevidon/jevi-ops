@@ -3,8 +3,10 @@ import { timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import { IngestRequestSchema, CaptureTranscriptSourceSchema } from '@jevi-ops/shared/schemas';
 import { env } from '../lib/env.js';
+import { randomUUID } from 'node:crypto';
 import { getDb, isDatabaseConfigured } from '../lib/db.js';
-import { captured_data } from '../db/schema.js';
+import { acceptIngestEnvelope, CaptureError } from '../lib/capture/service.js';
+import { CommandError } from '../lib/command-error.js';
 import { parseTranscript } from '../lib/parser.js';
 import { executeActions } from '../lib/executor.js';
 import { isLlmConfigured } from '../lib/llm.js';
@@ -47,38 +49,31 @@ export const ingestRoutes: FastifyPluginAsync = async (app) => {
       });
     }
 
+    // No database means nothing was stored. Fail closed: a success-shaped
+    // stub here used to make callers believe a capture was saved when it had
+    // only been logged.
     if (!isDatabaseConfigured()) {
-      req.log.info({ event: 'ingest_stub', body: parsed.data }, 'captured (no db)');
-      return reply.code(202).send({ status: 'accepted_no_db', stub: true });
+      return reply.code(503).send({ error: 'database_not_configured' });
     }
 
-    // Direct insert — webhook is not a user-authenticated context; the
-    // secret check above is the auth.
+    // Webhook is not a user-authenticated context; the secret check above is
+    // the auth. The write goes through the durable capture service so it
+    // gets a receipt and an operation ledger entry; callers that send an
+    // operation_id can retry safely and get the same {id, created_at}.
     try {
-      const [row] = await getDb()
-        .insert(captured_data)
-        .values({
-          source: parsed.data.source,
-          type: parsed.data.type,
-          payload: parsed.data.payload,
-          tags: parsed.data.tags ?? [],
-          display_hint: parsed.data.display_hint ?? 'log',
-          source_ref: parsed.data.source_ref ?? null,
-        })
-        .returning({ id: captured_data.id, created_at: captured_data.created_at });
-      return reply.code(201).send(row);
+      const r = await acceptIngestEnvelope(
+        getDb(),
+        { ...parsed.data, operation_id: parsed.data.operation_id ?? randomUUID() },
+        { actor: 'ingest:webhook', credentialId: null, restrictToCredential: false, log: req.log },
+      );
+      return reply.code(r.replayed ? 200 : 201).send(r.body);
     } catch (err) {
+      if (err instanceof CaptureError || err instanceof CommandError) {
+        return reply.code(err.status).send({ error: err.code, message: err.message, ...err.details });
+      }
+      // Details go to the server log only; the response carries a code.
       req.log.error({ err }, 'ingest insert failed');
-      // Surface the Postgres message in the response. Single-user app —
-      // no risk of cross-tenant info leakage — and it makes debugging
-      // schema/constraint mismatches from a watch shortcut much easier
-      // than spelunking through PM2 logs.
-      const pgCode = (err as { code?: string })?.code;
-      return reply.code(500).send({
-        error: 'insert_failed',
-        message: err instanceof Error ? err.message : 'unknown',
-        code: pgCode,
-      });
+      return reply.code(500).send({ error: 'insert_failed' });
     }
   });
 

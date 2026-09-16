@@ -302,9 +302,12 @@ export async function testSttAction(): Promise<SyncResult> {
 export async function createApiTokenAction(formData: FormData): Promise<SyncResult & { token?: string }> {
   const name = String(formData.get('name') ?? '').trim();
   const kind = String(formData.get('kind') ?? 'agent') === 'device' ? 'device' : 'agent';
+  // capture_client tokens can only reach the durable capture routes; the API
+  // default-denies them everywhere else (plugins/auth.ts).
+  const permission_profile = String(formData.get('permission_profile') ?? 'legacy') === 'capture_client' ? 'capture_client' : 'legacy';
   if (!name) return { ok: false, message: 'Name is required.' };
   try {
-    const res = await authApi.createToken({ name, kind });
+    const res = await authApi.createToken({ name, kind, permission_profile });
     revalidatePath('/settings');
     return { ok: true, message: `Token "${name}" created — copy it now, it won't be shown again.`, token: res.token };
   } catch (err) {

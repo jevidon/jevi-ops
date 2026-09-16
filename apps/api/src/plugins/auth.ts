@@ -5,6 +5,7 @@ import { verifySession } from '../lib/jwt.js';
 import { getDb } from '../lib/db.js';
 import { api_tokens } from '../db/schema.js';
 import { hashApiToken } from '../routes/auth.js';
+import type { CaptureClientScope } from '@jevi-ops/shared';
 
 // Fastify plugin: verifies the Authorization bearer on protected routes.
 // Two credential shapes:
@@ -24,7 +25,12 @@ declare module 'fastify' {
   interface FastifyRequest {
     user?: AuthUser;
     authMethod?: 'session' | 'api_token';
+    permissionProfile?: 'legacy' | 'capture_client';
+    /** api_tokens.id for token credentials; undefined for sessions. */
+    credentialId?: string;
+    captureScopes?: string[];
   }
+  interface FastifyContextConfig { captureScope?: CaptureClientScope }
   interface FastifyInstance {
     requireAuth: (req: FastifyRequest, reply: import('fastify').FastifyReply) => Promise<void>;
   }
@@ -50,6 +56,19 @@ const authPlugin: FastifyPluginAsync = async (app) => {
         req.log.warn('api token rejected');
         return reply.code(401).send({ error: 'invalid_token' });
       }
+      // Default-deny for capture-only credentials (migration 0053): only
+      // routes that declare a captureScope admit them, and only with that
+      // scope granted. A legacy route that forgets its own check can never
+      // become a privilege escalation for a phone or plugin token.
+      if (row.permission_profile === 'capture_client') {
+        const scope = req.routeOptions.config.captureScope;
+        if (!scope || !row.scopes.includes(scope)) {
+          return reply.code(403).send({ error: 'capture_scope_denied' });
+        }
+        req.captureScopes = row.scopes;
+      }
+      req.permissionProfile = row.permission_profile;
+      req.credentialId = row.id;
       // Touch last_used_at without blocking the request. Coarse (per
       // request) is fine — it's a "when was this credential last alive"
       // signal for the settings page, not an audit log.

@@ -20,6 +20,7 @@ const MIGRATIONS = [
   '0050_docs_ideas.sql',
   '0051_service_visits.sql',
   '0052_currency_visit_outcomes.sql',
+  '0053_durable_capture.sql',
 ].map((f) => resolve(ROOT, 'infrastructure/migrations', f));
 
 function upgradeUrl(): string {
@@ -73,8 +74,27 @@ describe('0047 → 0048 → 0049', () => {
     const [task] = await sql`insert into tasks (title, domain_id, source, due_date) values ('Oil — Outback', ${domainA}, 'maintenance', '2026-09-01') returning id`;
     await sql`update maintenance_items set generated_task_id = ${task!.id} where id = ${seedOnly!.id}`;
 
+    // A historical raw capture (pre-0053): must stay readable, never scheduled.
+    const [legacyCapture] = await sql`insert into captured_data (source, type, payload) values ('manual', 'note', '{"text":"legacy capture"}') returning id`;
+
     // ─── Upgrade ─────────────────────────────────────────────────────
     for (const m of MIGRATIONS) await sql.file(m);
+
+    // 0053: durable capture. Historical rows are readable and untouched; no
+    // receipt/attempt is backfilled; the installation gets a stable data space;
+    // existing tokens stay 'legacy' with full access.
+    expect((await sql`select processed_status from captured_data where id = ${legacyCapture!.id}`)[0]?.processed_status).toBe('raw');
+    expect((await sql`select count(*)::int as n from capture_receipts`)[0]?.n).toBe(0);
+    expect((await sql`select count(*)::int as n from capture_attempts`)[0]?.n).toBe(0);
+    const [dataSpace] = await sql`select data_space_id, server_epoch, capture_async_enabled from app_settings where id = true`;
+    expect(dataSpace!.data_space_id).toMatch(/^[0-9a-f-]{36}$/);
+    expect(dataSpace!.server_epoch).toBe(1);
+    expect(dataSpace!.capture_async_enabled).toBe(false);
+    await sql`insert into api_tokens (name, token_hash) values ('pre-existing', 'hash-legacy-0053')`;
+    expect((await sql`select permission_profile, scopes from api_tokens where token_hash = 'hash-legacy-0053'`)[0]).toMatchObject({ permission_profile: 'legacy', scopes: [] });
+    await sql`insert into api_tokens (name, token_hash, permission_profile, scopes) values ('capture', 'hash-capture-0053', 'capture_client', '["capture:write"]')`;
+    await expect(sql`insert into api_tokens (name, token_hash, permission_profile) values ('bad', 'hash-bad-0053', 'research_worker')`).rejects.toThrow();
+    await expect(sql`insert into operation_receipts (data_space_id, operation_id, protocol_version, command, actor, digest, disposition, status, result, server_epoch) values (${dataSpace!.data_space_id}, gen_random_uuid(), 1, 'capture.create', 'test', 'd', 'pending', 201, '{}', 1)`).rejects.toThrow();
 
     const [s] = await sql`select policy, domain_id, system, generated_task_id from maintenance_items where id = ${seedOnly!.id}`;
     expect(s!.policy).toBe('interval');
@@ -144,6 +164,8 @@ describe('0047 → 0048 → 0049', () => {
 
     // ─── Again — every statement is idempotent ───────────────────────
     for (const m of MIGRATIONS) await sql.file(m);
+    expect((await sql`select data_space_id from app_settings where id = true`)[0]?.data_space_id).toBe(dataSpace!.data_space_id);
+    expect((await sql`select count(*)::int as n from api_tokens where permission_profile = 'capture_client'`)[0]?.n).toBe(1);
     const [n] = await sql`select count(*)::int as n from maintenance_logs where item_id = ${seedOnly!.id}`;
     expect(n!.n).toBe(1);
   });

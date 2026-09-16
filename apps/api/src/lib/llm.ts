@@ -90,6 +90,12 @@ async function resolveConfig(): Promise<ResolvedLlmConfig> {
   };
 }
 
+/** The origin private capture content would be sent to (lib/inference-policy.ts checks it). */
+export async function llmBaseUrl(): Promise<string | null> {
+  const cfg = await resolveConfig();
+  return cfg.provider === 'anthropic' ? 'https://api.anthropic.com' : cfg.baseUrl;
+}
+
 export async function isLlmConfigured(): Promise<boolean> {
   const cfg = await resolveConfig();
   if (cfg.provider === 'anthropic') return Boolean(cfg.apiKey);

@@ -21,3 +21,4 @@ export * from './conversation.js';
 export * from './maintenance.js';
 export * from './doc.js';
 export * from './visit.js';
+export * from './durable-capture.js';

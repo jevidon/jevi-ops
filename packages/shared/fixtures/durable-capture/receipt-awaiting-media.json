@@ -1,0 +1,21 @@
+{
+  "receipt": {
+    "capture_id": "7a6b5c4d-3e2f-4a1b-8c9d-0e1f2a3b4c5d",
+    "operation_id": "3c2b1a09-8f7e-4d6c-9b5a-4c3d2e1f0a9b",
+    "data_space_id": "11111111-2222-4333-8444-555555555555",
+    "server_epoch": 1,
+    "receipt_kind": "awaiting_media",
+    "storage_state": "awaiting_media",
+    "processing_state": "awaiting_media",
+    "created_at": "2026-09-13T22:15:31.004+00:00",
+    "uploads": [
+      {
+        "attachment_id": "9d8c7b6a-5f4e-4d3c-8b2a-1f0e9d8c7b6a",
+        "put_url": "/api/capture-uploads/9d8c7b6a-5f4e-4d3c-8b2a-1f0e9d8c7b6a",
+        "max_bytes": 26214400,
+        "resumable": false
+      }
+    ]
+  },
+  "replayed": false
+}
