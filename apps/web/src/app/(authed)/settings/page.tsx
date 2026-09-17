@@ -18,6 +18,8 @@ import { getAppSettings } from '@/lib/app-settings';
 import { AiSettingsForm } from './ai-settings-form';
 import { ApiTokensPanel } from './api-tokens-panel';
 import { beginGoogleOAuthAction } from './actions';
+import { requireUser } from '@/lib/auth';
+import { PasswordForm } from './password-form';
 
 // /settings — integrations and account controls. Lives outside the six-tab
 // nav (it's reachable from the rail's email footer or by direct URL).
@@ -27,6 +29,7 @@ export default async function SettingsPage({
 }: {
   searchParams: Promise<{ google?: string; reason?: string }>;
 }) {
+  const user = await requireUser();
   const { google: googleParam, reason } = await searchParams;
   const themeCookie = (await cookies()).get('jops2.theme')?.value;
   const theme: ThemePref =
@@ -113,6 +116,10 @@ export default async function SettingsPage({
           {banner.text}
         </div>
       )}
+
+      <SettingsSection title="Password">
+        <PasswordForm email={user.email} />
+      </SettingsSection>
 
       <SettingsSection title="Appearance">
         <AppearanceForm initial={theme} />
