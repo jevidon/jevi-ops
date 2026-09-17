@@ -70,12 +70,13 @@ struct ShellContainer: View {
     }
 
     private func retry() async {
-        // Probe the API's unauthenticated /healthz first so the message can
-        // distinguish "tailnet unreachable" from "server down".
+        // Preserve the API probe's error so routing, TLS, and HTTP failures
+        // aren't all reported as a disconnected tailnet.
         if let api = config.apiURL {
-            let alive = await APIClient(baseURL: api).healthz()
-            if !alive {
-                shell.offlineMessage = "Still unreachable. Check that Tailscale is connected on this device and the server is up."
+            do {
+                try await APIClient(baseURL: api).checkHealth()
+            } catch {
+                shell.offlineMessage = error.localizedDescription
                 return
             }
         }

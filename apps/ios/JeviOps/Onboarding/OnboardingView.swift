@@ -122,12 +122,8 @@ struct OnboardingView: View {
         }
 
         var client = APIClient(baseURL: api)
-        guard await client.healthz() else {
-            errorMessage = "No response from \(api.absoluteString)/healthz. Check the URL and that Tailscale is connected."
-            return
-        }
-
         do {
+            try await client.checkHealth()
             let jwt = try await client.login(email: email, password: password)
             client.bearer = jwt
             let deviceName = await UIDevice.current.name
