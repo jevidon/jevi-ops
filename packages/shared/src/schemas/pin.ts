@@ -45,6 +45,9 @@ export type ReorderPins = z.infer<typeof ReorderPinsSchema>;
 // cards that carry inline actions.
 
 export interface ResolvedPinTask {
+  domain_id: string;
+  project_id: string | null;
+  workflow_status_id: string | null;
   status: string;
   due_date: string | null;
   due_time: string | null;

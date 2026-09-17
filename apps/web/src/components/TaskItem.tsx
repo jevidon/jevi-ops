@@ -1,3 +1,4 @@
+import { TaskStatusControl } from '@/components/task-workflows/TaskWorkflows';
 import Link from 'next/link';
 import type { Task } from '@jevi-ops/shared';
 import {
@@ -53,6 +54,7 @@ export async function TaskItem({
 
   return (
     <div className="flex items-start gap-3 py-2 group">
+      <TaskStatusControl task={task}>
       <form action={toggleTaskDoneAction} className="pt-0.5">
         <input type="hidden" name="taskId" value={task.id} />
         <input type="hidden" name="status" value={task.status} />
@@ -81,12 +83,13 @@ export async function TaskItem({
           )}
         </button>
       </form>
+      </TaskStatusControl>
 
       <div className="flex-1 min-w-0">
         <Link
           href={`/tasks/${task.id}`}
           className={`block font-sans text-[14px] leading-snug hover:text-accent transition-colors ${
-            isDone
+            isDone && !task.workflow_status_id
               ? 'text-ink-3 line-through decoration-ink-3/60'
               : isWaiting
                 ? 'text-ink-2'

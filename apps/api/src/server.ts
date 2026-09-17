@@ -11,6 +11,7 @@ import authPlugin from './plugins/auth.js';
 import { healthzRoutes } from './routes/healthz.js';
 import { authRoutes } from './routes/auth.js';
 import { ingestRoutes } from './routes/ingest.js';
+import { taskWorkflowRoutes } from './routes/task-workflows.js';
 import { taskRoutes } from './routes/tasks.js';
 import { projectRoutes } from './routes/projects.js';
 import { domainRoutes } from './routes/domains.js';
@@ -101,6 +102,7 @@ export async function buildServer() {
   await app.register(authRoutes);
   await app.register(ingestRoutes);
   await app.register(taskRoutes);
+  await app.register(taskWorkflowRoutes);
   await app.register(projectRoutes);
   await app.register(domainRoutes);
   await app.register(captureRoutes);

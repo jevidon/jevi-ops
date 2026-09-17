@@ -21,6 +21,7 @@ const MIGRATIONS = [
   '0051_service_visits.sql',
   '0052_currency_visit_outcomes.sql',
   '0053_durable_capture.sql',
+  '0054_task_workflows.sql',
 ].map((f) => resolve(ROOT, 'infrastructure/migrations', f));
 
 function upgradeUrl(): string {
@@ -131,6 +132,14 @@ describe('0047 → 0048 → 0049', () => {
     expect(idx!.n).toBe(3);
     const [settings] = await sql`select meter_stale_days from app_settings limit 1`;
     expect(settings!.meter_stale_days).toBe(14);
+
+    // 0054: additive task workflows preserve legacy tasks and start disabled.
+    const [legacyTask] = await sql`select status, workflow_status_id from tasks where id = ${task!.id}`;
+    expect(legacyTask).toMatchObject({ status: 'open', workflow_status_id: null });
+    const [workflowColumns] = await sql`select count(*)::int as n from information_schema.columns where table_name in ('projects', 'stewardship_domains') and column_name in ('task_workflow', 'workflow_revision')`;
+    expect(workflowColumns!.n).toBe(4);
+    const [workflowPresets] = await sql`select count(*)::int as n from task_workflow_presets`;
+    expect(workflowPresets!.n).toBe(0);
 
     // 0050: docs + ideas.
     const docCols = await sql`

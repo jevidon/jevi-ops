@@ -89,6 +89,8 @@ async function resolveType(
           id: tasks.id,
           title: tasks.title,
           status: tasks.status,
+          domain_id: tasks.domain_id,
+          workflow_status_id: tasks.workflow_status_id,
           due_date: tasks.due_date,
           due_time: tasks.due_time,
           priority: tasks.priority,
@@ -125,6 +127,9 @@ async function resolveType(
           state,
           task: {
             status: r.status,
+            domain_id: r.domain_id,
+            project_id: r.project_id,
+            workflow_status_id: r.workflow_status_id,
             due_date: r.due_date,
             due_time: r.due_time,
             priority: r.priority,

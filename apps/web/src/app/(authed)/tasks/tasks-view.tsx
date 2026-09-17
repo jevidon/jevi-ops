@@ -1,4 +1,5 @@
 'use client';
+import { TaskStatusControl } from '@/components/task-workflows/TaskWorkflows';
 
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
@@ -103,11 +104,18 @@ export function TasksView({
     return `▸ ${done} / ${kids.length}`;
   };
   const crumbFor = (t: Task): string | null => t.parent_task?.title ?? null;
-  // Completed TODAY only (app tz) — the API returns all done tasks, so without
-  // this the "Completed today" section would list every done task in history.
+  // Reusable satisfied tasks stay available beyond today, with the same
+  // domain/priority/text filters as actionable tasks.
   const completed = useMemo(
-    () => tasks.filter((t) => t.status === 'done' && isToday(tz, t.completed_at ?? null)),
-    [tasks, tz],
+    () => tasks.filter((t) => {
+      if (t.status !== 'done' || view === 'upcoming') return false;
+      const completedToday = isToday(tz, t.completed_at ?? null);
+      if (!completedToday && (!t.workflow_status_id || view === 'today')) return false;
+      if (dsel.size && !dsel.has(t.domain_id)) return false;
+      if (psel.size && !psel.has(t.priority)) return false;
+      return !q.trim() || textMatches(q, t.title, t.project?.name, t.domain?.name);
+    }),
+    [tasks, tz, view, dsel, psel, q],
   );
 
   // Domain facets — the domains actually present on active tasks, with counts.
@@ -299,7 +307,7 @@ export function TasksView({
               onClick={() => setShowDone((v) => !v)}
               className="flex items-center justify-between w-full"
             >
-              <span className="eyebrow">Completed today</span>
+              <span className="eyebrow">Satisfied & completed today</span>
               <span className="flex items-center gap-1.5 font-mono text-[10.5px] text-ink-3">
                 {completed.length}
                 <Icon name="chev" size={13} style={{ transform: `rotate(${showDone ? 90 : 0}deg)`, transition: 'transform .15s' }} />
@@ -309,10 +317,12 @@ export function TasksView({
               <div className="mt-2">
                 {completed.map((t) => (
                   <div key={t.id} className="flex items-center gap-3 py-2 border-b border-line">
+                    <TaskStatusControl task={t}>
                     <span className="grid place-items-center h-[18px] w-[18px] rounded-full bg-ink border-2 border-ink text-bg shrink-0">
                       <Icon name="check" size={11} strokeWidth={2.8} />
                     </span>
-                    <Link href={`/tasks/${t.id}`} className="flex-1 min-w-0 truncate font-sans text-[13.5px] text-ink-3 line-through decoration-ink-4 hover:opacity-80">
+                    </TaskStatusControl>
+                    <Link href={`/tasks/${t.id}`} className={`flex-1 min-w-0 truncate font-sans text-[13.5px] text-ink-3 hover:opacity-80 ${t.workflow_status_id ? '' : 'line-through decoration-ink-4'}`}>
                       {t.title}
                     </Link>
                   </div>
@@ -363,6 +373,7 @@ function TaskRow({ t, today, subtaskBadge, parentCrumb }: {
 
   return (
     <div className="group flex items-start gap-3 py-2.5 border-b border-line/70">
+      <TaskStatusControl task={t}>
       <form action={toggleTaskDoneAction} className="pt-0.5">
         <input type="hidden" name="taskId" value={t.id} />
         <input type="hidden" name="status" value={t.status} />
@@ -376,6 +387,7 @@ function TaskRow({ t, today, subtaskBadge, parentCrumb }: {
           }`}
         />
       </form>
+      </TaskStatusControl>
 
       <Link href={`/tasks/${t.id}`} className="flex-1 min-w-0 hover:opacity-80 transition-opacity">
         <div className={`font-sans text-[14.5px] leading-snug ${isWaiting ? 'text-ink-2' : 'text-ink'}`}>
