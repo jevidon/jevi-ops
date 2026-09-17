@@ -59,11 +59,15 @@ Against the real server: onboard with the ts.net web URL — the API derives to
 - Linking-session, device-token, transport, and response-format failures have
   separate messages. Response-format errors identify the endpoint without
   displaying authentication response contents.
+- After correcting the Web URL in native Settings, tap **Reload page** to
+  load that saved address. If you see `{"name":"jevi-ops/api",…}`, the web
+  view is reaching the API service; verify the Web URL and proxy mapping.
 
-## Isolated API client tests
+## Isolated native tests
 
-These hostless tests use an in-memory URL protocol. They do not start the app,
-contact a server, read stored credentials, or mint device tokens. The existing
+These hostless tests use an in-memory URL protocol for API requests and a
+recording web view for navigation. They do not start the app, contact a server,
+read stored credentials, or mint device tokens. The existing
 `JeviOps` UI-test scheme still needs a live test server.
 
 ```bash

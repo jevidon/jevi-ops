@@ -67,6 +67,7 @@ targets:
       - Shared/Models.swift
       - Shared/AppConfig.swift
       - Shared/KeychainStore.swift
+      - JeviOps/Web/WebShellView.swift
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES
