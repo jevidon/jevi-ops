@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { apiPublicUrl } from '@/lib/server-env';
-import { authApi, calendarApi, googleApi, settingsApi, ApiError, type UpdateAppSettingsBody } from '@/lib/api';
+import { authApi, calendarApi, googleApi, settingsApi, ApiError, type UpdateAppSettingsBody, type ModelDiscoveryResult } from '@/lib/api';
 import { BriefingPanelConfigSchema } from '@jevi-ops/shared/schemas';
 import { requireUser } from '@/lib/auth';
 import { signOAuthBridgeToken } from '@/lib/oauth-bridge';
@@ -285,6 +285,14 @@ export async function testLlmAction(): Promise<SyncResult> {
     return { ok: true, message: `OK · ${res.detail} · ${res.latency_ms}ms` };
   } catch (err) {
     return { ok: false, message: errMessage(err) };
+  }
+}
+
+export async function discoverLlmModelsAction(baseUrl: string): Promise<ModelDiscoveryResult> {
+  try {
+    return await settingsApi.discoverLlmModels(baseUrl);
+  } catch (err) {
+    return { ok: false, error: 'discover_unreachable', detail: errMessage(err) };
   }
 }
 

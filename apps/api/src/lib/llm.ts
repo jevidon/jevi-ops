@@ -71,9 +71,10 @@ interface ResolvedLlmConfig {
   apiKey: string | null;
 }
 
-async function resolveConfig(): Promise<ResolvedLlmConfig> {
+// Discovery can target OpenAI-compatible settings before a provider change is saved.
+export async function resolveLlmConfig(providerOverride?: ResolvedLlmConfig['provider']): Promise<ResolvedLlmConfig> {
   const s = await getAppSettings();
-  const provider = s.llm_provider ?? env.LLM_PROVIDER;
+  const provider = providerOverride ?? s.llm_provider ?? env.LLM_PROVIDER;
   if (provider === 'anthropic') {
     return {
       provider,
@@ -92,19 +93,19 @@ async function resolveConfig(): Promise<ResolvedLlmConfig> {
 
 /** The origin private capture content would be sent to (lib/inference-policy.ts checks it). */
 export async function llmBaseUrl(): Promise<string | null> {
-  const cfg = await resolveConfig();
+  const cfg = await resolveLlmConfig();
   return cfg.provider === 'anthropic' ? 'https://api.anthropic.com' : cfg.baseUrl;
 }
 
 export async function isLlmConfigured(): Promise<boolean> {
-  const cfg = await resolveConfig();
+  const cfg = await resolveLlmConfig();
   if (cfg.provider === 'anthropic') return Boolean(cfg.apiKey);
   return Boolean(cfg.baseUrl && cfg.model);
 }
 
 /** Human-readable summary for healthz / integrations-status. Never leaks keys. */
 export async function llmDescription(): Promise<string> {
-  const cfg = await resolveConfig();
+  const cfg = await resolveLlmConfig();
   if (cfg.provider === 'anthropic') {
     return cfg.apiKey ? `anthropic · ${cfg.model}` : 'anthropic · API key missing';
   }
@@ -328,7 +329,7 @@ async function completeAnthropic(cfg: ResolvedLlmConfig, opts: ChatCompleteOptio
 // ─── Entry point ─────────────────────────────────────────────────────────
 
 export async function chatComplete(opts: ChatCompleteOptions): Promise<LlmResult> {
-  const cfg = await resolveConfig();
+  const cfg = await resolveLlmConfig();
   if (cfg.provider === 'anthropic') {
     if (!cfg.apiKey) throw new Error('LLM provider is anthropic but no API key is configured.');
     return completeAnthropic(cfg, opts);
@@ -355,7 +356,7 @@ export async function chatComplete(opts: ChatCompleteOptions): Promise<LlmResult
  * request there would be a paid round-trip. Resolves to null when skipped.
  */
 export async function prefillPrompt(opts: ChatCompleteOptions): Promise<LlmUsage | null> {
-  const cfg = await resolveConfig();
+  const cfg = await resolveLlmConfig();
   if (cfg.provider !== 'openai_compatible' || !cfg.baseUrl || !cfg.model) return null;
   const client = openAiClient(cfg);
   const res = await client.chat.completions.create(openAiBody(cfg, { ...opts, maxTokens: 1 }));

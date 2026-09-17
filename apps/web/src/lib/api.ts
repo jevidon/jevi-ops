@@ -1962,6 +1962,10 @@ export interface ConnectionTestResult {
   sample?: string;
 }
 
+export type ModelDiscoveryResult =
+  | { ok: true; base_url: string; models: string[]; loaded?: string[] }
+  | { ok: false; error: string; detail: string };
+
 export const settingsApi = {
   integrationsStatus: () =>
     api.get<{ items: IntegrationItem[] }>('/api/settings/integrations-status'),
@@ -1969,6 +1973,8 @@ export const settingsApi = {
   updateApp: (body: UpdateAppSettingsBody) =>
     api.patch<AppSettings>('/api/settings/app', body),
   testLlm: () => api.post<ConnectionTestResult>('/api/settings/test-llm'),
+  discoverLlmModels: (baseUrl: string) =>
+    api.get<ModelDiscoveryResult>(`/api/settings/discover-llm-models?base_url=${encodeURIComponent(baseUrl)}`),
   testStt: () => api.post<ConnectionTestResult>('/api/settings/test-stt'),
 };
 

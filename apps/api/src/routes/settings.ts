@@ -3,7 +3,8 @@ import { eq } from 'drizzle-orm';
 import { env } from '../lib/env.js';
 import { isDatabaseConfigured } from '../lib/db.js';
 import { isAuthConfigured } from '../lib/jwt.js';
-import { chatComplete, isLlmConfigured, llmDescription } from '../lib/llm.js';
+import { chatComplete, isLlmConfigured, llmDescription, resolveLlmConfig } from '../lib/llm.js';
+import { readModelList } from '../lib/model-discovery.js';
 import { isSttConfigured, sttDescription } from '../lib/stt.js';
 import { isStorageConfigured } from '../lib/storage.js';
 import { isImmichConfigured, immichDescription } from '../lib/immich.js';
@@ -43,6 +44,44 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
   app.get('/api/settings/app', async () => {
     const settings = await getAppSettings();
     return settings;
+  });
+
+  app.get<{ Querystring: { base_url?: unknown } }>('/api/settings/discover-llm-models', async (req) => {
+    try {
+      const config = await resolveLlmConfig('openai_compatible');
+      const raw = req.query.base_url === undefined ? config.baseUrl : req.query.base_url;
+      let url: URL;
+      try {
+        if (typeof raw !== 'string' || !raw.trim()) throw new Error();
+        url = new URL(raw.trim());
+        // Local and cloud-compatible endpoints are supported. Reject credentials,
+        // queries and fragments so appending /models has unambiguous semantics.
+        if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) {
+          throw new Error();
+        }
+      } catch {
+        return { ok: false, error: 'discover_bad_payload', detail: 'Base URL must be an HTTP(S) URL without credentials, query or fragment.' };
+      }
+      const baseUrl = url.toString().replace(/\/+$/, '');
+      const response = await fetch(`${baseUrl}/models`, {
+        signal: AbortSignal.timeout(5000),
+        // Do not forward the configured key to a redirect destination.
+        redirect: 'manual',
+        headers: config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {},
+      });
+      if (!response.ok) {
+        await response.body?.cancel().catch(() => {});
+        return { ok: false, error: `discover_http_${response.status}`, detail: `Model server returned HTTP ${response.status}.` };
+      }
+      return { ok: true, base_url: baseUrl, ...await readModelList(response) };
+    } catch (err) {
+      const timeout = err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError');
+      return {
+        ok: false,
+        error: timeout ? 'discover_timeout' : 'discover_bad_payload',
+        detail: timeout ? 'Model discovery timed out after 5 seconds.' : err instanceof Error ? err.message.slice(0, 300) : 'Could not read the model list.',
+      };
+    }
   });
 
   // Connection tests for the AI section — cheap round-trips so the
@@ -288,5 +327,4 @@ function detailForPushover(): string {
   parts.push(env.PUSHOVER_API_TOKEN ? 'api token set' : 'PUSHOVER_API_TOKEN missing');
   return parts.join(' · ');
 }
-
 
