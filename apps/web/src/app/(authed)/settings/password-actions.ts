@@ -17,7 +17,7 @@ export async function changePasswordAction(formData: FormData): Promise<Password
 
   try {
     await authApi.changePassword(parsed.data);
-    return { ok: true, message: 'Password changed. Use your new password the next time you sign in.' };
+    return { ok: true, message: 'Password changed. Use your new password the next time you sign in or re-link a device.' };
   } catch (error) {
     if (error instanceof ApiError) {
       const code = (error.body as { error?: string } | null)?.error;

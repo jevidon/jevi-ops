@@ -70,7 +70,7 @@ export function PasswordForm({ email }: { email: string }) {
           {pending ? 'Changing…' : 'Change password'}
         </button>
       </fieldset>
-      <p className="text-[12px] text-ink-3">Existing sessions and API tokens stay active. Revoke agent or device tokens in the API tokens section below.</p>
+      <p className="text-[12px] text-ink-3">Existing sessions and API tokens stay active, so already-linked devices keep working. If you re-link a device, use your new password. Revoke agent or device tokens in the API tokens section below.</p>
       {result && <p role={result.ok ? 'status' : 'alert'} className={`text-[13px] ${result.ok ? 'text-ink-2' : 'text-accent'}`}>{result.message}</p>}
     </form>
   );
