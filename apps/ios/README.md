@@ -5,15 +5,27 @@ actions. Talks to the Fastify API directly with a revocable `ops_` device
 token (minted on first run via `POST /api/auth/tokens`, stored in the
 Keychain, shared with the extension through the App Group).
 
+Native offline capture is the next delivery, described in the
+[product scope](../../docs/capture-program/02-offline-phone-capture.md) and
+[implementation plan](../../docs/capture-program/03-native-ios-implementation-plan.md).
+The existing app does not yet provide that capture store, recording flow,
+local transcription, or offline library.
+
 ## One-time machine setup
 
-1. Install Xcode from the App Store, then:
+1. Open Xcode and complete its licence and first-launch component setup.
+   Select the full Xcode toolchain for the current terminal session:
 
    ```bash
-   sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
-   sudo xcodebuild -license accept
-   xcodebuild -downloadPlatform iOS
+   export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+   xcodebuild -checkFirstLaunchStatus
+   xcodebuild -showsdks
+   xcrun simctl list devices available
    ```
+
+   Install an iOS simulator runtime through Xcode if the list is empty.
+   `DEVELOPER_DIR` avoids changing the computer's global `xcode-select`
+   setting, which may still point at Command Line Tools.
 
 2. `brew install xcodegen` (already done if `which xcodegen` answers).
 3. For device/TestFlight builds only: sign into Xcode → Settings → Accounts
@@ -24,16 +36,32 @@ Keychain, shared with the extension through the App Group).
    cp Signing.xcconfig.example Signing.xcconfig  # then edit
    ```
 
-   Simulator builds don't need any of that.
+   Simulator builds do not need a development team or provisioning profile,
+   but must retain ad-hoc signing and the App Group entitlements for the
+   shared Keychain to work. Do not set `CODE_SIGNING_ALLOWED=NO`.
 
 ## Build & run (simulator)
 
 ```bash
 make generate   # XcodeGen → JeviOps.xcodeproj (gitignored, regenerate freely)
-make build      # unsigned simulator build
+make build      # simulator build; see explicit ad-hoc build below
 make run        # boot simulator, install, launch
 make screenshot
 ```
+
+For a simulator build independent of local team settings, use an installed
+device/runtime from `simctl list` (this combination was verified locally):
+
+```bash
+xcodebuild -project JeviOps.xcodeproj -scheme JeviOps \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.5' \
+  -derivedDataPath build/DerivedData DEVELOPMENT_TEAM= CODE_SIGN_IDENTITY=- build
+```
+
+The existing `make test` uses a live test account and mints a device token.
+Run it only against an isolated test environment. The offline capture
+foundation will add native storage/queue tests and fixture-based UI tests
+that can run without the owner's API or Hermes.
 
 Against local dev servers: `scripts/devctl.sh start` at the repo root, then
 onboard with web URL `http://127.0.0.1:3000` (API auto-derives to `:3001`).
