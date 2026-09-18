@@ -2,6 +2,7 @@
 
 import { useActionState, useEffect, useState } from 'react';
 import { useFormStatus } from 'react-dom';
+import { createClientId } from '@/lib/client-id';
 import type { SaveResult } from './actions';
 
 // A form bound to a SaveResult server action: shows the outcome inline,
@@ -18,11 +19,6 @@ import type { SaveResult } from './actions';
 // without a key lets the server mint one.
 
 type Action = (prev: SaveResult | null, formData: FormData) => Promise<SaveResult>;
-
-function mintKey(): string {
-  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-}
 
 function SubmitButton({ label, variant, pendingLabel }: { label: string; variant: 'solid' | 'ghost' | 'quiet'; pendingLabel?: string }) {
   const { pending } = useFormStatus();
@@ -62,10 +58,10 @@ export function ActionForm({
   const [state, formAction] = useActionState<SaveResult | null, FormData>(action, null);
   const [key, setKey] = useState('');
   useEffect(() => {
-    setKey(mintKey());
+    setKey(createClientId());
   }, []);
   useEffect(() => {
-    if (state?.ok) setKey(mintKey());
+    if (state?.ok) setKey(createClientId());
   }, [state]);
   return (
     <form action={formAction} className={className}>
