@@ -1,17 +1,18 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { createHash, randomBytes } from 'node:crypto';
-import { desc, eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import { z } from 'zod';
-import { CAPTURE_CLIENT_SCOPES, CaptureClientScopeSchema } from '@jevi-ops/shared';
+import { CAPTURE_CLIENT_SCOPES, CaptureClientScopeSchema, ChangePasswordSchema } from '@jevi-ops/shared';
 import { getDb } from '../lib/db.js';
 import { api_tokens, auth_user } from '../db/schema.js';
-import { verifyPassword } from '../lib/passwords.js';
+import { hashPassword, verifyPassword } from '../lib/passwords.js';
 import { isAuthConfigured, signSession } from '../lib/jwt.js';
 
 // /api/auth/* — self-issued auth for the single-user system.
 //
 //   POST /api/auth/login   { email, password } → { token, user }
 //   GET  /api/auth/me      (requireAuth)       → { user }
+//   POST /api/auth/password (session only)    → change current user's password
 //   POST /api/auth/tokens  (session only)      → create named agent/device token
 //   GET  /api/auth/tokens  (session only)      → list tokens (no values)
 //   DELETE /api/auth/tokens/:id (session only) → revoke
@@ -46,6 +47,9 @@ export function hashApiToken(token: string): string {
 }
 
 export const authRoutes: FastifyPluginAsync = async (app) => {
+  // Count attempts before hashing so concurrent requests share the limit.
+  // Like login's lockout, this is per API process (the single-host deployment).
+  const passwordChanges = new Map<string, { count: number; resetAt: number }>();
   app.post('/api/auth/login', async (req, reply) => {
     if (!isAuthConfigured()) {
       return reply.code(503).send({ error: 'auth_not_configured', reason: 'AUTH_SECRET not set' });
@@ -99,9 +103,47 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
     await app.requireAuth(req, reply);
     if (reply.sent) return;
     if (req.authMethod !== 'session') {
-      return reply.code(403).send({ error: 'session_required', reason: 'API tokens cannot manage tokens.' });
+      return reply.code(403).send({ error: 'session_required', reason: 'Sign in with a user session to manage account credentials.' });
     }
   };
+
+  app.post('/api/auth/password', { preHandler: requireSession }, async (req, reply) => {
+    const parsed = ChangePasswordSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'invalid_payload', details: parsed.error.flatten().fieldErrors });
+    }
+
+    const userId = req.user!.id;
+    const now = Date.now();
+    let attempts = passwordChanges.get(userId);
+    if (!attempts || now >= attempts.resetAt) {
+      attempts = { count: 0, resetAt: now + LOCKOUT_MS };
+      passwordChanges.set(userId, attempts);
+    }
+    if (attempts.count >= MAX_FAILS) {
+      const retryAfter = Math.ceil((attempts.resetAt - now) / 1000);
+      return reply.header('Retry-After', retryAfter).code(429).send({ error: 'too_many_attempts', retry_after_s: retryAfter });
+    }
+    attempts.count += 1;
+
+    const db = getDb();
+    const user = await db.query.auth_user.findFirst({ where: eq(auth_user.id, userId) });
+    if (!user) return reply.code(401).send({ error: 'invalid_session' });
+    if (!await verifyPassword(parsed.data.current_password, user.password_hash)) {
+      return reply.code(400).send({ error: 'invalid_current_password' });
+    }
+
+    const password_hash = await hashPassword(parsed.data.new_password);
+    // A second request using the old password must not overwrite a change
+    // made while its hash was being computed.
+    const [changed] = await db.update(auth_user).set({ password_hash })
+      .where(and(eq(auth_user.id, user.id), eq(auth_user.password_hash, user.password_hash)))
+      .returning({ id: auth_user.id });
+    if (!changed) return reply.code(409).send({ error: 'password_changed' });
+
+    failures.delete(user.email);
+    return { changed: true };
+  });
 
   app.post('/api/auth/tokens', { preHandler: requireSession }, async (req, reply) => {
     const parsed = CreateTokenSchema.safeParse(req.body);

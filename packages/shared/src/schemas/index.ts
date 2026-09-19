@@ -23,3 +23,4 @@ export * from './doc.js';
 export * from './visit.js';
 export * from './durable-capture.js';
 export * from './task-workflow.js';
+export * from './auth.js';

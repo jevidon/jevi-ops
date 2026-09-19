@@ -2009,6 +2009,8 @@ export interface ApiTokenRow {
 }
 
 export const authApi = {
+  changePassword: (body: import('@jevi-ops/shared').ChangePasswordInput) =>
+    api.post<{ changed: true }>('/api/auth/password', body),
   listTokens: () => api.get<{ tokens: ApiTokenRow[] }>('/api/auth/tokens'),
   createToken: (body: { name: string; kind: 'agent' | 'device'; permission_profile?: 'legacy' | 'capture_client'; scopes?: string[] }) =>
     api.post<ApiTokenRow & { token: string }>('/api/auth/tokens', body),
