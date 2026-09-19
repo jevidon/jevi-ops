@@ -2,5 +2,20 @@
   "extends": "next/core-web-vitals",
   "rules": {
     "@next/next/no-page-custom-font": "off"
-  }
+  },
+  "overrides": [
+    {
+      "files": ["src/**/*.{js,jsx,ts,tsx}"],
+      "excludedFiles": ["src/lib/client-id.ts"],
+      "rules": {
+        "no-restricted-syntax": [
+          "error",
+          {
+            "selector": "MemberExpression:matches([object.name='crypto'], [object.property.name='crypto'], [object.property.value='crypto']):matches([computed=false][property.name='randomUUID'], [computed=true][property.value='randomUUID'])",
+            "message": "Use createClientId() from @/lib/client-id for browser IDs; crypto.randomUUID is unavailable on HTTP origins."
+          }
+        ]
+      }
+    }
+  ]
 }

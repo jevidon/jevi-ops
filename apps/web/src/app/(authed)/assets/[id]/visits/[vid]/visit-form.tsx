@@ -2,6 +2,7 @@
 
 import { useActionState, useEffect, useState } from 'react';
 import { useFormStatus } from 'react-dom';
+import { createClientId } from '@/lib/client-id';
 import type { Attachment, MaintenanceItem } from '@/lib/api';
 import { ImageUploader } from '@/components/ImageUploader';
 import { completeVisitAction, type SaveResult } from '../../actions';
@@ -14,11 +15,6 @@ import { completeVisitAction, type SaveResult } from '../../actions';
 
 const inputCls = 'border border-line bg-surface px-2 py-1.5 font-sans text-[13px] text-ink';
 const labelCls = 'font-mono text-[9px] uppercase tracking-[0.08em] text-ink-3';
-
-function mintKey(): string {
-  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-}
 
 function Submit({ label }: { label: string }) {
   const { pending } = useFormStatus();
@@ -59,7 +55,7 @@ export function VisitForm({
   const [done, setDone] = useState<Set<string>>(() => new Set(preselected));
   const [key, setKey] = useState('');
   useEffect(() => {
-    setKey(mintKey());
+    setKey(createClientId());
   }, []);
 
   const toggle = (id: string) =>
