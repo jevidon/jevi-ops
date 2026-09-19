@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useTransition } from 'react';
-import type { AppSettings } from '@/lib/api';
+import { useCallback, useEffect, useId, useRef, useState, useTransition } from 'react';
+import type { AppSettings, ModelDiscoveryResult } from '@/lib/api';
 import {
+  discoverLlmModelsAction,
   testLlmAction,
   testSttAction,
   updateIntegrationSettingsAction,
@@ -38,6 +39,47 @@ export function AiSettingsForm({ current }: { current: AppSettings }) {
   const [llmModel, setLlmModel] = useState(current.llm_model ?? '');
   const [llmApiKey, setLlmApiKey] = useState(current.llm_api_key ?? '');
   const [llmState, setLlmState] = useState<SyncResult | null>(null);
+  const [discovery, setDiscovery] = useState<ModelDiscoveryResult | null>(null);
+  const [discovering, setDiscovering] = useState(false);
+  const modelListId = useId();
+  const discoveryRequest = useRef(0);
+  const modelEdits = useRef(0);
+  const autoDiscovered = useRef(false);
+  const canDiscover = provider !== 'anthropic' && llmBaseUrl.trim() !== '';
+
+  const clearDiscovery = () => {
+    discoveryRequest.current += 1;
+    setDiscovery(null);
+    setDiscovering(false);
+  };
+
+  const discoverModels = useCallback(async () => {
+    const request = ++discoveryRequest.current;
+    const edits = modelEdits.current;
+    setDiscovering(true);
+    setDiscovery(null);
+    try {
+      const result = await discoverLlmModelsAction(llmBaseUrl.trim());
+      // Ignore results for an old URL/provider and preserve edits made while
+      // the request was running, including a custom model typed by the user.
+      if (request !== discoveryRequest.current) return;
+      setDiscovery(result);
+      if (result.ok && result.models.length === 1 && modelEdits.current === edits) {
+        setLlmModel(result.models[0]!);
+      }
+    } catch (err) {
+      if (request !== discoveryRequest.current) return;
+      setDiscovery({ ok: false, error: 'discover_unreachable', detail: err instanceof Error ? err.message : 'Could not reach the API.' });
+    } finally {
+      if (request === discoveryRequest.current) setDiscovering(false);
+    }
+  }, [llmBaseUrl]);
+
+  useEffect(() => {
+    if (autoDiscovered.current) return;
+    autoDiscovered.current = true;
+    if (canDiscover && !llmModel.trim()) void discoverModels();
+  }, [canDiscover, llmModel, discoverModels]);
 
   // ── STT ──
   const [sttBaseUrl, setSttBaseUrl] = useState(current.stt_base_url ?? '');
@@ -93,20 +135,45 @@ export function AiSettingsForm({ current }: { current: AppSettings }) {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <label className="flex flex-col gap-1">
             <span className="eyebrow">Provider</span>
-            <select value={provider} onChange={(e) => setProvider(e.target.value)} className={inputCls}>
+            <select value={provider} onChange={(e) => { clearDiscovery(); setProvider(e.target.value); }} className={inputCls}>
               <option value="">— env default —</option>
               <option value="openai_compatible">OpenAI-compatible (local)</option>
               <option value="anthropic">Anthropic (cloud fallback)</option>
             </select>
           </label>
-          <label className="flex flex-col gap-1">
-            <span className="eyebrow">Model</span>
-            <input value={llmModel} onChange={(e) => setLlmModel(e.target.value)}
-              placeholder="e.g. qwen3-32b" className={inputCls} />
-          </label>
+          <div className="flex flex-col gap-1">
+            <label htmlFor={`${modelListId}-input`} className="eyebrow">Model</label>
+            <div className="flex items-center gap-2">
+              <input id={`${modelListId}-input`} value={llmModel}
+                onChange={(e) => { modelEdits.current += 1; setLlmModel(e.target.value); }}
+                list={discovery?.ok ? modelListId : undefined}
+                aria-describedby={discovery ? `${modelListId}-status` : undefined}
+                placeholder="e.g. qwen3-32b" className={`${inputCls} min-w-0`} />
+              {provider !== 'anthropic' && (
+                <button type="button" onClick={() => void discoverModels()} disabled={!canDiscover || discovering}
+                  className={`${ghostBtnCls} shrink-0`}>
+                  {discovering ? 'Discovering…' : 'Discover models'}
+                </button>
+              )}
+            </div>
+            {discovery?.ok && (
+              <datalist id={modelListId}>
+                {discovery.models.map((model) => (
+                  <option key={model} value={model} label={discovery.loaded?.includes(model) ? `${model} (loaded)` : model} />
+                ))}
+              </datalist>
+            )}
+            {discovery && (
+              <p id={`${modelListId}-status`} role="status" className={`font-mono text-[11px] ${discovery.ok ? 'text-ink-3' : 'text-accent'}`}>
+                {discovery.ok
+                  ? discovery.models.length ? 'Choose a discovered model or enter a custom model ID.' : 'No models found. Enter a custom model ID.'
+                  : `server unreachable: ${discovery.detail}`}
+              </p>
+            )}
+          </div>
           <label className="flex flex-col gap-1 sm:col-span-2">
             <span className="eyebrow">Base URL (OpenAI-compatible)</span>
-            <input value={llmBaseUrl} onChange={(e) => setLlmBaseUrl(e.target.value)}
+            <input value={llmBaseUrl} onChange={(e) => { clearDiscovery(); setLlmBaseUrl(e.target.value); }}
               placeholder="http://llama-box:8080/v1" className={inputCls} />
           </label>
           <label className="flex flex-col gap-1 sm:col-span-2">
