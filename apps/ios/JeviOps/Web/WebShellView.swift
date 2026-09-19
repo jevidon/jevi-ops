@@ -7,13 +7,12 @@ final class ShellState: ObservableObject {
     @Published var offlineMessage: String?
     weak var webView: WKWebView?
 
-    func reloadFromOrigin() {
-        guard let webView else { return }
-        if webView.url == nil, let home = AppConfig.shared.webURL {
-            webView.load(URLRequest(url: home))
-        } else {
-            webView.reload()
-        }
+    func reloadFromOrigin(home: URL? = AppConfig.shared.webURL) {
+        guard let webView, let home else { return }
+        // Settings may have corrected the Web URL while an old page (even
+        // the API landing page) is still loaded. Re-read the configured URL
+        // instead of reloading that stale destination.
+        webView.load(URLRequest(url: home))
     }
 
     func load(path: String) {

@@ -58,7 +58,29 @@ targets:
     dependencies:
       - target: JeviOps
 
+  APIClientTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - Tests
+      - Shared/APIClient.swift
+      - Shared/Models.swift
+      - Shared/AppConfig.swift
+      - Shared/KeychainStore.swift
+      - JeviOps/Web/WebShellView.swift
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+
 schemes:
+  APIClientTests:
+    build:
+      targets:
+        APIClientTests: all
+    test:
+      config: Debug
+      targets:
+        - APIClientTests
   JeviOps:
     build:
       targets:

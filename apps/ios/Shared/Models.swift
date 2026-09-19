@@ -47,5 +47,6 @@ struct CreateTaskPayload: Codable {
 
 struct DomainsResponse: Codable { let domains: [Domain] }
 struct ProjectsResponse: Codable { let projects: [Project] }
+struct HealthResponse: Decodable { let status: String }
 struct LoginResponse: Codable { let token: String }
 struct MintTokenResponse: Codable { let token: String }

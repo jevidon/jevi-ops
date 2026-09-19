@@ -43,6 +43,43 @@ The simulator shares the Mac's loopback; ATS allows it via
 Against the real server: onboard with the ts.net web URL — the API derives to
 `:8443` (tailscale serve). The device/simulator's host must be on the tailnet.
 
+## Connection troubleshooting
+
+- Open the API URL plus `/healthz` in Safari. Expect JSON containing
+  `"status":"ok"`. An HTML sign-in page means the API URL or proxy is reaching
+  the web service. The default proxy targets are web → `127.0.0.1:3000` and
+  API → `127.0.0.1:3001`.
+- A login 401 means the server rejected the email/password combination;
+  it does not mean a device token was revoked. Compare the normalized email
+  and backend with a successful web/controlled login. The API's `login failed`
+  log covers both an unknown email and a password mismatch.
+- Request byte counts alone cannot identify a changed password. JSON escaping
+  and differences in the email can change body length. Preserve passwords
+  exactly; do not trim them or log request bodies, passwords, or tokens.
+- Linking-session, device-token, transport, and response-format failures have
+  separate messages. Response-format errors identify the endpoint without
+  displaying authentication response contents.
+- After correcting the Web URL in native Settings, tap **Reload page** to
+  load that saved address. If you see `{"name":"jevi-ops/api",…}`, the web
+  view is reaching the API service; verify the Web URL and proxy mapping.
+
+## Isolated native tests
+
+These hostless tests use an in-memory URL protocol for API requests and a
+recording web view for navigation. They do not start the app, contact a server,
+read stored credentials, or mint device tokens. The existing
+`JeviOps` UI-test scheme still needs a live test server.
+
+```bash
+make generate
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild \
+  -project JeviOps.xcodeproj -scheme APIClientTests \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.5' \
+  -derivedDataPath build/UnitTests DEVELOPMENT_TEAM= CODE_SIGN_IDENTITY=- test
+```
+
+Choose a simulator installed on your Mac if that model/runtime is unavailable.
+
 ## Layout
 
 - `project.yml` — XcodeGen spec; the `.xcodeproj` is generated, never edited.
