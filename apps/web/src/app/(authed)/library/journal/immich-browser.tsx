@@ -66,10 +66,11 @@ export function ImmichBrowser({
   const onSelectionChangeRef = useRef(onSelectionChange);
   onSelectionChangeRef.current = onSelectionChange;
 
-  const setSel = (next: Set<string>) => {
-    setSelected(next);
-    onSelectionChangeRef.current(Array.from(next));
-  };
+  // Notify the parent after selection commits. State updater functions may
+  // run during render and must never update another component.
+  useEffect(() => {
+    onSelectionChangeRef.current(Array.from(selected));
+  }, [selected]);
 
   // A new committed entry date snaps browsing back to it.
   useEffect(() => {
@@ -80,7 +81,6 @@ export function ImmichBrowser({
     let cancelled = false;
     setCandidates(null);
     setSelected(new Set());
-    onSelectionChangeRef.current([]);
     loadImmichCandidatesAction(browseDate).then((res) => {
       if (cancelled) return;
       setConfigured(res.configured);
@@ -100,7 +100,6 @@ export function ImmichBrowser({
       const attached = new Set(attachedKey ? attachedKey.split('|') : []);
       const next = new Set(Array.from(prev).filter((id) => !attached.has(id)));
       if (next.size === prev.size) return prev;
-      onSelectionChangeRef.current(Array.from(next));
       return next;
     });
   }, [attachedKey]);
@@ -121,7 +120,7 @@ export function ImmichBrowser({
     const next = new Set(selected);
     if (next.has(id)) next.delete(id);
     else next.add(id);
-    setSel(next);
+    setSelected(next);
   };
 
   return (
