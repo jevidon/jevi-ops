@@ -200,6 +200,12 @@ body {
 .domain-ill-accent .f {
   color: rgb(var(--accent-slip) / 0.45); /* accent-slip, washed */
 }
+/* Tinted variant (Work board): the svg root carries the domain's identity
+   colour inline; faints drop to half of that same colour, so one hue draws
+   the whole engraving and no separate colour chip is needed. */
+.domain-ill-tinted .f {
+  color: color-mix(in srgb, currentColor 48%, transparent);
+}
 
 /* Capture Portal recording state — the Almanac mark's record disc pulses
    while the recorder is live (AlmanacMark coreClassName, set by the

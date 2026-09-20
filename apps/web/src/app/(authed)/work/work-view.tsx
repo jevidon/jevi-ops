@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useId, useMemo, useState } from 'react';
+import { useId, useMemo, useState, type CSSProperties } from 'react';
 import Link from 'next/link';
 import type { WorkPayload, WorkDomain } from '@/lib/api';
 import { Pill } from '@/components/Pill';
@@ -10,10 +10,21 @@ import { QuickAddTask } from '@/components/QuickAddTask';
 import { domainColor } from '@/lib/domain-colors';
 import { FocusControl, type FocusOption } from './focus-control';
 import { ProjectCard, ContentRow, AssetCard, FittedArt } from './cards';
+import { openCookieString } from './browse-state';
 
-// UI-only browsing state; urgency and rollups remain server-derived.
-const BROWSE_STATE_KEY = 'work-domain-browsing-v1';
-const cardGrid = { gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 258px), 1fr))' };
+// The Work page (issue #79 redesign, Sep 2026). No facet rail: the domains
+// are compact cards in two independent columns on desktop, one on mobile,
+// every card collapsed until opened. A card's name links to the domain page;
+// everything else on the card (engraving, pill, counts, empty space, the
+// desktop arrow) toggles its contents in place, constrained to the card's
+// own column. Open cards are remembered in a cookie the server reads back
+// (browse-state.ts), so the first paint is already right.
+//
+// Everything is server-derived — urgency pills and counts come straight off
+// the payload (buildWork), never re-computed here. State here is UI-only
+// (search, open cards, the parked toggle).
+
+const cardGrid = { gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 232px), 1fr))' };
 const actionClass = 'inline-flex min-h-11 items-center rounded px-2 font-mono text-[11px] text-ink-2 hover:text-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent';
 
 function matchesDomain(d: WorkDomain, q: string) {
@@ -24,47 +35,28 @@ function matchesDomain(d: WorkDomain, q: string) {
 }
 
 export function WorkView({
-  payload, tomorrowFocus, tomorrowDate, art = {},
+  payload, tomorrowFocus, tomorrowDate, art = {}, initialExpanded = [],
 }: {
   payload: WorkPayload;
   tomorrowFocus: { title: string; href: string } | null;
   tomorrowDate: string;
+  // Committed domain engravings (domain id → inner-SVG). Absent entries fall
+  // back to the name-seeded procedural motif, so every card carries art.
   art?: Record<string, string>;
+  // Cards the server found open in the cookie (already filtered to known ids).
+  initialExpanded?: string[];
 }) {
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set(initialExpanded));
   const [showParked, setShowParked] = useState(false);
   const [q, setQ] = useState('');
-  const [restored, setRestored] = useState(false);
-
-  // Restore on navigation back without changing the server's collapsed first
-  // render. Storage is optional (private browsing or a full quota may block it).
-  useEffect(() => {
-    try {
-      const saved = JSON.parse(sessionStorage.getItem(BROWSE_STATE_KEY) ?? 'null');
-      if (saved && typeof saved === 'object') {
-        if (Array.isArray(saved.expanded)) {
-          setExpanded(new Set(saved.expanded.filter((id: unknown): id is string => typeof id === 'string')));
-        }
-        if (typeof saved.q === 'string') setQ(saved.q);
-        if (typeof saved.showParked === 'boolean') setShowParked(saved.showParked);
-      }
-    } catch { /* Keep the initial, collapsed view. */ }
-    setRestored(true);
-  }, []);
-
-  useEffect(() => {
-    if (!restored) return;
-    try {
-      sessionStorage.setItem(BROWSE_STATE_KEY, JSON.stringify({ expanded: [...expanded], q, showParked }));
-    } catch { /* Browsing still works without persistence. */ }
-  }, [expanded, q, showParked, restored]);
 
   function toggle(id: string) {
-    setExpanded((previous) => {
-      const next = new Set(previous);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return next;
-    });
+    const next = new Set(expanded);
+    next.has(id) ? next.delete(id) : next.add(id);
+    setExpanded(next);
+    try {
+      document.cookie = openCookieString(next);
+    } catch { /* Browsing still works without persistence. */ }
   }
 
   // Search retains the full matching domain, including its asset hierarchy.
@@ -84,8 +76,10 @@ export function WorkView({
     return out;
   }, [payload.domains]);
 
-  const renderDomain = (d: WorkDomain) => (
-    <DomainSection key={d.id} domain={d} artSvg={art[d.id]} expanded={expanded.has(d.id)} onToggle={() => toggle(d.id)} />
+  const renderBoard = (list: WorkDomain[], label: string) => (
+    <Board list={list} label={label} render={(d, order) => (
+      <DomainCard key={d.id} domain={d} artSvg={art[d.id]} expanded={expanded.has(d.id)} onToggle={() => toggle(d.id)} order={order} />
+    )} />
   );
 
   return (
@@ -97,9 +91,6 @@ export function WorkView({
           <Link href="/projects/new" className="inline-flex min-h-11 items-center rounded border border-ink bg-ink px-3 font-mono text-[11px] text-bg hover:bg-ink-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">+ Project</Link>
         </div>
       </div>
-      <p className="mb-4 font-sans text-[14px] text-ink-3">
-        Select a domain row to show its contents. Choose “Open domain” inside for its full page.
-      </p>
       <div className="mb-4">
         <FilterInput value={q} onChange={setQ} placeholder="Find domains, assets, projects, content…" className="max-w-[420px]" />
       </div>
@@ -107,9 +98,7 @@ export function WorkView({
         <FocusControl current={tomorrowFocus} options={focusOptions} date={tomorrowDate} />
       </div>
 
-      <div className="border-t border-line-strong">
-        {visibleDomains.map(renderDomain)}
-      </div>
+      {renderBoard(visibleDomains, 'Active domains')}
       {visibleDomains.length === 0 && (
         <p className="py-8 font-sans text-[14px] text-ink-3" role="status">
           {q.trim()
@@ -125,8 +114,8 @@ export function WorkView({
             <Icon name="chev" size={15} style={{ transform: `rotate(${showParked ? 90 : 0}deg)` }} />
             <span className="ml-2">Parked ({visibleParked.length})</span>
           </button>
-          <div id="parked-domains" hidden={!showParked} className="mt-2 border-t border-line-strong">
-            {showParked && visibleParked.map(renderDomain)}
+          <div id="parked-domains" hidden={!showParked} className="mt-2 opacity-70">
+            {showParked && renderBoard(visibleParked, 'Parked domains')}
             {showParked && visibleParked.length === 0 && <p className="py-4 text-sm text-ink-3">No parked domains match.</p>}
           </div>
         </div>
@@ -135,11 +124,36 @@ export function WorkView({
   );
 }
 
-function DomainSection({ domain, artSvg, expanded, onToggle }: {
+// Two independent columns on desktop, one list on mobile — from ONE set of
+// DOM nodes. Cards are dealt into two column wrappers (even indices left,
+// odd right) so an open card only pushes down the cards beneath it in its
+// own column; the other column never moves. Below lg the wrappers become
+// `display: contents` and each card's `order` (its payload index) restores
+// row-wise reading order in the single flex column. No media query in JS,
+// so server and client render the same tree.
+function Board({ list, label, render }: {
+  list: WorkDomain[];
+  label: string;
+  render: (d: WorkDomain, order: number) => React.ReactNode;
+}) {
+  if (list.length === 0) return null;
+  return (
+    <div aria-label={label} className="flex flex-col border-t-2 border-ink lg:grid lg:grid-cols-2 lg:items-start lg:gap-x-10">
+      {[0, 1].map((col) => (
+        <div key={col} className="contents lg:flex lg:min-w-0 lg:flex-col">
+          {list.map((d, i) => (i % 2 === col ? render(d, i) : null))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function DomainCard({ domain, artSvg, expanded, onToggle, order }: {
   domain: WorkDomain;
   artSvg?: string;
   expanded: boolean;
   onToggle: () => void;
+  order: number;
 }) {
   const r = domain.rollup;
   const color = domainColor(domain.name);
@@ -151,50 +165,74 @@ function DomainSection({ domain, artSvg, expanded, onToggle }: {
   const cueId = `${id}-cue`;
   const assetIds = new Set(domain.assets.map((a) => a.id));
   const otherProjects = domain.projects.filter((p) => !p.asset || !assetIds.has(p.asset.id));
+  const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`;
 
   return (
-    <section aria-labelledby={titleId} className="min-w-0 border-b border-line-strong">
-      <h2 className="sticky top-0 lg:top-[60px] z-20 bg-bg">
-        <button type="button" onClick={onToggle} aria-expanded={expanded} aria-controls={panelId}
+    <section aria-labelledby={titleId} className="min-w-0 border-b border-line-strong" style={{ order } as CSSProperties}>
+      {/* The card. A transparent button fills it and is the disclosure
+          control (keyboard focus rings the whole card; Enter/Space toggle).
+          Being absolutely positioned it paints above the in-flow content,
+          so a click on the engraving, pill, counts or empty space lands on
+          it. The name link is raised above the button so it navigates.
+          Open cards sit on the raised paper surface — on mobile, where
+          there is no arrow, that is the visible open state. */}
+      <div className={`relative flex items-center gap-3.5 min-h-[80px] py-3 pr-2 rounded transition-colors hover:bg-surface ${expanded ? 'bg-surface' : ''}`}>
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-expanded={expanded}
+          aria-controls={panelId}
           aria-labelledby={`${titleId} ${cueId}`}
-          className="group flex w-full min-h-11 items-center gap-4 rounded py-4 text-left hover:bg-surface focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
-          <span className="min-w-0 flex-1">
-            <span id={titleId} className="block font-serif text-[22px] font-medium leading-[1.2] tracking-[-0.015em] text-ink [overflow-wrap:anywhere]">
-              <span className="mr-2 inline-block h-[10px] w-[10px] rounded-[3px]" style={{ background: color }} aria-hidden />
-              {domain.name}
-            </span>
-            <span className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2 font-mono text-[11px] font-normal text-ink-3">
-              <Pill state={domain.urgency} />
-              <span>{r.open} open</span>
-              {r.overdue > 0 && <span className="text-accent">{r.overdue} overdue</span>}
-              {r.waiting > 0 && <span>{r.waiting} waiting</span>}
-              {r.attention > 0 && <span>{r.attention} {r.attention === 1 ? 'needs' : 'need'} attention</span>}
-            </span>
-            <span className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 font-sans text-[12px] font-normal text-ink-3">
-              <span>{domain.assets.length} {domain.assets.length === 1 ? 'asset' : 'assets'} · {domain.projects.length} {domain.projects.length === 1 ? 'project' : 'projects'} · {domain.content.length} content</span>
-              <span id={cueId} className="inline-flex items-center gap-1 text-ink-2 group-hover:text-accent">
-                {expanded ? 'Hide contents' : 'Show contents'}
-                <span className="inline-flex lg:hidden" aria-hidden>
-                  <Icon name="chev" size={14} style={{ transform: `rotate(${expanded ? 90 : 0}deg)` }} />
-                </span>
-              </span>
-            </span>
-          </span>
-          <span className="hidden lg:block h-[42px] max-w-[140px] shrink-0 overflow-hidden opacity-80" aria-hidden>
-            <FittedArt name={domain.name} svg={artSvg} tone={domain.urgency === 'over' ? 'accent' : 'ink'} />
-          </span>
-          <span className="hidden lg:inline-flex shrink-0 text-ink-3" aria-hidden>
-            <Icon name="chev" size={20} style={{ transform: `rotate(${expanded ? 90 : 0}deg)` }} />
-          </span>
+          className="absolute inset-0 rounded focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
+        >
+          <span id={cueId} className="sr-only">{expanded ? 'Hide contents' : 'Show contents'}</span>
         </button>
-      </h2>
+
+        {/* Lead slot: the engraving inked in the domain colour, with the
+            urgency pill spanning its full width beneath. Fixed width so
+            every name in a column starts at the same x. */}
+        <span className="flex w-[84px] lg:w-[104px] shrink-0 flex-col items-end gap-1.5">
+          <span className="flex h-[34px] lg:h-10 w-full items-center justify-end overflow-hidden" aria-hidden>
+            <FittedArt name={domain.name} svg={artSvg} color={color} fit="xMaxYMid meet" />
+          </span>
+          <Pill state={domain.urgency} className="w-full" />
+        </span>
+
+        <span className="flex min-w-0 flex-1 flex-col gap-1.5">
+          {/* Name links to the domain detail page — settings, cadence rule,
+              and the illustration panel live there. */}
+          <Link
+            id={titleId}
+            href={`/domains/${domain.id}`}
+            className="relative z-10 self-start font-serif text-[21px] lg:text-[22px] font-medium leading-[1.1] tracking-[-0.015em] text-ink [overflow-wrap:anywhere] hover:text-accent transition-colors"
+          >
+            {domain.name}
+          </Link>
+          <span className="flex flex-wrap gap-x-2.5 gap-y-1 font-mono text-[11px] font-medium text-ink-3">
+            <span>{r.open} open</span>
+            {r.overdue > 0 && <span className="text-accent">{r.overdue} overdue</span>}
+            {r.waiting > 0 && <span>{r.waiting} waiting</span>}
+          </span>
+        </span>
+
+        {/* Desktop keeps a right-side arrow as the visible cue; decorative,
+            the button above carries the state. Mobile has no arrow. */}
+        <span className="hidden lg:grid h-[34px] w-[34px] shrink-0 place-items-center text-ink-3" aria-hidden>
+          <Icon name="chev" size={16} style={{ transform: `rotate(${expanded ? 90 : 0}deg)`, transition: 'transform .15s' }} />
+        </span>
+      </div>
 
       <div id={panelId} hidden={!expanded}>
         {expanded && (
           <div className="min-w-0 border-t border-line pb-5 [overflow-wrap:anywhere]">
-            <Link href={`/domains/${domain.id}`} aria-label={`Open domain: ${domain.name}`} className={`${actionClass} my-2 underline underline-offset-4`}>
-              Open domain<span aria-hidden className="ml-2">→</span>
-            </Link>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 py-2">
+              <Link href={`/domains/${domain.id}`} aria-label={`Open domain: ${domain.name}`} className={`${actionClass} underline underline-offset-4`}>
+                Open domain<span aria-hidden className="ml-2">→</span>
+              </Link>
+              <span className="ml-auto font-mono text-[10.5px] text-ink-3">
+                {plural(domain.assets.length, 'asset')} · {plural(domain.projects.length, 'project')} · {domain.content.length} content
+              </span>
+            </div>
             {domain.assets.length > 0 && (
               <div className="mb-4 space-y-4">
                 <h3 className="font-mono text-[11px] uppercase tracking-wider text-ink-3">Assets &amp; their projects</h3>

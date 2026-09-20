@@ -1,5 +1,46 @@
 # Compact domain browsing — issue #79
 
+## Revision — 21 September 2026
+
+The first cut (below) was reviewed against a clickable prototype and revised.
+What the board does now, and why it differs from the original decision:
+
+- **Two independent columns on desktop, one on mobile.** The collapsed list
+  of thirteen domains was one long stack with most of the page empty once the
+  sidebar went. Cards are dealt into two column wrappers (even indices left,
+  odd right); below `lg` the wrappers become `display: contents` and each
+  card's `order` restores row-wise reading order. One DOM tree serves both,
+  so there is no viewport check in JS and no hydration mismatch. A card's
+  contents open **inside its own column**, directly under its bar; only the
+  cards beneath it in that column move.
+- **Name navigates, everything else toggles.** The whole-row-button design
+  hid navigation behind a second tap on desktop too, where there is room for
+  both. The domain name is now a link at every width. A transparent button
+  the size of the card is the disclosure control: it carries `aria-expanded`
+  and `aria-controls`, Enter and Space toggle it, and keyboard focus rings the
+  whole card. Because it is absolutely positioned it paints above the in-flow
+  content, so a tap on the engraving, pill, counts or empty space toggles;
+  the name link is raised above it. Desktop keeps a decorative right-side
+  arrow that rotates when open; mobile has no arrow, and an open card sits on
+  the raised paper surface instead. “Open domain” stays inside the panel too.
+- **Engraving in the lead slot, inked in the domain colour.** Every card
+  carries its drawing (committed engraving or the name-seeded motif), set to
+  the left of the name in a fixed-width slot so names align down a column.
+  The drawing is inked in the domain's identity colour — primary strokes full,
+  faint strokes at half — which retires the separate colour chip. The urgency
+  pill spans the slot's full width beneath the drawing, label left-aligned.
+  Open, overdue and waiting counts sit under the name. The old “overdue
+  domains re-ink in rust” signal now lives only in the pill.
+- **Open cards persist in a cookie the server reads.** sessionStorage restored
+  after hydration meant a collapsed first paint that popped open under the
+  user and broke back-navigation scroll restore. `browse-state.ts` defines the
+  cookie; the page component reads it, filters to ids the payload still
+  knows, and passes `initialExpanded`, so the first paint is already right.
+  Search text and the parked toggle are no longer persisted.
+- **Deferred.** Choosing a domain colour (the project/area swatch palette)
+  belongs in the Edit domain flow and is a separate work item. Project kind
+  (area vs project) is not surfaced at this vantage point.
+
 ## Interaction decision (before implementation)
 
 The `/domains` index redirects to `/work`, so this change belongs to the Work

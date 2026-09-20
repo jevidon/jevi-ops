@@ -1,7 +1,9 @@
+import { cookies } from 'next/headers';
 import { workApi, focusApi, domainsApi } from '@/lib/api';
 import { getAppTimezone } from '@/lib/app-settings';
 import { tomorrowIsoDate } from '@/lib/today';
 import { WorkView } from './work-view';
+import { WORK_OPEN_COOKIE, parseOpenCookie } from './browse-state';
 
 // /work — the computed manager's map (Addendum 08). Replaces the Projects and
 // Domains index pages: one page answering "where does everything stand?".
@@ -42,7 +44,13 @@ export default async function WorkPage() {
       }
     : null;
 
+  // Cards the user left open (browse-state.ts), rendered open on the first
+  // paint. Filtered to ids the payload still carries, so a deleted or
+  // renamed domain can't leave a ghost entry behind.
+  const known = new Set([...payload.domains, ...payload.parked].map((d) => d.id));
+  const initialExpanded = parseOpenCookie((await cookies()).get(WORK_OPEN_COOKIE)?.value).filter((id) => known.has(id));
+
   return (
-    <WorkView payload={payload} tomorrowFocus={tomorrowFocus} tomorrowDate={tomorrowDate} art={art} />
+    <WorkView payload={payload} tomorrowFocus={tomorrowFocus} tomorrowDate={tomorrowDate} art={art} initialExpanded={initialExpanded} />
   );
 }
