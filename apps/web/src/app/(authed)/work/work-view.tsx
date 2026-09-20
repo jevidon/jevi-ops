@@ -1,384 +1,253 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useState } from 'react';
 import Link from 'next/link';
-import type { WorkPayload, WorkDomain, WorkProjectCard, WorkContentRow } from '@/lib/api';
-import type { Urgency } from '@jevi-ops/shared';
-import { URGENCY_LABEL } from '@jevi-ops/shared';
+import type { WorkPayload, WorkDomain } from '@/lib/api';
 import { Pill } from '@/components/Pill';
 import { Icon } from '@/components/Icon';
-import { FacetRail, FacetGroup, FacetRow, FacetTag, FacetTags, FacetSep } from '@/components/FacetRail';
 import { FilterInput, textMatches } from '@/components/FilterInput';
 import { QuickAddTask } from '@/components/QuickAddTask';
 import { domainColor } from '@/lib/domain-colors';
 import { FocusControl, type FocusOption } from './focus-control';
 import { ProjectCard, ContentRow, AssetCard, FittedArt } from './cards';
 
-// The Work page (Addendum 08 + v2 redesign, Jul 2026). One computed map: a left
-// facet rail (Domain / Status / Show) filters domain sections, each a sticky
-// colour-chip header over project cards + content rows + direct tasks. (The
-// View group's needs-attention toggle was retired Aug 2026 — the Attention
-// page owns that lens.)
-//
-// Everything is server-derived — the urgency pills come straight off the
-// payload's `urgency` fields (buildWork), never re-computed here, so a domain
-// pill can't disagree with a card inside it. State here is UI-only (filters,
-// collapse). Preserved from Addendum 08: Tomorrow's Focus and the holder flip.
+// UI-only browsing state; urgency and rollups remain server-derived.
+const BROWSE_STATE_KEY = 'work-domain-browsing-v1';
+const cardGrid = { gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 258px), 1fr))' };
+const actionClass = 'inline-flex min-h-11 items-center rounded px-2 font-mono text-[11px] text-ink-2 hover:text-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent';
 
-const STATUS_ORDER: Urgency[] = ['over', 'due', 'ok', 'quiet'];
-type Kind = 'assets' | 'projects' | 'content' | 'tasks';
-const ALL_KINDS: Kind[] = ['assets', 'projects', 'content', 'tasks'];
+function matchesDomain(d: WorkDomain, q: string) {
+  return textMatches(q, d.name)
+    || d.assets.some((a) => textMatches(q, a.name))
+    || d.projects.some((p) => textMatches(q, p.name, p.client, p.asset?.name))
+    || d.content.some((c) => textMatches(q, c.title));
+}
 
 export function WorkView({
-  payload,
-  tomorrowFocus,
-  tomorrowDate,
-  art = {},
+  payload, tomorrowFocus, tomorrowDate, art = {},
 }: {
   payload: WorkPayload;
   tomorrowFocus: { title: string; href: string } | null;
   tomorrowDate: string;
-  // Fork: committed domain engravings (domain id → inner-SVG), rendered as
-  // muted spot art in section headers. Absent entries render no art.
   art?: Record<string, string>;
 }) {
-  const [dsel, setDsel] = useState<Set<string>>(new Set());
-  const [ssel, setSsel] = useState<Set<Urgency>>(new Set());
-  const [kinds, setKinds] = useState<Set<Kind>>(new Set(ALL_KINDS));
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [showParked, setShowParked] = useState(false);
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  // Live text filter (Wave 2 #3) — narrows sections/cards/rows as you type.
   const [q, setQ] = useState('');
+  const [restored, setRestored] = useState(false);
 
-  const toggle = <T,>(set: React.Dispatch<React.SetStateAction<Set<T>>>, v: T) =>
-    set((s) => {
-      const n = new Set(s);
-      n.has(v) ? n.delete(v) : n.add(v);
-      return n;
+  // Restore on navigation back without changing the server's collapsed first
+  // render. Storage is optional (private browsing or a full quota may block it).
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(BROWSE_STATE_KEY) ?? 'null');
+      if (saved && typeof saved === 'object') {
+        if (Array.isArray(saved.expanded)) {
+          setExpanded(new Set(saved.expanded.filter((id: unknown): id is string => typeof id === 'string')));
+        }
+        if (typeof saved.q === 'string') setQ(saved.q);
+        if (typeof saved.showParked === 'boolean') setShowParked(saved.showParked);
+      }
+    } catch { /* Keep the initial, collapsed view. */ }
+    setRestored(true);
+  }, []);
+
+  useEffect(() => {
+    if (!restored) return;
+    try {
+      sessionStorage.setItem(BROWSE_STATE_KEY, JSON.stringify({ expanded: [...expanded], q, showParked }));
+    } catch { /* Browsing still works without persistence. */ }
+  }, [expanded, q, showParked, restored]);
+
+  function toggle(id: string) {
+    setExpanded((previous) => {
+      const next = new Set(previous);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
     });
+  }
 
-  // Apply the active facets to a domain, returning a filtered copy or null if
-  // it drops out. Status is the four-state multi-select.
-  const applyFacets = (d: WorkDomain): WorkDomain | null => {
-    let assets = kinds.has('assets') ? d.assets : [];
-    let projects = kinds.has('projects') ? d.projects : [];
-    let content = kinds.has('content') ? d.content : [];
+  // Search retains the full matching domain, including its asset hierarchy.
+  const visibleDomains = payload.domains.filter((d) => matchesDomain(d, q));
+  const visibleParked = payload.parked.filter((d) => matchesDomain(d, q));
 
-    if (ssel.size) {
-      assets = assets.filter((a) => ssel.has(a.urgency));
-      projects = projects.filter((p) => ssel.has(p.urgency));
-      content = content.filter((c) => ssel.has(c.urgency));
-    }
-
-    // Text narrow: a domain-name hit keeps the whole (facet-filtered)
-    // section; otherwise cards/rows must match by name/title/client and the
-    // section drops when nothing survives (direct-task counts aren't
-    // searchable text, so they don't hold a section open).
-    if (q.trim() && !textMatches(q, d.name)) {
-      assets = assets.filter((a) => textMatches(q, a.name));
-      projects = projects.filter((p) => textMatches(q, p.name, p.client, p.asset?.name));
-      content = content.filter((c) => textMatches(q, c.title));
-      if (!assets.length && !projects.length && !content.length) return null;
-    }
-
-    // Domain drops out when nothing survives AND it has no other reason to show.
-    if (ssel.size && !ssel.has(d.urgency) && !assets.length && !projects.length && !content.length) {
-      return null;
-    }
-    return { ...d, assets, projects, content };
-  };
-
-  const visibleDomains = useMemo(() => {
-    let list = payload.domains;
-    if (dsel.size) list = list.filter((d) => dsel.has(d.id));
-    return list.map(applyFacets).filter((d): d is WorkDomain => d !== null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [payload.domains, dsel, ssel, kinds, q]);
-
-  // Quick-add target options per domain — from the UNFILTERED payload, so a
-  // Status/attention facet that hides a project card doesn't also hide it as
-  // an add-into target.
-  const quickAddProjects = useMemo(() => {
-    const m = new Map<string, { id: string; name: string }[]>();
-    for (const d of [...payload.domains, ...payload.parked]) {
-      m.set(d.id, d.projects.map((p) => ({ id: p.id, name: p.name })));
-    }
-    return m;
-  }, [payload]);
-
-  // Focus candidates — active projects + my-move content, from the same payload.
   const focusOptions = useMemo<FocusOption[]>(() => {
     const out: FocusOption[] = [];
     for (const d of payload.domains) {
       for (const p of d.projects) {
-        if (p.paused) continue;
-        out.push({ type: 'project', id: p.id, label: p.name, context: p.client ?? d.name });
+        if (!p.paused) out.push({ type: 'project', id: p.id, label: p.name, context: p.client ?? d.name });
       }
       for (const c of d.content) {
-        if (c.holder !== 'me') continue;
-        out.push({ type: 'content_item', id: c.id, label: c.title, context: c.status });
+        if (c.holder === 'me') out.push({ type: 'content_item', id: c.id, label: c.title, context: c.status });
       }
     }
     return out;
   }, [payload.domains]);
 
-  const activeFilters = dsel.size + ssel.size + (ALL_KINDS.length - kinds.size) + (q.trim() ? 1 : 0);
-  const resetFilters = () => {
-    setDsel(new Set());
-    setSsel(new Set());
-    setKinds(new Set(ALL_KINDS));
-    setQ('');
-  };
+  const renderDomain = (d: WorkDomain) => (
+    <DomainSection key={d.id} domain={d} artSvg={art[d.id]} expanded={expanded.has(d.id)} onToggle={() => toggle(d.id)} />
+  );
 
   return (
-    <div className="lg:flex">
-      {/* ─── Facet rail ─────────────────────────────────────────────── */}
-      <FacetRail activeCount={activeFilters} onReset={resetFilters}>
-        {/* The Reset affordance rides on the first group now that the View
-            group is gone (Aug 2026) — it clears every facet, not just Domain. */}
-        <FacetGroup
-          label="Domain"
-          action={
-            activeFilters > 0 ? (
-              <button type="button" onClick={resetFilters} className="font-mono text-[9px] uppercase tracking-[0.09em] text-ink-3 hover:text-accent transition-colors">
-                Reset
-              </button>
-            ) : undefined
-          }
-        >
-          {payload.domains.map((d) => (
-            <FacetRow
-              key={d.id}
-              on={dsel.has(d.id)}
-              onClick={() => toggle(setDsel, d.id)}
-              color={domainColor(d.name)}
-              name={d.name}
-              count={d.assets.length + d.projects.length + d.content.length + d.rollup.open}
-            />
-          ))}
-        </FacetGroup>
-        <FacetSep />
-
-        <FacetGroup
-          label="Status"
-          action={
-            ssel.size ? (
-              <button type="button" onClick={() => setSsel(new Set())} className="font-mono text-[9px] uppercase tracking-[0.09em] text-ink-3 hover:text-accent transition-colors">
-                Clear
-              </button>
-            ) : undefined
-          }
-        >
-          <FacetTags>
-            {STATUS_ORDER.map((s) => (
-              <FacetTag key={s} on={ssel.has(s)} onClick={() => toggle(setSsel, s)} name={URGENCY_LABEL[s]} />
-            ))}
-          </FacetTags>
-        </FacetGroup>
-        <FacetSep />
-
-        <FacetGroup label="Show">
-          {([['assets', 'Assets'], ['projects', 'Projects'], ['content', 'Content'], ['tasks', 'Direct tasks']] as [Kind, string][]).map(
-            ([k, label]) => (
-              <FacetRow key={k} on={kinds.has(k)} onClick={() => toggle(setKinds, k)} name={label} />
-            ),
-          )}
-        </FacetGroup>
-      </FacetRail>
-
-      {/* ─── Body ───────────────────────────────────────────────────── */}
-      <div className="flex-1 min-w-0 px-5 lg:px-0 lg:pl-8 pt-6 pb-24">
-        {/* Masthead */}
-        <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-4 mb-5">
-          <div>
-            <h1 className="font-serif text-[40px] font-medium leading-[1.02] tracking-[-0.022em] text-ink">Domains</h1>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <Link
-              href="/content?status=idea"
-              className="inline-flex items-center h-[34px] px-3 rounded border border-line-strong font-mono text-[10px] uppercase tracking-[0.09em] text-ink-2 hover:border-ink-3 hover:text-ink transition-colors"
-            >
-              Ideas ({payload.ideasCount})
-            </Link>
-            <Link
-              href="/projects/new"
-              className="inline-flex items-center h-[34px] px-3 rounded bg-ink border border-ink font-mono text-[10px] uppercase tracking-[0.09em] text-bg hover:bg-ink-2 transition-colors"
-            >
-              + Project
-            </Link>
-          </div>
+    <div className="min-w-0 px-5 lg:px-0 pt-6 pb-24">
+      <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-4 mb-4">
+        <h1 className="font-serif text-[40px] font-medium leading-[1.02] tracking-[-0.022em] text-ink">Domains</h1>
+        <div className="flex flex-wrap items-center gap-2">
+          <Link href="/content?status=idea" className={`${actionClass} border border-line-strong px-3`}>Ideas ({payload.ideasCount})</Link>
+          <Link href="/projects/new" className="inline-flex min-h-11 items-center rounded border border-ink bg-ink px-3 font-mono text-[11px] text-bg hover:bg-ink-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">+ Project</Link>
         </div>
-
-        {/* Live filter — type to narrow the whole board. */}
-        <div className="mb-4">
-          <FilterInput value={q} onChange={setQ} placeholder="Filter domains, projects, content…" className="max-w-[420px]" />
-        </div>
-
-        {/* Tomorrow's focus */}
-        <div className="border-y border-line mb-3">
-          <FocusControl current={tomorrowFocus} options={focusOptions} date={tomorrowDate} />
-        </div>
-
-        {/* Domain sections */}
-        {visibleDomains.length === 0 ? (
-          <div className="pt-16 text-center">
-            <div className="font-serif text-[25px] font-medium tracking-[-0.015em] text-ink">Nothing matches this view.</div>
-            <p className="mt-1.5 font-sans text-[14px] text-ink-3">Loosen a filter on the left, or reset them all.</p>
-          </div>
-        ) : (
-          visibleDomains.map((d) => (
-            <DomainSection key={d.id} domain={d} kinds={kinds} artSvg={art[d.id]} collapsed={collapsed.has(d.id)} onToggle={() => toggle(setCollapsed, d.id)} quickAddProjects={quickAddProjects.get(d.id) ?? []} />
-          ))
-        )}
-
-        {/* Parked */}
-        {payload.parked.length > 0 && (
-          <div className="mt-8">
-            <button
-              type="button"
-              onClick={() => setShowParked((v) => !v)}
-              className="font-mono text-[10px] uppercase tracking-wider text-ink-3 hover:text-ink-2 transition-colors"
-            >
-              {showParked ? '▾' : '▸'} Parked ({payload.parked.length})
-            </button>
-            {showParked && (
-              <div className="mt-4 opacity-60">
-                {/* Run parked domains through the same facets so Status/Show/
-                    attention narrow them too. */}
-                {payload.parked
-                  .map(applyFacets)
-                  .filter((d): d is WorkDomain => d !== null)
-                  .map((d) => (
-                    <DomainSection key={d.id} domain={d} kinds={kinds} artSvg={art[d.id]} collapsed={collapsed.has(d.id)} onToggle={() => toggle(setCollapsed, d.id)} quickAddProjects={quickAddProjects.get(d.id) ?? []} />
-                  ))}
-              </div>
-            )}
-          </div>
-        )}
       </div>
+      <p className="mb-4 font-sans text-[14px] text-ink-3">
+        Select a domain row to show its contents. Choose “Open domain” inside for its full page.
+      </p>
+      <div className="mb-4">
+        <FilterInput value={q} onChange={setQ} placeholder="Find domains, assets, projects, content…" className="max-w-[420px]" />
+      </div>
+      <div className="border-y border-line mb-5 pb-3">
+        <FocusControl current={tomorrowFocus} options={focusOptions} date={tomorrowDate} />
+      </div>
+
+      <div className="border-t border-line-strong">
+        {visibleDomains.map(renderDomain)}
+      </div>
+      {visibleDomains.length === 0 && (
+        <p className="py-8 font-sans text-[14px] text-ink-3" role="status">
+          {q.trim()
+            ? visibleParked.length ? 'Matching domains are in Parked below.' : 'No domains match. Try another search or clear it.'
+            : 'No active domains.'}
+        </p>
+      )}
+
+      {payload.parked.length > 0 && (
+        <div className="mt-6">
+          <button type="button" onClick={() => setShowParked((v) => !v)}
+            aria-expanded={showParked} aria-controls="parked-domains" className={actionClass}>
+            <Icon name="chev" size={15} style={{ transform: `rotate(${showParked ? 90 : 0}deg)` }} />
+            <span className="ml-2">Parked ({visibleParked.length})</span>
+          </button>
+          <div id="parked-domains" hidden={!showParked} className="mt-2 border-t border-line-strong">
+            {showParked && visibleParked.map(renderDomain)}
+            {showParked && visibleParked.length === 0 && <p className="py-4 text-sm text-ink-3">No parked domains match.</p>}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-function DomainSection({
-  domain, kinds, artSvg, collapsed, onToggle, quickAddProjects,
-}: {
+function DomainSection({ domain, artSvg, expanded, onToggle }: {
   domain: WorkDomain;
-  kinds: Set<Kind>;
-  // Fork: committed engraving (inner-SVG) shown as muted header spot art.
   artSvg?: string;
-  collapsed: boolean;
+  expanded: boolean;
   onToggle: () => void;
-  // Unfiltered add-into targets for the quick-add select.
-  quickAddProjects: { id: string; name: string }[];
 }) {
   const r = domain.rollup;
   const color = domainColor(domain.name);
-  const showDirect = kinds.has('tasks') && (domain.direct.open > 0 || domain.direct.waiting > 0);
-  const empty =
-    domain.assets.length === 0 && domain.projects.length === 0 && domain.content.length === 0 && !showDirect;
+  const showDirect = domain.direct.open > 0 || domain.direct.waiting > 0;
+  const empty = !domain.assets.length && !domain.projects.length && !domain.content.length && !showDirect;
+  const id = useId();
+  const panelId = `${id}-contents`;
+  const titleId = `${id}-title`;
+  const cueId = `${id}-cue`;
+  const assetIds = new Set(domain.assets.map((a) => a.id));
+  const otherProjects = domain.projects.filter((p) => !p.asset || !assetIds.has(p.asset.id));
 
   return (
-    <section className="mb-8">
-      {/* Sticky header — colour chip · name · engraving, then counts ·
-          toggle · urgency pill as the right bookend, with a 2px ink rule
-          under it. Sticks below the 60px topbar. The fork's engraving
-          (committed art or the name-seeded procedural motif) hangs off the
-          title and rests its strokes on the rule; accent-inked when
-          slipping. */}
-      {/* items-end + a small bottom standoff: chip, title baseline, art
-          ground-line, counts, toggle, and pill all settle onto the same
-          shelf just above the 2px rule instead of floating mid-row. */}
-      {/* Mobile: the counts/toggle/pill group wraps to its own second line
-          (basis-full) so the full domain name shows — no truncation below
-          lg. Desktop keeps the one-line shelf: the group rides lg:ml-auto
-          exactly where the old inline items sat. */}
-      <div className="sticky top-0 lg:top-[60px] z-20 flex flex-wrap items-end gap-x-3 gap-y-1 pt-2 pb-[9px] bg-bg border-b-2 border-ink">
-        <span className="w-[11px] h-[11px] rounded-[3px] shrink-0 mb-[4px]" style={{ background: color }} aria-hidden />
-        {/* Name links to the domain detail page — settings, cadence rule, and
-            the illustration panel live there. Previously the only doorway was
-            the Direct-tasks chip, which not every domain renders. */}
-        <Link
-          href={`/domains/${domain.id}`}
-          className="font-serif text-[21px] font-medium leading-[1.1] lg:leading-none tracking-[-0.015em] text-ink shrink min-w-0 lg:truncate hover:text-accent transition-colors"
-        >
-          {domain.name}
-        </Link>
-        <span
-          className="hidden lg:block h-[48px] max-w-[190px] shrink-0 overflow-hidden opacity-80"
-          aria-hidden
-        >
-          <FittedArt name={domain.name} svg={artSvg} tone={domain.urgency === 'over' ? 'accent' : 'ink'} />
-        </span>
-        <div className="flex items-center gap-3 basis-full lg:basis-auto lg:ml-auto min-w-0">
-          <div className="flex items-baseline gap-3 min-w-0 overflow-hidden font-mono text-[11px] font-medium text-ink-3 lg:mb-[2px]">
-            <span className="whitespace-nowrap">{r.open} open</span>
-            {r.overdue > 0 && <span className="whitespace-nowrap text-accent">{r.overdue} overdue</span>}
-            {r.waiting > 0 && <span className="whitespace-nowrap">{r.waiting} waiting</span>}
-          </div>
-          <button
-            type="button"
-            onClick={onToggle}
-            aria-label={collapsed ? 'Expand' : 'Collapse'}
-            className="grid place-items-center w-6 h-6 shrink-0 rounded ml-auto lg:ml-0 text-ink-3 hover:bg-surface-2 hover:text-ink transition-colors"
-          >
-            <Icon name="chev" size={15} style={{ transform: `rotate(${collapsed ? 0 : 90}deg)`, transition: 'transform .15s' }} />
-          </button>
-          <Pill state={domain.urgency} />
-        </div>
-      </div>
+    <section aria-labelledby={titleId} className="min-w-0 border-b border-line-strong">
+      <h2 className="sticky top-0 lg:top-[60px] z-20 bg-bg">
+        <button type="button" onClick={onToggle} aria-expanded={expanded} aria-controls={panelId}
+          aria-labelledby={`${titleId} ${cueId}`}
+          className="group flex w-full min-h-11 items-center gap-4 rounded py-4 text-left hover:bg-surface focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
+          <span className="min-w-0 flex-1">
+            <span id={titleId} className="block font-serif text-[22px] font-medium leading-[1.2] tracking-[-0.015em] text-ink [overflow-wrap:anywhere]">
+              <span className="mr-2 inline-block h-[10px] w-[10px] rounded-[3px]" style={{ background: color }} aria-hidden />
+              {domain.name}
+            </span>
+            <span className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2 font-mono text-[11px] font-normal text-ink-3">
+              <Pill state={domain.urgency} />
+              <span>{r.open} open</span>
+              {r.overdue > 0 && <span className="text-accent">{r.overdue} overdue</span>}
+              {r.waiting > 0 && <span>{r.waiting} waiting</span>}
+              {r.attention > 0 && <span>{r.attention} {r.attention === 1 ? 'needs' : 'need'} attention</span>}
+            </span>
+            <span className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 font-sans text-[12px] font-normal text-ink-3">
+              <span>{domain.assets.length} {domain.assets.length === 1 ? 'asset' : 'assets'} · {domain.projects.length} {domain.projects.length === 1 ? 'project' : 'projects'} · {domain.content.length} content</span>
+              <span id={cueId} className="inline-flex items-center gap-1 text-ink-2 group-hover:text-accent">
+                {expanded ? 'Hide contents' : 'Show contents'}
+                <span className="inline-flex lg:hidden" aria-hidden>
+                  <Icon name="chev" size={14} style={{ transform: `rotate(${expanded ? 90 : 0}deg)` }} />
+                </span>
+              </span>
+            </span>
+          </span>
+          <span className="hidden lg:block h-[42px] max-w-[140px] shrink-0 overflow-hidden opacity-80" aria-hidden>
+            <FittedArt name={domain.name} svg={artSvg} tone={domain.urgency === 'over' ? 'accent' : 'ink'} />
+          </span>
+          <span className="hidden lg:inline-flex shrink-0 text-ink-3" aria-hidden>
+            <Icon name="chev" size={20} style={{ transform: `rotate(${expanded ? 90 : 0}deg)` }} />
+          </span>
+        </button>
+      </h2>
 
-      {!collapsed && (
-        <div className="pt-3.5">
-          {/* Assets band (0049): the domain's assigned assets, above the
-              projects grid in the same card shell so the scan rhythm holds. */}
-          {domain.assets.length > 0 && (
-            <div
-              className="grid gap-3.5 mb-3"
-              style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(258px, 1fr))' }}
-            >
-              {domain.assets.map((a) => <AssetCard key={a.id} a={a} color={color} />)}
-            </div>
-          )}
-          {domain.projects.length > 0 && (
-            <div
-              className="grid gap-3.5 mb-3"
-              style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(258px, 1fr))' }}
-            >
-              {domain.projects.map((p) => <ProjectCard key={p.id} p={p} color={color} />)}
-            </div>
-          )}
-          {domain.content.length > 0 && (
-            <div className="border border-line rounded mb-3">
-              {domain.content.map((c) => <ContentRow key={c.id} c={c} color={color} />)}
-            </div>
-          )}
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-            {showDirect && (
-              <Link href={`/domains/${domain.id}`} className="inline-flex items-center gap-1.5 h-[26px] px-[9px] rounded border border-line-strong font-mono text-[9.5px] font-semibold uppercase tracking-[0.07em] text-ink-3 hover:border-ink-3 hover:text-ink transition-colors">
-                Direct tasks {domain.direct.open}
-                {domain.direct.overdue > 0 && ` · ${domain.direct.overdue} overdue`}
-                {domain.direct.waiting > 0 && ` · ${domain.direct.waiting} waiting`}
-              </Link>
+      <div id={panelId} hidden={!expanded}>
+        {expanded && (
+          <div className="min-w-0 border-t border-line pb-5 [overflow-wrap:anywhere]">
+            <Link href={`/domains/${domain.id}`} aria-label={`Open domain: ${domain.name}`} className={`${actionClass} my-2 underline underline-offset-4`}>
+              Open domain<span aria-hidden className="ml-2">→</span>
+            </Link>
+            {domain.assets.length > 0 && (
+              <div className="mb-4 space-y-4">
+                <h3 className="font-mono text-[11px] uppercase tracking-wider text-ink-3">Assets &amp; their projects</h3>
+                {domain.assets.map((a) => {
+                  const projects = domain.projects.filter((p) => p.asset?.id === a.id);
+                  return (
+                    <div key={a.id} role="group" aria-label={a.name} className="min-w-0">
+                      <div className="grid gap-3" style={cardGrid}><AssetCard a={a} color={color} /></div>
+                      {projects.length > 0 && (
+                        <div className="ml-2 mt-3 border-l-2 border-line pl-3">
+                          <div className="grid gap-3" style={cardGrid}>
+                            {projects.map((p) => <ProjectCard key={p.id} p={p} color={color} />)}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             )}
-            <Link href={`/projects/new?domain_id=${domain.id}`} className="font-mono text-[9px] uppercase tracking-[0.09em] text-ink-3 hover:text-accent transition-colors">
-              + Project in {domain.name}
-            </Link>
-            <Link href={`/maintenance/assets?domain_id=${domain.id}`} className="font-mono text-[9px] uppercase tracking-[0.09em] text-ink-3 hover:text-accent transition-colors">
-              + Asset in {domain.name}
-            </Link>
-            {/* Quick task capture (Wave 2 #2) — title straight into this
-                domain or one of its projects, no page hop. */}
-            <QuickAddTask
-              domainId={domain.id}
-              projects={quickAddProjects}
-              placeholder={`Add a task in ${domain.name}…`}
-              collapsible
-            />
+            {otherProjects.length > 0 && (
+              <div className="mb-4">
+                <h3 className="mb-3 font-mono text-[11px] uppercase tracking-wider text-ink-3">{domain.assets.length ? 'Other projects' : 'Projects'}</h3>
+                <div className="grid gap-3" style={cardGrid}>
+                  {otherProjects.map((p) => <ProjectCard key={p.id} p={p} color={color} />)}
+                </div>
+              </div>
+            )}
+            {domain.content.length > 0 && (
+              <div className="mb-4">
+                <h3 className="mb-3 font-mono text-[11px] uppercase tracking-wider text-ink-3">Content</h3>
+                <div className="border border-line rounded">
+                  {domain.content.map((c) => <ContentRow key={c.id} c={c} color={color} />)}
+                </div>
+              </div>
+            )}
+            {empty && <p className="mb-3 font-sans text-[13px] italic text-ink-3">Nothing open.</p>}
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+              {showDirect && (
+                <Link href={`/domains/${domain.id}`} className={actionClass}>
+                  Direct tasks {domain.direct.open}
+                  {domain.direct.overdue > 0 && ` · ${domain.direct.overdue} overdue`}
+                  {domain.direct.waiting > 0 && ` · ${domain.direct.waiting} waiting`}
+                </Link>
+              )}
+              <Link href={`/projects/new?domain_id=${domain.id}`} className={actionClass}>+ Project</Link>
+              <Link href={`/maintenance/assets?domain_id=${domain.id}`} className={actionClass}>+ Asset</Link>
+              <QuickAddTask domainId={domain.id} projects={domain.projects.map((p) => ({ id: p.id, name: p.name }))}
+                placeholder={`Add a task in ${domain.name}…`} collapsible />
+            </div>
           </div>
-          {empty && <p className="mt-0.5 font-sans text-[13px] italic text-ink-3">Nothing open.</p>}
-        </div>
-      )}
+        )}
+      </div>
     </section>
   );
 }
