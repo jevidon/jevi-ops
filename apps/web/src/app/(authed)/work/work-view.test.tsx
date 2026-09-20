@@ -96,7 +96,7 @@ describe('compact domain browsing', () => {
     expect(section('Empty').style.order).toBe('2');
   });
 
-  it('supports Enter/Space, independent cards, explicit navigation and asset hierarchy', async () => {
+  it('supports Enter/Space, independent cards, explicit navigation and flat asset/project grids', async () => {
     const user = userEvent.setup();
     mount();
     const button = card('Household');
@@ -105,14 +105,20 @@ describe('compact domain browsing', () => {
     expect(button.getAttribute('aria-expanded')).toBe('true');
     expect(document.activeElement).toBe(button);
     expect(screen.getByRole('link', { name: 'Open domain: Household' }).getAttribute('href')).toBe('/domains/Household');
-    const assetGroup = screen.getByRole('group', { name: 'Family car' });
-    expect(within(assetGroup).getByRole('link', { name: /Service brakes/ })).toBeDefined();
-    expect(within(assetGroup).queryByRole('link', { name: /Kitchen refresh/ })).toBeNull();
-    expect(screen.getByRole('link', { name: /Kitchen refresh/ })).toBeDefined();
+    // Assets and projects are two flat grids (as on the domain page); a
+    // project grouped under an asset carries the asset's name as a chip.
+    const panel = section('Household');
+    const assetsHeading = within(panel).getByRole('heading', { name: 'Assets' });
+    const projectsHeading = within(panel).getByRole('heading', { name: 'Projects' });
+    expect(within(assetsHeading.parentElement!).getByRole('link', { name: /Family car/ })).toBeDefined();
+    const projectGrid = projectsHeading.parentElement!;
+    expect(within(projectGrid).getByRole('link', { name: /Service brakes/ }).textContent).toContain('Family car');
+    expect(within(projectGrid).getByRole('link', { name: /Kitchen refresh/ })).toBeDefined();
+    expect(screen.queryByRole('group', { name: 'Family car' })).toBeNull();
     expect(screen.getByRole('link', { name: 'Household guide' })).toBeDefined();
     expect(screen.getByRole('link', { name: /Direct tasks 1/ })).toBeDefined();
     // The panel lives inside the card's own section (its column), not beside it.
-    expect(section('Household').contains(assetGroup)).toBe(true);
+    expect(panel.contains(projectGrid)).toBe(true);
     await user.click(card('Creative work'));
     expect(button.getAttribute('aria-expanded')).toBe('true');
     button.focus();
@@ -129,7 +135,8 @@ describe('compact domain browsing', () => {
     await user.type(screen.getByRole('searchbox'), 'brakes');
     expect(screen.queryByRole('button', { name: 'Creative work Show contents' })).toBeNull();
     expect(screen.getByRole('link', { name: /Kitchen refresh/ })).toBeDefined();
-    expect(screen.getByRole('group', { name: 'Family car' })).toBeDefined();
+    // The asset card itself (the Service brakes card also names the asset in its chip).
+    expect(screen.getByRole('link', { name: /^Family car/ })).toBeDefined();
     await user.click(screen.getByRole('button', { name: 'Clear filter' }));
     expect(card('Creative work')).toBeDefined();
     expect(card('Household', 'Hide')).toBeDefined();

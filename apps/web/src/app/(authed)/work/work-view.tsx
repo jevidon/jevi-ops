@@ -163,8 +163,6 @@ function DomainCard({ domain, artSvg, expanded, onToggle, order }: {
   const panelId = `${id}-contents`;
   const titleId = `${id}-title`;
   const cueId = `${id}-cue`;
-  const assetIds = new Set(domain.assets.map((a) => a.id));
-  const otherProjects = domain.projects.filter((p) => !p.asset || !assetIds.has(p.asset.id));
   const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`;
 
   return (
@@ -237,31 +235,24 @@ function DomainCard({ domain, artSvg, expanded, onToggle, order }: {
                 {plural(domain.assets.length, 'asset')} · {plural(domain.projects.length, 'project')} · {domain.content.length} content
               </span>
             </div>
+            {/* Flat grids, as on the domain detail page: assets, then
+                projects. A project that groups under an asset carries the
+                asset's name as a chip on its card (see ProjectCard) rather
+                than nesting beneath it — nesting left every asset card
+                alone in a two-column grid. */}
             {domain.assets.length > 0 && (
-              <div className="mb-4 space-y-4">
-                <h3 className="font-mono text-[11px] uppercase tracking-wider text-ink-3">Assets &amp; their projects</h3>
-                {domain.assets.map((a) => {
-                  const projects = domain.projects.filter((p) => p.asset?.id === a.id);
-                  return (
-                    <div key={a.id} role="group" aria-label={a.name} className="min-w-0">
-                      <div className="grid gap-3" style={cardGrid}><AssetCard a={a} color={color} /></div>
-                      {projects.length > 0 && (
-                        <div className="ml-2 mt-3 border-l-2 border-line pl-3">
-                          <div className="grid gap-3" style={cardGrid}>
-                            {projects.map((p) => <ProjectCard key={p.id} p={p} color={color} />)}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
+              <div className="mb-4">
+                <h3 className="mb-3 font-mono text-[11px] uppercase tracking-wider text-ink-3">Assets</h3>
+                <div className="grid gap-3" style={cardGrid}>
+                  {domain.assets.map((a) => <AssetCard key={a.id} a={a} color={color} />)}
+                </div>
               </div>
             )}
-            {otherProjects.length > 0 && (
+            {domain.projects.length > 0 && (
               <div className="mb-4">
-                <h3 className="mb-3 font-mono text-[11px] uppercase tracking-wider text-ink-3">{domain.assets.length ? 'Other projects' : 'Projects'}</h3>
+                <h3 className="mb-3 font-mono text-[11px] uppercase tracking-wider text-ink-3">Projects</h3>
                 <div className="grid gap-3" style={cardGrid}>
-                  {otherProjects.map((p) => <ProjectCard key={p.id} p={p} color={color} />)}
+                  {domain.projects.map((p) => <ProjectCard key={p.id} p={p} color={color} />)}
                 </div>
               </div>
             )}

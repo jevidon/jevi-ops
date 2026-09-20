@@ -45,6 +45,11 @@ What the board does now, and why it differs from the original decision:
   cookie; the page component reads it, filters to ids the payload still
   knows, and passes `initialExpanded`, so the first paint is already right.
   Search text and the parked toggle are no longer persisted.
+- **Flat asset and project grids.** The first cut nested each asset's
+  projects beneath its card, which left every asset card alone in a
+  two-column grid. The panel now lays out assets and then projects as two
+  flat grids, as the domain detail page does; a project grouped under an
+  asset carries the asset's name as a chip on its card.
 - **Deferred.** Choosing a domain colour (the project/area swatch palette)
   belongs in the Edit domain flow and is a separate work item. Project kind
   (area vs project) is not surfaced at this vantage point.
