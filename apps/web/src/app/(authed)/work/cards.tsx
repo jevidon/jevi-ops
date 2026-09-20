@@ -35,7 +35,20 @@ export function ageClass(days: number | null): string {
 // First paint uses the contract band (0 14 240 72); the fit lands before
 // the browser paints (useLayoutEffect), and the box has a fixed height so
 // nothing shifts.
-export function FittedArt({ name, svg, tone }: { name: string; svg?: string | null; tone: 'ink' | 'accent' }) {
+//
+// Two inkings: `tone` (ink, or accent for a slipping domain) is the detail
+// page's; `color` inks the drawing in the domain's identity colour — primary
+// strokes full, faint strokes at half (globals.css .domain-ill-tinted) — as
+// the Work board does, where the drawing replaced the colour chip. `fit` is
+// the preserveAspectRatio: the default hangs the art off a title and rests
+// it on a rule; the board centres it in a fixed slot, anchored right.
+export function FittedArt({ name, svg, tone = 'ink', color, fit = 'xMinYMax meet' }: {
+  name: string;
+  svg?: string | null;
+  tone?: 'ink' | 'accent';
+  color?: string;
+  fit?: string;
+}) {
   const gRef = useRef<SVGGElement>(null);
   const [viewBox, setViewBox] = useState('0 14 240 72');
   const inner = svg && svg.trim() ? svg : proceduralIllustration(name);
@@ -57,11 +70,12 @@ export function FittedArt({ name, svg, tone }: { name: string; svg?: string | nu
   return (
     <svg
       viewBox={viewBox}
-      preserveAspectRatio="xMinYMax meet"
+      preserveAspectRatio={fit}
       aria-hidden="true"
-      className={`domain-ill h-full w-auto ${
-        tone === 'accent' ? 'domain-ill-accent text-accent-slip/80' : 'text-ink-3'
+      className={`domain-ill h-full w-auto max-w-full ${
+        color ? 'domain-ill-tinted' : tone === 'accent' ? 'domain-ill-accent text-accent-slip/80' : 'text-ink-3'
       }`}
+      style={color ? { color } : undefined}
     >
       <g
         ref={gRef}
