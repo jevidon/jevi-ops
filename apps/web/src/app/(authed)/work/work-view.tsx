@@ -175,8 +175,11 @@ function DomainCard({ domain, artSvg, expanded, onToggle, order }: {
           so a click on the engraving, pill, counts or empty space lands on
           it. The name link is raised above the button so it navigates.
           Open cards sit on the raised paper surface — on mobile, where
-          there is no arrow, that is the visible open state. */}
-      <div className={`relative flex items-center gap-3.5 min-h-[80px] py-3 pr-2 rounded transition-colors hover:bg-surface ${expanded ? 'bg-surface' : ''}`}>
+          there is no arrow, that is the visible open state, and it clears
+          on collapse. Hover is offered only where a pointer can hover:
+          touch browsers pin :hover to the last tapped element, which made
+          a collapsed card look open. Taps get a press flash instead. */}
+      <div className={`relative flex items-center gap-3.5 min-h-[80px] py-3 pr-2 rounded transition-colors [@media(hover:hover)]:hover:bg-surface active:bg-surface ${expanded ? 'bg-surface' : ''}`}>
         <button
           type="button"
           onClick={onToggle}

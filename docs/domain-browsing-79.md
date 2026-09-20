@@ -22,7 +22,13 @@ What the board does now, and why it differs from the original decision:
   content, so a tap on the engraving, pill, counts or empty space toggles;
   the name link is raised above it. Desktop keeps a decorative right-side
   arrow that rotates when open; mobile has no arrow, and an open card sits on
-  the raised paper surface instead. “Open domain” stays inside the panel too.
+  the raised paper surface instead, clearing on collapse. Hover uses the same
+  surface but only on hover-capable pointers (`@media (hover: hover)`): touch
+  browsers pin `:hover` to the last tapped element, which made a collapsed
+  card look open. A tap gets a press flash (`:active`) instead. This is scoped
+  to the card, not the app-wide Tailwind flag, because sixteen files reveal
+  controls with `group-hover` and would lose them on touch.
+  “Open domain” stays inside the panel too.
 - **Engraving in the lead slot, inked in the domain colour.** Every card
   carries its drawing (committed engraving or the name-seeded motif), set to
   the left of the name in a fixed-width slot so names align down a column.
