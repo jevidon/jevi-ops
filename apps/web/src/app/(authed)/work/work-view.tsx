@@ -10,15 +10,14 @@ import { QuickAddTask } from '@/components/QuickAddTask';
 import { domainColor } from '@/lib/domain-colors';
 import { FocusControl, type FocusOption } from './focus-control';
 import { ProjectCard, ContentRow, AssetCard, FittedArt } from './cards';
-import { openCookieString } from './browse-state';
 
 // The Work page (issue #79 redesign, Sep 2026). No facet rail: the domains
 // are compact cards in two independent columns on desktop, one on mobile,
 // every card collapsed until opened. A card's name links to the domain page;
 // everything else on the card (engraving, pill, counts, empty space, the
 // desktop arrow) toggles its contents in place, constrained to the card's
-// own column. Open cards are remembered in a cookie the server reads back
-// (browse-state.ts), so the first paint is already right.
+// own column. Expansion lasts only for the current visit; every new visit
+// starts with all domain cards collapsed.
 //
 // Everything is server-derived — urgency pills and counts come straight off
 // the payload (buildWork), never re-computed here. State here is UI-only
@@ -35,7 +34,7 @@ function matchesDomain(d: WorkDomain, q: string) {
 }
 
 export function WorkView({
-  payload, tomorrowFocus, tomorrowDate, art = {}, initialExpanded = [],
+  payload, tomorrowFocus, tomorrowDate, art = {},
 }: {
   payload: WorkPayload;
   tomorrowFocus: { title: string; href: string } | null;
@@ -43,10 +42,8 @@ export function WorkView({
   // Committed domain engravings (domain id → inner-SVG). Absent entries fall
   // back to the name-seeded procedural motif, so every card carries art.
   art?: Record<string, string>;
-  // Cards the server found open in the cookie (already filtered to known ids).
-  initialExpanded?: string[];
 }) {
-  const [expanded, setExpanded] = useState<Set<string>>(() => new Set(initialExpanded));
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const [showParked, setShowParked] = useState(false);
   const [q, setQ] = useState('');
 
@@ -54,9 +51,6 @@ export function WorkView({
     const next = new Set(expanded);
     next.has(id) ? next.delete(id) : next.add(id);
     setExpanded(next);
-    try {
-      document.cookie = openCookieString(next);
-    } catch { /* Browsing still works without persistence. */ }
   }
 
   // Search retains the full matching domain, including its asset hierarchy.
@@ -96,10 +90,10 @@ export function WorkView({
             Ideas ({payload.ideasCount})
           </Link>
           <Link
-            href="/projects/new"
+            href="/domains/new"
             className="inline-flex items-center h-[34px] px-3 rounded bg-ink border border-ink font-mono text-[10px] uppercase tracking-[0.09em] text-bg hover:bg-ink-2 transition-colors"
           >
-            + Project
+            + Domain
           </Link>
         </div>
       </div>
