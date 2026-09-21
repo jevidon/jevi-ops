@@ -1,6 +1,6 @@
 'use client';
 
-import { useId, useMemo, useState, type CSSProperties } from 'react';
+import { useId, useMemo, useState } from 'react';
 import Link from 'next/link';
 import type { WorkPayload, WorkDomain } from '@/lib/api';
 import { Pill } from '@/components/Pill';
@@ -77,8 +77,8 @@ export function WorkView({
   }, [payload.domains]);
 
   const renderBoard = (list: WorkDomain[], label: string) => (
-    <Board list={list} label={label} render={(d, order) => (
-      <DomainCard key={d.id} domain={d} artSvg={art[d.id]} expanded={expanded.has(d.id)} onToggle={() => toggle(d.id)} order={order} />
+    <Board list={list} label={label} render={(d) => (
+      <DomainCard key={d.id} domain={d} artSvg={art[d.id]} expanded={expanded.has(d.id)} onToggle={() => toggle(d.id)} />
     )} />
   );
 
@@ -136,36 +136,38 @@ export function WorkView({
   );
 }
 
-// Two independent columns on desktop, one list on mobile — from ONE set of
-// DOM nodes. Cards are dealt into two column wrappers (even indices left,
-// odd right) so an open card only pushes down the cards beneath it in its
-// own column; the other column never moves. Below lg the wrappers become
-// `display: contents` and each card's `order` (its payload index) restores
-// row-wise reading order in the single flex column. No media query in JS,
-// so server and client render the same tree.
+// CSS order cannot change keyboard or screen-reader order. Mobile therefore
+// gets a list in payload order; desktop keeps independent column groups.
+// display:none removes the inactive layout from tab and accessibility order.
+// Both layouts share expansion state above and use unique card IDs, so this
+// also works on the server's first paint and when crossing the breakpoint.
 function Board({ list, label, render }: {
   list: WorkDomain[];
   label: string;
-  render: (d: WorkDomain, order: number) => React.ReactNode;
+  render: (d: WorkDomain) => React.ReactNode;
 }) {
   if (list.length === 0) return null;
   return (
-    <div aria-label={label} className="flex flex-col border-t-2 border-ink lg:grid lg:grid-cols-2 lg:items-start lg:gap-x-10">
-      {[0, 1].map((col) => (
-        <div key={col} className="contents lg:flex lg:min-w-0 lg:flex-col">
-          {list.map((d, i) => (i % 2 === col ? render(d, i) : null))}
-        </div>
-      ))}
+    <div aria-label={label} className="border-t-2 border-ink">
+      <div className="flex flex-col lg:hidden" data-domain-layout="mobile">
+        {list.map(render)}
+      </div>
+      <div className="hidden lg:grid lg:grid-cols-2 lg:items-start lg:gap-x-10" data-domain-layout="desktop">
+        {[0, 1].map((col) => (
+          <div key={col} className="flex min-w-0 flex-col">
+            {list.map((d, i) => (i % 2 === col ? render(d) : null))}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
 
-function DomainCard({ domain, artSvg, expanded, onToggle, order }: {
+function DomainCard({ domain, artSvg, expanded, onToggle }: {
   domain: WorkDomain;
   artSvg?: string;
   expanded: boolean;
   onToggle: () => void;
-  order: number;
 }) {
   const r = domain.rollup;
   const color = domainColor(domain.name);
@@ -178,7 +180,7 @@ function DomainCard({ domain, artSvg, expanded, onToggle, order }: {
   const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`;
 
   return (
-    <section aria-labelledby={titleId} className="min-w-0 border-b border-line-strong" style={{ order } as CSSProperties}>
+    <section aria-labelledby={titleId} className="min-w-0 border-b border-line-strong">
       {/* The card. A transparent button fills it and is the disclosure
           control (keyboard focus rings the whole card; Enter/Space toggle).
           Being absolutely positioned it paints above the in-flow content,
