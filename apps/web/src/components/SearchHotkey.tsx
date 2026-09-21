@@ -13,6 +13,7 @@ export function SearchHotkey() {
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
+      if (e.defaultPrevented || document.querySelector('dialog[open]')) return;
       // Cmd+K on macOS, Ctrl+K elsewhere. Match either to feel native.
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();

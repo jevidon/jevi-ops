@@ -28,7 +28,7 @@ export function CreatedTaskToast() {
     });
     const url = new URL(window.location.href);
     url.searchParams.delete('created');
-    window.history.replaceState(null, '', url.toString());
+    window.history.replaceState(window.history.state, '', url.toString());
   }, [created, toast]);
 
   return null;

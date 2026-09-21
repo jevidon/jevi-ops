@@ -112,6 +112,7 @@ export function CapturePortal() {
   // ⌘J / Ctrl-J toggle + Esc. 'j' (not 'k') so it coexists with ⌘K search.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
+      if (e.defaultPrevented || document.querySelector('dialog[open]')) return;
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'j') {
         e.preventDefault();
         if (recording) {
