@@ -157,7 +157,7 @@ export default async function TaskDetailPage({
         actions={
           <>
             <PinButton targetType="task" targetId={task.id} path={`/tasks/${task.id}`} />
-            <EditDrawer title="Edit task">
+            <EditDrawer title="Edit task" managed>
             <TaskForm
               initial={{
                 id: task.id,

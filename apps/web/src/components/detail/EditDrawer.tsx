@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { EditorShell } from '@/components/editor/EditorShell';
 
 // Edit drawer (Detail Pages v2, Addendum 10 §5). Configuration lives here,
 // behind the header's Edit button — off the read surface. A right slide-over
@@ -13,6 +14,7 @@ export function EditDrawer({
   triggerLabel = 'Edit',
   triggerVariant = 'solid',
   children,
+  managed = false,
 }: {
   title: string;
   triggerLabel?: string;
@@ -20,6 +22,7 @@ export function EditDrawer({
   // text affordance for the calm library reading pages.
   triggerVariant?: 'solid' | 'quiet';
   children: React.ReactNode;
+  managed?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const triggerClass = triggerVariant === 'quiet'
@@ -27,7 +30,7 @@ export function EditDrawer({
     : 'inline-flex items-center gap-1.5 h-[34px] px-3 rounded border border-ink bg-ink text-bg font-mono text-[10px] font-semibold uppercase tracking-[0.07em] hover:bg-ink-2 transition-colors shrink-0';
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || managed) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setOpen(false);
     };
@@ -38,7 +41,7 @@ export function EditDrawer({
       document.removeEventListener('keydown', onKey);
       document.body.style.overflow = prev;
     };
-  }, [open]);
+  }, [open, managed]);
 
   return (
     <>
@@ -46,7 +49,8 @@ export function EditDrawer({
         {triggerLabel}
       </button>
 
-      {open && (
+      {open && managed && <EditorShell title={title} onClose={() => setOpen(false)}>{children}</EditorShell>}
+      {open && !managed && (
         <div className="fixed inset-0 z-50" role="dialog" aria-modal="true" aria-label={title}>
           <div
             className="absolute inset-0 bg-ink/30"

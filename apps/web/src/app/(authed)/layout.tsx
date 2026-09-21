@@ -1,3 +1,4 @@
+import { EditorProvider } from '@/components/editor/EditorProvider';
 import { TaskWorkflowsProvider } from '@/components/task-workflows/TaskWorkflows';
 import type { WorkflowRegistry } from '@jevi-ops/shared';
 import { api } from '@/lib/api';
@@ -62,6 +63,7 @@ export default async function AuthedLayout({ children }: { children: React.React
     <TimezoneProvider timezone={timezone}>
       <CrumbsProvider>
       <ToastProvider>
+      <EditorProvider scope={user.id}>
       <div className="flex-1 flex">
         <IconRail
           email={user.email ?? undefined}
@@ -117,6 +119,7 @@ export default async function AuthedLayout({ children }: { children: React.React
           </Suspense>
         </div>
       </div>
+      </EditorProvider>
       </ToastProvider>
       </CrumbsProvider>
     </TimezoneProvider>

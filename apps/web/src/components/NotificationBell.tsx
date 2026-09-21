@@ -1,4 +1,9 @@
+'use client';
+
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+import { useEditorNavigation } from '@/components/editor/EditorProvider';
+import { showFloatingNotifications } from '@/lib/editor-navigation';
 
 // Floating notification badge for mobile. The DesktopRail already shows
 // an unread count in its bottom-of-rail footer; on mobile that affordance
@@ -11,7 +16,9 @@ import Link from 'next/link';
 // is waiting. The accent count chip matches the rail's badge styling.
 
 export function NotificationBell({ unread }: { unread: number }) {
-  if (unread <= 0) return null;
+  const pathname = usePathname();
+  const editor = useEditorNavigation();
+  if (unread <= 0 || editor?.openCount || !showFloatingNotifications(pathname)) return null;
 
   return (
     <Link

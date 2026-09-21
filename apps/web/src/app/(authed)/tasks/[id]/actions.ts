@@ -3,11 +3,12 @@
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
-import { tasksApi, ApiError } from '@/lib/api';
+import { tasksApi, projectsApi, domainsApi, contentApi, assetsApi, ApiError } from '@/lib/api';
+import { safeReturnPath } from '@/lib/editor-navigation';
 import { isRecurrencePattern } from '@jevi-ops/shared';
 import { maintenanceDetailsHref } from '@/lib/needs-details';
 
-export type SaveResult = { ok: true } | { ok: false; error: string };
+export type SaveResult = { ok: true; redirectTo?: string } | { ok: false; error: string };
 
 // Complete / reopen a task from its detail page. Setting status='done' also
 // triggers the API's recurring-task rollover (open + advance due_date) when a
@@ -143,12 +144,7 @@ export async function updateTaskAction(
     }
     return { ok: false, error: (err as Error).message };
   }
-  revalidatePath('/');
-  revalidatePath('/tasks');
-  revalidatePath('/projects');
-  revalidatePath('/content');
-  revalidatePath('/attention');
-  revalidatePath(`/tasks/${taskId}`);
+  refreshTaskViews();
   return { ok: true };
 }
 
@@ -199,20 +195,45 @@ export async function createTaskFullAction(
   );
 }
 
-export async function deleteTaskAction(formData: FormData): Promise<void> {
+export async function deleteTaskAction(formData: FormData): Promise<SaveResult> {
   const taskId = String(formData.get('taskId') ?? '');
-  if (!taskId) return;
+  if (!taskId) return { ok: false, error: 'Missing task id.' };
+  let task;
   try {
+    task = await tasksApi.get(taskId);
     await tasksApi.remove(taskId);
-  } catch {
-    /* best-effort */
+  } catch (err) {
+    const body = err instanceof ApiError ? err.body as { error?: string } | null : null;
+    return { ok: false, error: body?.error ?? 'Could not delete this task. Please try again.' };
   }
-  revalidatePath('/');
-  revalidatePath('/tasks');
-  revalidatePath('/projects');
-  revalidatePath('/content');
-  revalidatePath('/attention');
-  redirect('/');
+  refreshTaskViews();
+  // A record's ancestry is only a fallback: the recorded prior page wins.
+  const candidates = [
+    safeReturnPath(formData.get('returnTo'), `/tasks/${taskId}`),
+    task.parent_task_id && `/tasks/${task.parent_task_id}`,
+    task.project_id && `/projects/${task.project_id}`,
+    task.domain_id && `/domains/${task.domain_id}`,
+    '/tasks',
+  ];
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    const path = new URL(candidate, 'https://editor.invalid').pathname;
+    const record = /^\/(tasks|projects|domains|content|assets)\/([^/]+)$/.exec(path);
+    if (record) {
+      const readers = { tasks: tasksApi, projects: projectsApi, domains: domainsApi, content: contentApi, assets: assetsApi };
+      try { await readers[record[1] as keyof typeof readers].get(record[2]!); }
+      catch { continue; }
+    } else if (!/^\/(?:tasks|projects|domains|work|today|calendar|search|attention|inbox|content|assets)?$/.test(path)) {
+      continue;
+    }
+    return { ok: true, redirectTo: candidate };
+  }
+  return { ok: true, redirectTo: '/tasks' };
+}
+
+function refreshTaskViews() {
+  for (const path of ['/', '/tasks', '/projects', '/work', '/calendar', '/content', '/attention']) revalidatePath(path);
+  for (const path of ['/tasks/[id]', '/projects/[id]', '/domains/[id]', '/content/[id]']) revalidatePath(path, 'page');
 }
 
 // ─── Subtasks (fork) ─────────────────────────────────────────────────────

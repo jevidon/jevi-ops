@@ -1,7 +1,8 @@
 'use client';
 import { TaskStatusControl } from '@/components/task-workflows/TaskWorkflows';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useEditorNavigation } from '@/components/editor/EditorProvider';
 import Link from 'next/link';
 import type { Task } from '@jevi-ops/shared';
 import { isRecurrencePattern } from '@jevi-ops/shared';
@@ -72,6 +73,24 @@ export function TasksView({
   const [showDone, setShowDone] = useState(false);
   // Live text filter (Wave 2 #3) — narrows rows as you type.
   const [q, setQ] = useState('');
+  const navigation = useEditorNavigation();
+  const [viewReady, setViewReady] = useState(false);
+  const readView = navigation?.readView;
+  const writeView = navigation?.writeView;
+  useEffect(() => {
+    const saved = readView?.<{ view: View; domains: string[]; priorities: number[]; showDone: boolean; q: string }>(`tasks:${location.search}`);
+    if (saved && VIEWS.some(([value]) => value === saved.view) && Array.isArray(saved.domains) && Array.isArray(saved.priorities)) {
+      setView(saved.view);
+      setDsel(new Set(saved.domains.filter(value => typeof value === 'string')));
+      setPsel(new Set(saved.priorities.filter(value => [1, 2, 3, 4].includes(value))));
+      setShowDone(saved.showDone === true);
+      setQ(typeof saved.q === 'string' ? saved.q : '');
+    }
+    setViewReady(true);
+  }, [readView]);
+  useEffect(() => {
+    if (viewReady) writeView?.(`tasks:${location.search}`, { view, domains: [...dsel], priorities: [...psel], showDone, q });
+  }, [viewReady, writeView, view, dsel, psel, showDone, q]);
 
   const toggle = <T,>(set: React.Dispatch<React.SetStateAction<Set<T>>>, v: T) =>
     set((s) => {

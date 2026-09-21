@@ -1,6 +1,9 @@
 'use client';
 
 import { useActionState, useState } from 'react';
+import { EditorForm } from '@/components/editor/EditorForm';
+import { useEditor } from '@/components/editor/EditorShell';
+import { useEditorNavigation } from '@/components/editor/EditorProvider';
 import { useTransientSaveResult } from '@/lib/use-transient-save-result';
 import { DateInput } from '@/components/DateInput';
 import { TimeInput } from '@/components/TimeInput';
@@ -72,6 +75,15 @@ export function TaskForm({
   returnTo?: string;
 }) {
   const isEdit = Boolean(initial.id);
+  const editor = useEditor();
+  const navigation = useEditorNavigation();
+  async function remove() {
+    const data = new FormData();
+    data.set('taskId', initial.id!);
+    const origin = navigation?.origin(`/tasks/${initial.id}`);
+    if (origin) data.set('returnTo', origin.href);
+    return deleteTaskAction(data);
+  }
   const action = isEdit ? updateTaskAction : createTaskFullAction;
   const [state, formAction] = useActionState<SaveResult | null, FormData>(action, null);
   // Auto-clear success messages so back-to-back saves each show fresh feedback.
@@ -97,7 +109,9 @@ export function TaskForm({
 
   return (
     <>
-      <form action={formAction} className="flex flex-col gap-5">
+      <EditorForm action={formAction} result={state} deleteAction={isEdit ? remove : undefined}
+        deleteDescription={`Delete “${initial.title}” permanently? This cannot be undone.`}
+        className="flex flex-col gap-5">
         {initial.id && <input type="hidden" name="taskId" value={initial.id} />}
         {!isEdit && returnTo && <input type="hidden" name="returnTo" value={returnTo} />}
 
@@ -230,7 +244,7 @@ export function TaskForm({
           </select>
         </Field>
 
-        {display && (
+        {!editor && display && (
           <div
             className={`font-mono text-[11px] uppercase tracking-wider ${
               display.ok ? 'text-ink-2' : 'text-accent'
@@ -240,14 +254,10 @@ export function TaskForm({
           </div>
         )}
 
-        <div className="flex items-center gap-3 pt-2">
+        <div data-editor-local-actions className="flex items-center gap-3 pt-2">
           <SaveButton isEdit={isEdit} />
         </div>
-      </form>
-
-      {isEdit && initial.id && (
-        <DeleteRow taskId={initial.id} title={initial.title} />
-      )}
+      </EditorForm>
     </>
   );
 }
@@ -335,43 +345,5 @@ function SaveButton({ isEdit }: { isEdit: boolean }) {
     >
       {pending ? 'Saving…' : isEdit ? 'Save' : 'Add task'}
     </button>
-  );
-}
-
-function DeleteRow({ taskId, title }: { taskId: string; title: string }) {
-  const [confirming, setConfirming] = useState(false);
-  return (
-    <div className="mt-12 pt-6 border-t border-line">
-      <div className="eyebrow mb-3">Danger zone</div>
-      {!confirming ? (
-        <button
-          type="button"
-          onClick={() => setConfirming(true)}
-          className="font-mono text-[11px] uppercase tracking-wider text-ink-3 hover:text-accent transition-colors"
-        >
-          Delete task…
-        </button>
-      ) : (
-        <form action={deleteTaskAction} className="flex items-center gap-3">
-          <input type="hidden" name="taskId" value={taskId} />
-          <span className="font-sans text-[13px] text-ink-2">
-            Delete &ldquo;{title}&rdquo; permanently?
-          </span>
-          <button
-            type="submit"
-            className="bg-accent text-bg font-sans font-semibold text-[12px] uppercase tracking-wider px-3 py-1.5 transition-colors"
-          >
-            Confirm delete
-          </button>
-          <button
-            type="button"
-            onClick={() => setConfirming(false)}
-            className="font-mono text-[11px] uppercase tracking-wider text-ink-3 hover:text-ink-2 transition-colors"
-          >
-            Cancel
-          </button>
-        </form>
-      )}
-    </div>
   );
 }
