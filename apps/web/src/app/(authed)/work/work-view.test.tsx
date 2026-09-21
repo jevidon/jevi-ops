@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { WorkDomain, WorkPayload, WorkProjectCard } from '@/lib/api';
@@ -49,8 +49,20 @@ function card(name: string, state: 'Show' | 'Hide' = 'Show') {
 // The card's section, found via its name link so it works open or closed.
 function section(name: string) { return screen.getByRole('link', { name }).closest('section')!; }
 
+// jsdom does not load Tailwind or evaluate media queries. Model only the
+// layout visibility here; real breakpoint/geometry checks run in a browser.
+let layoutStyle: HTMLStyleElement;
+function viewport(layout: 'mobile' | 'desktop') {
+  layoutStyle.textContent = `[data-domain-layout="${layout === 'mobile' ? 'desktop' : 'mobile'}"] { display: none; }`;
+}
+beforeEach(() => {
+  layoutStyle = document.createElement('style');
+  document.head.append(layoutStyle);
+  viewport('mobile');
+});
 afterEach(() => {
   cleanup();
+  layoutStyle.remove();
   document.cookie = `${WORK_OPEN_COOKIE}=;path=/;max-age=0`;
   vi.restoreAllMocks();
 });
@@ -82,18 +94,50 @@ describe('compact domain browsing', () => {
     expect(card('Household').getAttribute('aria-expanded')).toBe('false');
   });
 
-  it('deals cards into two columns in reading order', () => {
+  it('keeps mobile DOM and keyboard order in payload order, including expanded contents', async () => {
+    const user = userEvent.setup();
     mount();
+    expect(screen.getAllByRole('button', { name: /Show contents$/ }).map((button) => button.getAttribute('aria-labelledby')?.split(' ')[0]))
+      .toEqual(payload.domains.map((d) => screen.getByRole('link', { name: d.name }).id));
+    card('Household').focus();
+    for (const [i, d] of payload.domains.entries()) {
+      expect(document.activeElement).toBe(card(d.name));
+      await user.tab();
+      expect(document.activeElement).toBe(screen.getByRole('link', { name: d.name }));
+      if (i < payload.domains.length - 1) await user.tab();
+    }
+    await user.click(card('Household'));
+    const panel = document.getElementById(card('Household', 'Hide').getAttribute('aria-controls')!)!;
+    const lastControl = within(panel).getByRole('button', { name: '+ Task' });
+    lastControl.focus();
+    await user.tab();
+    expect(document.activeElement).toBe(card('Creative work'));
+    await user.tab({ shift: true });
+    expect(document.activeElement).toBe(lastControl);
+  });
+
+  it('keeps desktop columns independent and shares expansion across layouts with unique IDs', async () => {
+    const user = userEvent.setup();
+    mount();
+    await user.click(card('Creative work'));
+    viewport('desktop');
     const board = screen.getByLabelText('Active domains');
-    expect(board.children).toHaveLength(2);
-    const left = board.children[0] as HTMLElement;
-    const right = board.children[1] as HTMLElement;
+    const desktop = board.querySelector('[data-domain-layout="desktop"]')!;
+    const left = desktop.children[0] as HTMLElement;
+    const right = desktop.children[1] as HTMLElement;
     expect(within(left).getByRole('link', { name: 'Household' })).toBeDefined();
     expect(within(left).getByRole('link', { name: 'Empty' })).toBeDefined();
     expect(within(right).getByRole('link', { name: 'Creative work' })).toBeDefined();
-    // `order` carries the payload index so the single mobile column reads row-wise.
-    expect(section('Creative work').style.order).toBe('1');
-    expect(section('Empty').style.order).toBe('2');
+    expect(card('Creative work', 'Hide').getAttribute('aria-expanded')).toBe('true');
+    expect(screen.getAllByRole('link', { name: 'Creative work' })).toHaveLength(1);
+    await user.click(card('Creative work', 'Hide'));
+    viewport('mobile');
+    expect(card('Creative work').getAttribute('aria-expanded')).toBe('false');
+    const ids = [...board.querySelectorAll('[id]')].map((element) => element.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    for (const button of board.querySelectorAll('[aria-controls]')) {
+      expect(button.closest('section')?.contains(document.getElementById(button.getAttribute('aria-controls')!))).toBe(true);
+    }
   });
 
   it('supports Enter/Space, independent cards, explicit navigation and flat asset/project grids', async () => {
@@ -148,7 +192,7 @@ describe('compact domain browsing', () => {
     const user = userEvent.setup();
     mount();
     await user.click(card('Empty'));
-    expect(screen.getByText('Nothing open.')).toBeDefined();
+    expect(within(section('Empty')).getByText('Nothing open.')).toBeDefined();
     expect(screen.getByRole('link', { name: 'Open domain: Empty' })).toBeDefined();
     await user.type(screen.getByRole('searchbox'), 'Someday');
     expect(screen.getByRole('status').textContent).toContain('Parked below');
