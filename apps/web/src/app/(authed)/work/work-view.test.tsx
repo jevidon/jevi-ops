@@ -4,7 +4,6 @@ import userEvent from '@testing-library/user-event';
 import type { WorkDomain, WorkPayload, WorkProjectCard } from '@/lib/api';
 import { ToastProvider } from '@/components/toast/ToastProvider';
 import { WorkView } from './work-view';
-import { WORK_OPEN_COOKIE, openCookieString, parseOpenCookie } from './browse-state';
 
 vi.mock('./actions', () => ({ flipHolderAction: vi.fn(), setFocusAction: vi.fn(), clearFocusAction: vi.fn() }));
 vi.mock('@/components/quick-add-task-action', () => ({ quickAddTaskAction: vi.fn() }));
@@ -34,10 +33,10 @@ const payload: WorkPayload = {
   domains: [household, domain('Creative work'), domain('Empty', { direct: { open: 0, overdue: 0, waiting: 0, waitingAging: 0, today: 0 } })],
   parked: [domain('Someday', { parked: true })], ideasCount: 2,
 };
-function mount(data = payload, initialExpanded: string[] = []) {
+function mount(data = payload) {
   return render(
     <ToastProvider>
-      <WorkView payload={data} tomorrowFocus={null} tomorrowDate="2026-09-20" initialExpanded={initialExpanded} />
+      <WorkView payload={data} tomorrowFocus={null} tomorrowDate="2026-09-20" />
     </ToastProvider>,
   );
 }
@@ -63,7 +62,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   layoutStyle.remove();
-  document.cookie = `${WORK_OPEN_COOKIE}=;path=/;max-age=0`;
+  document.cookie = 'jops2.work_open=;path=/;max-age=0';
   vi.restoreAllMocks();
 });
 
@@ -204,28 +203,23 @@ describe('compact domain browsing', () => {
     expect(screen.getByRole('link', { name: 'Open domain: Someday' })).toBeDefined();
   });
 
-  it('renders server-provided open cards on first paint and writes the cookie on toggle', () => {
-    const view = mount(payload, ['Creative work']);
-    expect(card('Creative work', 'Hide').getAttribute('aria-expanded')).toBe('true');
-    expect(card('Household').getAttribute('aria-expanded')).toBe('false');
+  it('ignores old expansion cookies and starts collapsed again on a new visit', () => {
+    document.cookie = 'jops2.work_open=Creative%20work;path=/';
+    const view = mount();
+    expect(card('Creative work').getAttribute('aria-expanded')).toBe('false');
     fireEvent.click(card('Household'));
-    expect(parseOpenCookie(document.cookie.split('; ').find((c) => c.startsWith(`${WORK_OPEN_COOKIE}=`))?.split('=')[1]))
-      .toEqual(['Creative work', 'Household']);
-    fireEvent.click(card('Creative work', 'Hide'));
-    expect(parseOpenCookie(document.cookie.split('; ').find((c) => c.startsWith(`${WORK_OPEN_COOKIE}=`))?.split('=')[1]))
-      .toEqual(['Household']);
-    view.unmount();
-    // The page component turns that cookie back into initialExpanded.
-    mount(payload, ['Household']);
     expect(card('Household', 'Hide').getAttribute('aria-expanded')).toBe('true');
+    expect(document.cookie).toContain('jops2.work_open=Creative%20work');
+    view.unmount();
+    mount();
+    for (const d of payload.domains) {
+      expect(card(d.name).getAttribute('aria-expanded')).toBe('false');
+    }
   });
 
-  it('round-trips ids through the cookie and survives a mangled value', () => {
-    const ids = ['3f2b9c1e-0000-4000-8000-000000000001', 'Household'];
-    const value = openCookieString(ids).split(';')[0]!.split('=')[1];
-    expect(parseOpenCookie(value)).toEqual(ids);
-    expect(parseOpenCookie(undefined)).toEqual([]);
-    expect(parseOpenCookie('')).toEqual([]);
-    expect(parseOpenCookie('%E0%A4%A')).toEqual([]);
+  it('offers domain creation from the page header', () => {
+    mount();
+    expect(screen.getByRole('link', { name: '+ Domain' }).getAttribute('href')).toBe('/domains/new');
+    expect(screen.queryByRole('link', { name: '+ Project' })).toBeNull();
   });
 });
