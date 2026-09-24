@@ -5,11 +5,16 @@ actions. Talks to the Fastify API directly with a revocable `ops_` device
 token (minted on first run via `POST /api/auth/tokens`, stored in the
 Keychain, shared with the extension through the App Group).
 
-Native offline capture is the next delivery, described in the
-[product scope](../../docs/capture-program/02-offline-phone-capture.md) and
-[implementation plan](../../docs/capture-program/03-native-ios-implementation-plan.md).
-The existing app does not yet provide that capture store, recording flow,
-local transcription, or offline library.
+The native home now opens without the server. Capture saves text and WAV
+recordings in Application Support before attempting delivery. Captures remain
+searchable and playable after upload. Tasks & Lists downloads a paginated
+snapshot and supports queued edits to titles, notes, due dates, priorities,
+completion and custom workflow statuses. See [offline behavior and validation](offline.md).
+
+The broader [product scope](../../docs/capture-program/02-offline-phone-capture.md)
+and [implementation plan](../../docs/capture-program/03-native-ios-implementation-plan.md)
+also cover functionality not delivered here: on-device transcription, mixed
+attachments, durable capture from the Share Extension, and background uploads.
 
 ## One-time machine setup
 

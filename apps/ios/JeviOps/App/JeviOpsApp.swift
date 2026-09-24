@@ -18,7 +18,7 @@ struct JeviOpsApp: App {
 
     var body: some Scene {
         WindowGroup {
-            RootView()
+            NativeHomeView()
                 .environmentObject(config)
                 .environmentObject(router)
                 .onOpenURL { url in
