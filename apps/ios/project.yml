@@ -68,11 +68,33 @@ targets:
       - Shared/AppConfig.swift
       - Shared/KeychainStore.swift
       - JeviOps/Web/WebShellView.swift
+      - JeviOps/Offline/OfflineStore.swift
+      - JeviOps/Offline/OfflineModel.swift
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES
 
+  OfflineUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - OfflineUITests
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+    dependencies:
+      - target: JeviOps
+
 schemes:
+  OfflineUITests:
+    build:
+      targets:
+        JeviOps: all
+        OfflineUITests: all
+    test:
+      config: Debug
+      targets:
+        - OfflineUITests
   APIClientTests:
     build:
       targets:

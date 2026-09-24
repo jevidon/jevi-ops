@@ -107,7 +107,7 @@ struct APIClient {
 
     // MARK: - Transport
 
-    private func send<T: Decodable>(
+    func send<T: Decodable>(
         _ method: String, _ path: String, body: [String: String]? = nil,
         timeout: TimeInterval = 15
     ) async throws -> T {
@@ -122,18 +122,20 @@ struct APIClient {
         }
     }
 
-    private func sendRaw(
+    func sendRaw(
         _ method: String, _ path: String, bodyData: Data?,
-        expectsJSON: Bool = false, timeout: TimeInterval = 15
+        expectsJSON: Bool = false, timeout: TimeInterval = 15,
+        contentType: String = "application/json", headers: [String: String] = [:]
     ) async throws -> Data {
         guard let url = URL(string: path, relativeTo: baseURL) else { throw APIError.badURL }
         var request = URLRequest(url: url, timeoutInterval: timeout)
         request.httpMethod = method
+        for (key, value) in headers { request.setValue(value, forHTTPHeaderField: key) }
         if let bearer {
             request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
         }
         if let bodyData {
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue(contentType, forHTTPHeaderField: "Content-Type")
             request.httpBody = bodyData
         }
 
