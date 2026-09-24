@@ -6,6 +6,7 @@ import { BUILTIN_WORKFLOW_PRESETS, type WorkflowRegistry } from '@jevi-ops/share
 import { TaskStatusControl, TaskWorkflowsProvider } from './TaskWorkflows';
 import { WorkflowSettings } from './WorkflowSettings';
 import { changeWorkflowStatus, configureWorkflow } from './actions';
+import { UnrecognizedActionError } from 'next/dist/client/components/unrecognized-action-error';
 
 vi.mock('@/app/(authed)/today/actions', () => ({ toggleTaskDoneAction: vi.fn() }));
 vi.mock('./actions', () => ({ changeWorkflowStatus: vi.fn(), configureWorkflow: vi.fn(), saveWorkflowPreset: vi.fn(), deleteWorkflowPreset: vi.fn() }));
@@ -49,6 +50,39 @@ describe('task status controls', () => {
     await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('Inspection needs details'));
     expect(select.value).toBe('pack');
     expect(screen.getByRole('link').getAttribute('href')).toBe('/maintenance/item');
+  });
+  it('keeps the current status and offers a full reload when the server no longer recognizes the action', async () => {
+    vi.mocked(changeWorkflowStatus).mockRejectedValue(new UnrecognizedActionError('Server Action was not found on the server.'));
+    render(<TaskWorkflowsProvider registry={registry}><TaskStatusControl task={task} /></TaskWorkflowsProvider>);
+    const select = screen.getByRole('combobox') as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: 'packed' } });
+
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('The app has updated'));
+    expect(select.value).toBe('pack');
+    expect(select.disabled).toBe(true);
+    expect(screen.queryByRole('status')).toBeNull();
+    expect(changeWorkflowStatus).toHaveBeenCalledTimes(1);
+
+    const reload = vi.fn();
+    vi.stubGlobal('window', { location: { reload } });
+    fireEvent.click(screen.getByRole('button', { name: 'Reload page' }));
+    expect(reload).toHaveBeenCalledOnce();
+    expect(changeWorkflowStatus).toHaveBeenCalledTimes(1);
+  });
+  it('shows a retryable error for a failed request without losing the current status', async () => {
+    vi.mocked(changeWorkflowStatus).mockRejectedValueOnce(new TypeError('Failed to fetch')).mockResolvedValueOnce({ ok: true });
+    render(<TaskWorkflowsProvider registry={registry}><TaskStatusControl task={task} /></TaskWorkflowsProvider>);
+    const select = screen.getByRole('combobox') as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: 'packed' } });
+
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('Could not save the status'));
+    expect(select.value).toBe('pack');
+    expect(select.disabled).toBe(false);
+    expect(screen.queryByRole('button', { name: 'Reload page' })).toBeNull();
+
+    fireEvent.change(select, { target: { value: 'packed' } });
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+    expect(changeWorkflowStatus).toHaveBeenCalledTimes(2);
   });
   it('keeps previously satisfied items reusable and respects text filtering', () => {
     const item: Task = { ...task, status: 'done', workflow_status_id: 'packed', title: 'Stored torch', priority: 4, source: 'manual', reminder_offsets: [], created_at: '2026-09-01T00:00:00Z', updated_at: '2026-09-01T00:00:00Z', completed_at: '2026-09-01T00:00:00Z' };

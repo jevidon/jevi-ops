@@ -66,6 +66,12 @@ pnpm dev:web    # :3000
 Open <http://localhost:3000> → sign in → `/today`. Point the LLM at your
 server in **Settings → AI** (or via `LLM_BASE_URL`/`LLM_MODEL` in `.env`).
 
+The web dev server writes to `apps/web/.next-dev`; production builds and
+`start:web` use `apps/web/.next`. This keeps local builds from overwriting a
+running dev server's Server Action manifests. After a server restart or
+deployment, reload any open tab that reports an outdated action before
+retrying the change.
+
 ## Deploying to the NAS
 
 See [`infrastructure/docker/README.md`](infrastructure/docker/README.md)
