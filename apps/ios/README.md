@@ -1,15 +1,14 @@
 # jevi-ops iOS companion
 
-WKWebView shell around the web app, plus native share-sheet capture and quick
-actions. Talks to the Fastify API directly with a revocable `ops_` device
-token (minted on first run via `POST /api/auth/tokens`, stored in the
-Keychain, shared with the extension through the App Group).
+A bundled shared React workspace inside a thin native shell, with native
+capture, storage, share-sheet integration and quick actions. It talks to the
+Fastify API with a revocable device token kept in the Keychain.
 
-The native home now opens without the server. Capture saves text and WAV
-recordings in Application Support before attempting delivery. Captures remain
-searchable and playable after upload. Tasks & Lists downloads a paginated
-snapshot and supports queued edits to titles, notes, due dates, priorities,
-completion and custom workflow statuses. See [offline behavior and validation](offline.md).
+Domains, projects and existing task editing work from a local snapshot. Notes
+and WAV recordings save on the phone before delivery. One shared navigation
+bar owns the workspace; native capture/settings use sheets. Agenda and other
+web tools currently open in Safari. See [offline behavior](offline.md) and the
+[milestone scope](../../docs/local-first-milestone.md).
 
 The broader [product scope](../../docs/capture-program/02-offline-phone-capture.md)
 and [implementation plan](../../docs/capture-program/03-native-ios-implementation-plan.md)
@@ -32,7 +31,7 @@ attachments, durable capture from the Share Extension, and background uploads.
    `DEVELOPER_DIR` avoids changing the computer's global `xcode-select`
    setting, which may still point at Command Line Tools.
 
-2. `brew install xcodegen` (already done if `which xcodegen` answers).
+2. Run `pnpm install` at the repository root (Node 20.10+), then `brew install xcodegen` (already done if `which xcodegen` answers).
 3. For device/TestFlight builds only: sign into Xcode → Settings → Accounts
    with the paid Apple ID, and put your Team ID (developer.apple.com →
    Membership) in `Signing.xcconfig`:
@@ -48,7 +47,7 @@ attachments, durable capture from the Share Extension, and background uploads.
 ## Build & run (simulator)
 
 ```bash
-make generate   # XcodeGen → JeviOps.xcodeproj (gitignored, regenerate freely)
+make generate   # Bundle shared React UI, then XcodeGen → JeviOps.xcodeproj (gitignored, regenerate freely)
 make build      # simulator build; see explicit ad-hoc build below
 make run        # boot simulator, install, launch
 make screenshot
@@ -64,9 +63,8 @@ xcodebuild -project JeviOps.xcodeproj -scheme JeviOps \
 ```
 
 The existing `make test` uses a live test account and mints a device token.
-Run it only against an isolated test environment. The offline capture
-foundation will add native storage/queue tests and fixture-based UI tests
-that can run without the owner's API or Hermes.
+Run it only against an isolated test environment. The `APIClientTests` and `OfflineUITests` schemes cover storage/queues and the
+bundled interface without the owner's API or Hermes.
 
 Against local dev servers: `scripts/devctl.sh start` at the repo root, then
 onboard with web URL `http://127.0.0.1:3000` (API auto-derives to `:3001`).

@@ -26,6 +26,7 @@
     "smoke:prod": "node scripts/smoke-prod.mjs"
   },
   "devDependencies": {
+    "esbuild": "0.25.12",
     "typescript": "^5.7.2"
   }
 }

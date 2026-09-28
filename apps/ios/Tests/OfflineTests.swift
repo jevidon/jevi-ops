@@ -115,6 +115,43 @@ final class OfflineTests: XCTestCase {
         XCTAssertEqual(restarted.edits[0].task.status, "done")
     }
 
+    func testSharedEditorRejectsAStaleLocalRevision() throws {
+        let snapshot = try seedSnapshot()
+        let model = OfflineModel(store: store, monitorNetwork: false)
+        model.loadSnapshot(client: client)
+        var first = snapshot.tasks[0]
+        first.title = "Already saved"
+        try model.saveEdit(first, checkRevision: true)
+        var stale = snapshot.tasks[0]
+        stale.notes = "A stale draft"
+        XCTAssertThrowsError(try model.saveEdit(stale, checkRevision: true))
+        XCTAssertEqual(model.edits[0].task.title, "Already saved")
+        var latest = model.edits[0].task
+        latest.notes = "More notes"
+        try model.saveEdit(latest, expectedRevision: model.edits[0].id.uuidString, checkRevision: true)
+        XCTAssertEqual(model.edits[0].task.title, "Already saved")
+        XCTAssertEqual(model.edits[0].task.notes, "More notes")
+    }
+
+    func testAuthenticationFailureRetainsRetryableFrozenOperation() async throws {
+        let snapshot = try seedSnapshot()
+        let model = OfflineModel(store: store, monitorNetwork: false)
+        model.loadSnapshot(client: client)
+        var task = snapshot.tasks[0]
+        task.title = "Waiting for sign in"
+        try model.saveEdit(task)
+        let operation = model.edits[0]
+        OfflineTransport.handler = { request in
+            if request.url!.path == "/api/tasks/sync-state" { return try self.response(self.identity, request) }
+            return self.rawResponse(request, "{}", status: 401)
+        }
+        await model.sendPending(client: client)
+        XCTAssertFalse(model.edits[0].blocked)
+        XCTAssertTrue(model.edits[0].attempted)
+        XCTAssertEqual(model.edits[0].id, operation.id)
+        XCTAssertEqual(model.edits[0].body, operation.body)
+    }
+
     func testTaskRetryAfterLostReplyUsesSameIDAndVersion() async throws {
         let snapshot = try seedSnapshot()
         let model = OfflineModel(store: store, monitorNetwork: false)
@@ -190,6 +227,39 @@ final class OfflineTests: XCTestCase {
         XCTAssertNil(body["notes"])
     }
 
+    func testLateReviewCannotOverwriteAnAttemptedReplacement() async throws {
+        let snapshot = try seedSnapshot()
+        let model = OfflineModel(store: store, monitorNetwork: false)
+        model.useOfflineFixture(client: client)
+        var local = snapshot.tasks[0]
+        local.title = "My edit"
+        var rejected = try PendingTaskEdit.make(base: snapshot.tasks[0], task: local, snapshot: snapshot)
+        rejected.attempted = true
+        rejected.blocked = true
+        rejected.serverTask = snapshot.tasks[0]
+        try store.saveEdit(rejected)
+        var replacement = try PendingTaskEdit.make(base: snapshot.tasks[0], task: local, snapshot: snapshot)
+        replacement.attempted = true
+        let replacementID = replacement.id
+        model.loadSnapshot(client: client)
+        OfflineTransport.handler = { request in
+            if request.url!.path == "/api/tasks/sync-state" { return try self.response(self.identity, request) }
+            // The request has started. A resolved replacement is persisted before
+            // the delayed response arrives, just as another UI action can do.
+            try self.store.saveEdit(replacement)
+            return try self.response(snapshot.tasks[0], request)
+        }
+        do {
+            try await model.reviewServerVersion(rejected)
+            XCTFail("A stale review must not write its captured operation")
+        } catch OfflineError.editChanged { }
+        let persisted = try XCTUnwrap(store.loadEdits().first)
+        XCTAssertEqual(persisted.id, replacementID)
+        XCTAssertTrue(persisted.attempted)
+        XCTAssertFalse(persisted.blocked)
+        XCTAssertEqual(persisted.body, replacement.body)
+    }
+
     func testDeletedServerTaskDoesNotHidePendingLocalEdit() throws {
         let snapshot = try seedSnapshot()
         let model = OfflineModel(store: store, monitorNetwork: false)
@@ -224,7 +294,7 @@ final class OfflineTests: XCTestCase {
     }
 
     private func seedSnapshot() throws -> TaskSnapshot {
-        let task = OfflineTask(id: UUID().uuidString, title: "Original", status: "open", updated_at: "2026-09-24T01:02:03.000Z")
+        let task = OfflineTask(id: UUID().uuidString, title: "Original", status: "open", domain_id: "00000000-0000-4000-8000-000000000001", updated_at: "2026-09-24T01:02:03.000Z")
         let snapshot = TaskSnapshot(destination: OfflineStore.destination(for: client), tasks: [task], scopes: [], identity: identity)
         try store.saveSnapshot(snapshot)
         return snapshot
@@ -234,8 +304,8 @@ final class OfflineTests: XCTestCase {
         (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!, try JSONEncoder().encode(body))
     }
 
-    private func rawResponse(_ request: URLRequest, _ text: String) -> (HTTPURLResponse, Data) {
-        (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!, Data(text.utf8))
+    private func rawResponse(_ request: URLRequest, _ text: String, status: Int = 200) -> (HTTPURLResponse, Data) {
+        (HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!, Data(text.utf8))
     }
 
     private static func body(_ request: URLRequest) throws -> Data {

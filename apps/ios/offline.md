@@ -1,18 +1,18 @@
 # Native offline use
 
-The app starts on a native Capture screen. Captures, Tasks & Lists, Dashboard,
-and Settings are separate tabs. Pairing and the server are unnecessary for
-saving notes or recording on the phone. The web Dashboard still requires a
-connection.
+The app starts in a bundled shared React workspace with Domains as its initial
+screen and a single navigation bar. Native sheets provide capture, saved
+recordings and settings. Pairing and the server are unnecessary for saving
+notes or recording. Agenda and other web tools currently open in Safari and
+require a connection. See the [shared-workspace milestone](../../docs/local-first-milestone.md).
 
 ## Available without a connection
 
 - Save text (up to 20,000 UTF-16 units) and phone audio (mono 16 kHz WAV,
   up to 10 minutes, within the server's 25 MiB media limit).
 - Search and read retained local captures; play and export recordings.
-- Read all tasks downloaded by the last successful sync, grouped by their
-  project/domain list, including notes, due dates and custom status labels.
-- Edit titles, notes, dates, priorities, completion and existing custom
+- Read all tasks downloaded by the last successful sync, organized by domain and project/area, including empty containers, including notes, due dates and custom status labels.
+- Edit titles, notes, dates, completion and existing custom
   statuses. The local view changes immediately and displays pending sync.
 - Close/relaunch the app and retain captures, task snapshots and queued edits.
 
@@ -25,12 +25,11 @@ the task snapshot or sending new captures/edits; an older server cannot silently
 treat an offline edit as an unconditional PATCH. Existing web PATCH clients
 keep their behavior.
 
-Link the device and open Tasks & Lists while connected once to download data.
-Later syncs download every task using opt-in UUID keyset pagination (500 per
-page). The snapshot is replaced only after the full tasks/workflows download
-and local write succeed. It is a last-downloaded view, not a live database
-transaction spanning all pages. New tasks created during a download may appear
-on the next sync. Empty lists without tasks are not represented in this view.
+Link the device and synchronize Domains once while connected. The authenticated
+`/api/local-workspace` endpoint downloads domains, projects, all tasks and
+workflows in a single repeatable-read transaction. The previous snapshot is
+replaced only after the download and local write succeed. Older snapshots and
+frozen queued operations remain readable and are not rewritten.
 
 ## Queues and conflict behavior
 
@@ -49,12 +48,13 @@ start. There is no automatic local-content eviction.
 Task edits retain the cached base version, desired values and an operation ID.
 Edits to the same task coalesce until the first request. Once attempted, the
 operation is immutable until confirmed or rejected. The server locks the task,
-checks its version, and commits the update and operation receipt in one
+checks its version and base fields, and commits the update and operation receipt in one
 transaction. Replaying a lost response cannot apply the edit again or repeat a
 recurring-task completion. Existing maintenance validation runs in that same
 path and rolls back changes if more evidence is required.
 
-Conflicts preserve the local edit and show the server version. Users can keep
+Independent field updates merge when their original values still match. Stale
+status transitions always require review. Conflicts preserve the local edit and show the server version. Users can keep
 the server version or reapply only their changed fields against the displayed
 server version using a new operation. Another intervening server change causes
 another conflict. Other rejections offer a fresh server-version review; required

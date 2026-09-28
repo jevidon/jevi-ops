@@ -5,19 +5,19 @@ import AVFoundation
 
 extension APIClient {
     func offlineSnapshot() async throws -> TaskSnapshot {
-        struct Tasks: Decodable { let tasks: [OfflineTask]; let next_cursor: String? }
-        struct Workflows: Decodable { let scopes: [OfflineWorkflow] }
-        let identity = try await syncIdentity()
-        var tasks: [OfflineTask] = []
-        var cursor: String?
-        repeat {
-            let suffix = cursor.map { "&before_id=\($0)" } ?? ""
-            let page: Tasks = try await send("GET", "/api/tasks?offline_page=1" + suffix)
-            tasks.append(contentsOf: page.tasks)
-            cursor = page.next_cursor
-        } while cursor != nil
-        async let workflows: Workflows = send("GET", "/api/task-workflows")
-        return try await TaskSnapshot(destination: OfflineStore.destination(for: self), tasks: tasks, scopes: workflows.scopes, identity: identity)
+        struct Workspace: Decodable {
+            let protocol_version: Int
+            let identity: SyncIdentity
+            let domains: [OfflineDomain]
+            let projects: [OfflineProject]
+            let tasks: [OfflineTask]
+            let scopes: [OfflineWorkflow]
+        }
+        let response: Workspace = try await send("GET", "/api/local-workspace", timeout: 60)
+        guard response.protocol_version == 1, response.identity.task_edit_protocol == 1 else { throw OfflineError.invalidReceipt }
+        return TaskSnapshot(destination: OfflineStore.destination(for: self), tasks: response.tasks,
+                            scopes: response.scopes, identity: response.identity,
+                            domains: response.domains, projects: response.projects)
     }
 
     func syncIdentity() async throws -> SyncIdentity {
@@ -223,12 +223,14 @@ final class OfflineModel: ObservableObject {
         return snapshot.tasks.map(visibleTask) + edits.filter { $0.destination == snapshot.destination && !ids.contains($0.task.id) }.map(\.task)
     }
 
-    func saveEdit(_ task: OfflineTask) throws {
+    func saveEdit(_ task: OfflineTask, expectedRevision: String? = nil, checkRevision: Bool = false) throws {
         guard storageError == nil, let store, let snapshot, let original = snapshot.tasks.first(where: { $0.id == task.id }), snapshot.identity != nil else {
             throw OfflineError.destinationChanged
         }
         let previous = pendingEdit(for: task)
-        guard previous?.attempted != true || (previous?.blocked == true && previous?.serverTask != nil) else { throw OfflineError.editInFlight }
+        if checkRevision, previous?.id.uuidString.lowercased() != expectedRevision?.lowercased() { throw OfflineError.editChanged }
+        guard previous?.attempted != true else { throw OfflineError.editInFlight }
+        guard (previous?.task.updated_at ?? original.updated_at) == task.updated_at else { throw OfflineError.editChanged }
         let edit = try PendingTaskEdit.make(base: previous?.serverTask ?? previous?.base ?? original, task: task, snapshot: snapshot)
         try store.saveEdit(edit)
         reload()
@@ -270,7 +272,11 @@ final class OfflineModel: ObservableObject {
               OfflineStore.destination(for: client) == original.destination,
               try await client.syncIdentity() == original.identity else { throw OfflineError.destinationChanged }
         let task: OfflineTask = try await client.send("GET", "/api/tasks/\(original.task.id)")
-        var edit = original
+        // Resolution may replace this operation while the request is in flight.
+        // Never resurrect the old operation or overwrite its attempted successor.
+        guard OfflineStore.destination(for: configuredClient ?? client) == original.destination,
+              var edit = try store?.loadEdits().first(where: { $0.id == original.id && $0.destination == original.destination }),
+              edit.blocked else { throw OfflineError.editChanged }
         edit.serverTask = task
         try store?.saveEdit(edit)
         reload()
@@ -293,6 +299,8 @@ final class OfflineModel: ObservableObject {
         await sendPending(client: client)
         do {
             let fresh = try await client.offlineSnapshot()
+            if let existing = try store?.snapshot(for: fresh.destination), let priorIdentity = existing.identity,
+               priorIdentity != fresh.identity { throw OfflineError.destinationChanged }
             // Settings can change during an in-flight download. Keep the
             // correctly partitioned file but never display it for a new link.
             try store?.saveSnapshot(fresh)
@@ -387,7 +395,7 @@ final class OfflineModel: ObservableObject {
 
     private static func isTerminal(_ error: Error) -> Bool {
         switch error {
-        case APIError.http(let status, _): return (400..<500).contains(status) && status != 429
+        case APIError.http(let status, _): return (400..<500).contains(status) && status != 429 && status != 401 && status != 403
         case OfflineError.destinationChanged: return true
         // A malformed success response or local acknowledgement-write failure
         // is ambiguous. Freeze the operation and replay it; never offer a new

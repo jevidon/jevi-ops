@@ -12,6 +12,7 @@ configFiles:
 settings:
   base:
     SWIFT_VERSION: "5.9"
+    IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     CODE_SIGN_STYLE: Automatic
     TARGETED_DEVICE_FAMILY: "1"
     # Xcode's "recommended settings" — declared here because the generated
@@ -26,6 +27,9 @@ targets:
     sources:
       - JeviOps
       - Shared
+      - path: build/LocalWorkspace
+        type: folder
+        buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.jevidon.jeviops

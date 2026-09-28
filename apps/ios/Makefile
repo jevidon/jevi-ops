@@ -20,6 +20,7 @@ Signing.xcconfig:
 	cp Signing.xcconfig.example Signing.xcconfig
 
 generate: Signing.xcconfig
+	node ../../scripts/build-ios-workspace.mjs
 	xcodegen generate
 
 build: generate

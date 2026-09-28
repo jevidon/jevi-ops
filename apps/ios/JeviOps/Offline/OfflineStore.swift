@@ -92,7 +92,7 @@ struct OfflineStore {
 }
 
 enum OfflineError: LocalizedError {
-    case invalidStoredCapture, emptyCapture, tooLong, audioLimit, destinationChanged, invalidReceipt, editInFlight
+    case invalidStoredCapture, emptyCapture, tooLong, audioLimit, destinationChanged, invalidReceipt, editInFlight, editChanged
 
     var errorDescription: String? {
         switch self {
@@ -103,6 +103,7 @@ enum OfflineError: LocalizedError {
         case .destinationChanged: return "Delivery paused: this capture belongs to a different server or device link. Its local copy is safe."
         case .invalidReceipt: return "The server did not confirm this capture. Its local copy is safe; retry to reconcile delivery."
         case .editInFlight: return "This task has an edit awaiting confirmation. Reconnect and resolve it before making another edit."
+        case .editChanged: return "This task changed while you were editing. Your draft is still here; reopen the task to review the saved version."
         }
     }
 }
@@ -190,6 +191,9 @@ struct TaskSnapshot: Codable {
     var tasks: [OfflineTask]
     let scopes: [OfflineWorkflow]
     var identity: SyncIdentity?
+    // Optional so snapshots from the previous app version remain readable.
+    var domains: [OfflineDomain]?
+    var projects: [OfflineProject]?
 
     func workflow(for task: OfflineTask) -> OfflineWorkflow? {
         scopes.first { $0.scope == (task.project_id == nil ? "domain" : "project") && $0.id == (task.project_id ?? task.domain_id) }
@@ -202,6 +206,22 @@ struct TaskSnapshot: Codable {
             ?? definition?.statuses.first { $0.category == task.status }
         return status?.label ?? task.status.capitalized
     }
+}
+
+struct OfflineDomain: Codable, Identifiable {
+    let id: String
+    let name: String
+    var description: String?
+    var doc_md: String?
+}
+
+struct OfflineProject: Codable, Identifiable {
+    let id: String
+    let name: String
+    var domain_id: String?
+    var description: String?
+    var doc_md: String?
+    var kind: String?
 }
 
 struct SyncIdentity: Codable, Equatable {
@@ -234,6 +254,14 @@ struct PendingTaskEdit: Codable, Identifiable {
             patch["workflow_status_id"] = status
             patch["workflow_revision"] = snapshot.workflow(for: base)?.revision
         } else if base.status != task.status { patch["status"] = task.status }
+        // Include a base for safe field merging. Existing frozen operations
+        // are never rewritten; older queued bodies retain their old semantics.
+        patch["_offline_base"] = [
+            "title": base.title, "notes": base.notes as Any? ?? NSNull(),
+            "due_date": base.due_date as Any? ?? NSNull(), "priority": base.priority,
+            "status": base.status, "workflow_status_id": base.workflow_status_id as Any? ?? NSNull(),
+            "project_id": base.project_id as Any? ?? NSNull(), "domain_id": base.domain_id as Any? ?? NSNull()
+        ] as [String: Any]
         return try PendingTaskEdit(destination: snapshot.destination, identity: snapshot.identity, base: base, task: task,
                                    body: JSONSerialization.data(withJSONObject: patch, options: .sortedKeys))
     }

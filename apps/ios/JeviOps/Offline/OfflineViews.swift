@@ -5,7 +5,8 @@ struct NativeHomeView: View {
     @EnvironmentObject private var config: AppConfig
     @EnvironmentObject private var router: AppRouter
     @StateObject private var model: OfflineModel
-    @State private var tab = 0
+    private enum Sheet: String, Identifiable { case capture, captures, settings, newTask; var id: String { rawValue } }
+    @State private var sheet: Sheet?
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
@@ -17,11 +18,16 @@ struct NativeHomeView: View {
             let client = APIClient(baseURL: URL(string: "https://offline-fixture.invalid")!, bearer: "fixture-only")
             let destination = OfflineStore.destination(for: client)
             if (try? store.snapshot(for: destination)) == nil {
+                let domainID = "22222222-2222-4222-8222-222222222222"
+                let projectID = "33333333-3333-4333-8333-333333333333"
                 let task = OfflineTask(id: "11111111-2222-4333-8444-555555555555", title: "Pack the torch", status: "open",
-                    notes: "Spare batteries are in the drawer", project: .init(id: "kit", name: "Camping kit"),
+                    notes: "Spare batteries are in the drawer", project_id: projectID, domain_id: domainID,
+                    project: .init(id: projectID, name: "Camping kit"),
                     updated_at: "2026-09-24T01:02:03.000Z")
                 try! store.saveSnapshot(TaskSnapshot(destination: destination, tasks: [task], scopes: [],
-                    identity: SyncIdentity(task_edit_protocol: 1, dataSpaceId: "11111111-2222-4333-8444-555555555555", serverEpoch: 1)))
+                    identity: SyncIdentity(task_edit_protocol: 1, dataSpaceId: "11111111-2222-4333-8444-555555555555", serverEpoch: 1),
+                    domains: [.init(id: domainID, name: "Personal"), .init(id: "44444444-4444-4444-8444-444444444444", name: "Empty domain")],
+                    projects: [.init(id: projectID, name: "Camping kit", domain_id: domainID), .init(id: "55555555-5555-4555-8555-555555555555", name: "Empty project", domain_id: domainID)]))
             }
             let fixture = OfflineModel(store: store, monitorNetwork: false)
             fixture.useOfflineFixture(client: client)
@@ -33,28 +39,67 @@ struct NativeHomeView: View {
     }
 
     var body: some View {
-        TabView(selection: $tab) {
-            NativeCaptureView(model: model).tabItem { Label("Capture", systemImage: "plus.circle") }.tag(0)
-            CaptureLibraryView(model: model).tabItem { Label("Captures", systemImage: "tray.full") }.tag(1)
-            OfflineTasksView(model: model).tabItem { Label("Tasks & Lists", systemImage: "checklist") }.tag(2)
-            RootView().tabItem { Label("Dashboard", systemImage: "square.grid.2x2") }.tag(3)
-            SettingsView(onReload: { router.pendingRoute = .openPath("/"); tab = 3 }).tabItem { Label("Settings", systemImage: "gearshape") }.tag(4)
+        LocalWorkspaceView(model: model, onAction: handleAction)
+        .ignoresSafeArea()
+        .sheet(item: $sheet) { selected in
+            NavigationStack {
+                Group {
+                    switch selected {
+                    case .capture: NativeCaptureView(model: model)
+                    case .captures: CaptureLibraryView(model: model)
+                    case .newTask: NewTaskSheet()
+                    case .settings:
+                        if config.onboarded { SettingsView(onReload: { Task { await model.refresh() } }) }
+                        else { OnboardingView() }
+                    }
+                }
+                .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { sheet = nil } } }
+            }
         }
-        .onChange(of: router.pendingRoute) { _, route in if route != nil { tab = 3 } }
-        .onAppear { if router.pendingRoute != nil { tab = 3 } }
+        .onChange(of: router.pendingRoute) { _, _ in consumeRoute() }
+        .onAppear { consumeRoute() }
         .onChange(of: config.apiBaseURL) { _, _ in model.loadSnapshot() }
-        .onChange(of: tab) { _, selected in
-            if selected == 2 { Task { await model.refresh() } }
-        }
+        .onChange(of: config.onboarded) { _, _ in Task { await model.refresh() } }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { Task { await model.refresh() } }
+            if phase == .active { Task { await model.refresh() }; PendingQueue.flushSoon() }
             if phase == .background { model.stopRecording() }
         }
         .task {
+            model.loadSnapshot()
+            if !ProcessInfo.processInfo.arguments.contains("-offline-ui-fixture") {
+                await ReferenceCache.refresh()
+                PendingQueue.flushSoon()
+            }
             while !Task.isCancelled {
                 await model.foregroundTick()
                 do { try await Task.sleep(for: .seconds(60)) } catch { return }
             }
+        }
+    }
+
+    private func handleAction(_ action: String) {
+        switch action {
+        case "capture": sheet = .capture
+        case "captures": sheet = .captures
+        case "settings": sheet = .settings
+        case "agenda": openWeb("/")
+        case "online": openWeb("/work")
+        default: if action.hasPrefix("details:") { openWeb(String(action.dropFirst("details:".count))) }
+        }
+    }
+
+    private func openWeb(_ path: String) {
+        guard let base = config.webURL, let url = URL(string: path, relativeTo: base) else { sheet = .settings; return }
+        UIApplication.shared.open(url)
+    }
+
+    private func consumeRoute() {
+        guard let route = router.pendingRoute else { return }
+        router.pendingRoute = nil
+        switch route {
+        case .newTask: sheet = .newTask
+        case .settings: sheet = .settings
+        case .openPath(let path): openWeb(path)
         }
     }
 }
