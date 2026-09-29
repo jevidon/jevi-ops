@@ -1,10 +1,11 @@
 import type { FastifyPluginAsync } from 'fastify';
-import { and, desc, eq, lt, sql, type SQL } from 'drizzle-orm';
+import { and, desc, eq, gte, lt, ne, or, sql, type SQL } from 'drizzle-orm';
 import { CreateTaskSchema, UpdateTaskSchema } from '@jevi-ops/shared/schemas';
-import { INBOX_DOMAIN_ID, isRecurrencePattern, nextDueDate } from '@jevi-ops/shared';
+import { INBOX_DOMAIN_ID, isRecurrencePattern, nextDueDate, proceduralIllustration } from '@jevi-ops/shared';
 import { getAppTz } from '../lib/app-settings.js';
 import { todayInTz } from '../lib/tz.js';
-import { getDb } from '../lib/db.js';
+import { getDb, type Db } from '../lib/db.js';
+import { buildWork } from '../lib/work.js';
 import type { DbOrTx, Tx } from '../lib/maintenance-tx.js';
 import { clearAttentionForSource } from '../lib/attention.js';
 import { MaintenanceNeedsDetails, clearMaintenanceAttention, completeMaintenanceItem } from '../lib/maintenance.js';
@@ -13,6 +14,9 @@ import { withOperation, installationIdentity } from '../lib/capture/ledger.js';
 import { envelopeDigest } from '../lib/capture/digest.js';
 import { CommandError } from '../lib/command-error.js';
 import { maintenance_items, milestones, projects, stewardship_domains, tasks } from '../db/schema.js';
+import { OfflineTaskBase, conflictingTaskFields } from '../lib/offline-task-merge.js';
+
+const LOCAL_WORKSPACE_DONE_WINDOW_MS = 30 * 86_400_000;
 
 class TaskPatchError extends Error {
   constructor(public status: number, public body: Record<string, unknown>) { super(String(body.error)); }
@@ -102,6 +106,46 @@ async function resolveMilestone(
 export const taskRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', app.requireAuth);
 
+  // One consistent snapshot for the phone's native Domains, task and search
+  // screens: identity, every domain and project (empty containers included),
+  // the workflow definitions, the computed Domains board, and the tasks a
+  // phone can act on. Done tasks are bounded to the last 30 days so the
+  // download stays proportional to live work rather than to history.
+  // Replacing a saved snapshot is safe only after this entire response has
+  // been persisted.
+  app.get('/api/local-workspace', async () => getDb().transaction(async tx => {
+    const identity = await installationIdentity(tx);
+    const cutoff = new Date(Date.now() - LOCAL_WORKSPACE_DONE_WINDOW_MS).toISOString();
+    const [domains, projectRows, taskRows, work] = await Promise.all([
+      tx.select().from(stewardship_domains),
+      tx.select().from(projects),
+      tx.query.tasks.findMany({
+        with: TASK_EMBEDS,
+        where: or(ne(tasks.status, 'done'), gte(tasks.completed_at, cutoff)),
+      }),
+      buildWork(tx as unknown as Db),
+    ]);
+    // Every domain carries art, as on the web's Work board: the committed
+    // engraving, or the name-seeded procedural motif the web falls back to.
+    // The fallback is computed per response, never persisted.
+    const generated_at = new Date().toISOString();
+    const withArt = domains.map(d => d.illustration?.svg ? d : {
+      ...d,
+      illustration: { svg: proceduralIllustration(d.name), style: 'engraved' as const, source: 'procedural' as const, generated_at },
+    });
+    return {
+      protocol_version: 1, identity: { task_edit_protocol: 1, ...identity },
+      done_window_days: LOCAL_WORKSPACE_DONE_WINDOW_MS / 86_400_000,
+      // App timezone (a DB setting, not the phone's): every "today" the phone derives must use it.
+      timezone: await getAppTz(),
+      domains: withArt, projects: projectRows, tasks: taskRows, work,
+      scopes: [
+        ...domains.map(d => ({ id: d.id, scope: 'domain', definition: d.task_workflow, revision: d.workflow_revision })),
+        ...projectRows.map(p => ({ id: p.id, scope: 'project', definition: p.task_workflow, revision: p.workflow_revision })),
+      ],
+    };
+  }, { isolationLevel: 'repeatable read' }));
+
   app.get<{ Querystring: { content_item_id?: string; project_id?: string; status?: string; domain_id?: string; parent_task_id?: string; before_id?: string; offline_page?: string } }>(
     '/api/tasks',
     async (req, reply) => {
@@ -189,13 +233,21 @@ export const taskRoutes: FastifyPluginAsync = async (app) => {
       : null;
     if (operation && !operation.success) return reply.code(400).send({ error: 'invalid_offline_headers' });
     const command = operation?.success ? operation.data : null;
+    const rawBase = (req.body as Record<string, unknown>)._offline_base;
+    const baseResult = rawBase === undefined ? null : OfflineTaskBase.safeParse(rawBase);
+    if (baseResult && (!command || !baseResult.success)) return reply.code(400).send({ error: 'invalid_offline_base' });
+    const base = baseResult?.success ? baseResult.data : null;
     let completedItemId: string | undefined;
     const mutate = async (db: Tx) => {
       await db.execute(sql`lock table tasks in row exclusive mode`);
       const [current] = await db.select().from(tasks).where(eq(tasks.id, req.params.id)).for('update');
       if (!current) throw new TaskPatchError(404, { error: 'not_found' });
       if (command && current.updated_at !== command.version) {
-        throw new TaskPatchError(409, { error: 'task_changed', message: 'This task changed on the server. Review both versions before applying your offline edit.', current });
+        const conflicts = base ? conflictingTaskFields(base, current, parsed.data) : ['version'];
+        if (conflicts.length) throw new TaskPatchError(409, {
+          error: 'task_changed', conflicting_fields: conflicts,
+          message: 'This task changed on the server. Review both versions before applying your offline edit.', current,
+        });
       }
       if (parsed.data.workflow_status_id) {
         if ('project_id' in parsed.data || 'domain_id' in parsed.data) {
@@ -387,9 +439,9 @@ export const taskRoutes: FastifyPluginAsync = async (app) => {
       if (command) {
         const outcome = await withOperation(getDb(), {
           operationId: command.id, command: 'task.update', protocolVersion: 1,
-          actor: req.user!.email, credentialId: req.credentialId ?? null,
+          actor: req.authMethod === 'api_token' ? req.user!.email : `session:${req.user!.email}`, credentialId: req.credentialId ?? null,
           restrictToCredential: true,
-          digest: envelopeDigest({ task_id: req.params.id, version: command.version, identity: command.identity, patch: parsed.data }),
+          digest: envelopeDigest({ task_id: req.params.id, version: command.version, identity: command.identity, patch: parsed.data, ...(base ? { base } : {}) }),
         }, async (tx, identity) => {
           if (command.identity !== `${identity.dataSpaceId}:${identity.serverEpoch}`) {
             throw new CommandError(409, 'installation_changed', 'The server installation changed. Your local edit is preserved.');
