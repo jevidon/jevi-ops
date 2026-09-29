@@ -4,7 +4,7 @@ export interface TaskRecord {
   workflow_status_id?: string | null;
   domain?: { id: string; name: string }; project?: { id: string; name: string };
 }
-export interface ContainerRecord { id: string; name: string; description?: string | null; doc_md?: string | null; domain_id?: string | null; kind?: string | null }
+export interface ContainerRecord { id: string; name: string; description?: string | null; doc_md?: string | null; domain_id?: string | null; kind?: string | null; illustration?: { svg: string } | null }
 export interface Scope { id: string; scope: string; revision: number; definition?: { statuses: { id: string; label: string; category: string }[] } | null }
 export interface Identity { task_edit_protocol: number; dataSpaceId: string; serverEpoch: number }
 export interface Snapshot {

@@ -1,4 +1,5 @@
 import React from 'react';
+import '../../web/src/styles/globals.css';
 import { createRoot } from 'react-dom/client';
 import { Workspace } from '../../web/src/components/local-workspace/Workspace';
 import { emptyState, type ViewState, type WorkspaceAdapter, type TaskRecord } from '../../web/src/components/local-workspace/model';
@@ -20,5 +21,4 @@ class NativeAdapter implements WorkspaceAdapter {
   resolve = (id: string, choice: 'server' | 'local') => this.call('resolve', { id, choice });
   action = (name: string) => { void this.call('action', name).catch(e => this.publish({ ...this.state, error: String(e) })); };
 }
-document.body.style.margin = '0';
 createRoot(document.getElementById('root')!).render(<Workspace adapter={new NativeAdapter()} />);

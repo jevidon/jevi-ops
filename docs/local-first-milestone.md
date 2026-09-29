@@ -12,7 +12,7 @@ The first shared workflow is Domains → project/area → existing task → dura
 
 `apps/web/src/components/local-workspace` contains the shared UI and adapter contract. Browser storage uses an account-keyed IndexedDB transaction; Web Locks serialize senders across tabs. Each editor records the local operation revision so an older tab cannot overwrite a newer saved edit. iOS delegates to the existing atomic-file store through a narrow bundled-frame WebKit bridge; credentials never enter JavaScript.
 
-The installed app packages React, styles and HTML with `make generate`. It makes no server request to render the interface. The browser review surface is `/local-workspace`, outside the existing web layout so it has one navigation bar. Browser cold launch still needs the Next.js server; an already-open workspace reads and edits offline. A browser service worker is outside this slice.
+The installed app packages React, styles, HTML and fonts with `make generate`. It compiles the existing web `globals.css` and Tailwind config, and uses the same Newsreader/Geist/Geist Mono typefaces, ScreenHeader, status pills, SVG icons, Almanac mark and fitted domain artwork. Fontsource packages supply local font files and licences; the bundle does not depend on a font CDN. Workspace CSS provides layout and controls using shared tokens rather than a second palette. It makes no server request to render the interface. The browser review surface is `/local-workspace`, outside the existing web layout so it has one navigation bar. Browser cold launch still needs the Next.js server; an already-open workspace reads and edits offline. A browser service worker is outside this slice.
 
 ## Sync contract and compatibility
 

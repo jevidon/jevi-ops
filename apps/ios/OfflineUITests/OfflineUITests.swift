@@ -9,10 +9,12 @@ final class OfflineUITests: XCTestCase {
         app.launch()
         let emptyDomain = button(app, "Empty domain")
         XCTAssertTrue(emptyDomain.waitForExistence(timeout: 15))
+        attachScreen(app, name: "Domains — shared design")
         emptyDomain.tap()
         XCTAssertTrue(app.staticTexts["No projects or areas here yet."].waitForExistence(timeout: 5))
         app.buttons["All domains"].tap()
         button(app, "Personal").tap()
+        attachScreen(app, name: "Projects — shared design")
         button(app, "Empty project").tap()
         XCTAssertTrue(app.staticTexts["No tasks here yet."].waitForExistence(timeout: 5))
         button(app, "← Personal").tap()
@@ -20,17 +22,18 @@ final class OfflineUITests: XCTestCase {
         button(app, "Pack the torch").tap()
         let title = app.textFields["Task title"]
         XCTAssertTrue(title.waitForExistence(timeout: 5))
+        attachScreen(app, name: "Task editor — shared design")
         title.tap()
         title.typeText("Check: ")
         app.toolbars.buttons["Done"].tap()
         let editedTitle = title.value as! String
         XCTAssertTrue(editedTitle.contains("Check:"))
         app.buttons["Domains"].tap()
-        XCTAssertTrue(app.buttons["Keep editing"].waitForExistence(timeout: 5))
-        app.buttons["Keep editing"].tap()
+        XCTAssertTrue(button(app, "Keep editing").waitForExistence(timeout: 5))
+        button(app, "Keep editing").tap()
         XCTAssertEqual(title.value as? String, editedTitle)
-        app.buttons["Save on device"].tap()
-        XCTAssertTrue(app.staticTexts["Pending sync"].waitForExistence(timeout: 5))
+        button(app, "Save on device").tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label ==[c] %@", "Pending sync")).firstMatch.waitForExistence(timeout: 5))
         app.terminate()
 
         app.launchArguments = ["-offline-ui-fixture"]
@@ -50,8 +53,8 @@ final class OfflineUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-offline-ui-fixture", "-offline-ui-reset"]
         app.launch()
-        XCTAssertTrue(app.buttons["＋ Capture"].waitForExistence(timeout: 15))
-        app.buttons["＋ Capture"].tap()
+        XCTAssertTrue(app.buttons["Capture"].waitForExistence(timeout: 15))
+        app.buttons["Capture"].tap()
         let note = app.descendants(matching: .any).matching(identifier: "offlineNote").firstMatch
         XCTAssertTrue(note.waitForExistence(timeout: 5))
         note.tap()
@@ -68,7 +71,14 @@ final class OfflineUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["A note saved without connectivity"].waitForExistence(timeout: 5))
     }
 
+    private func attachScreen(_ app: XCUIApplication, name: String) {
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
     private func button(_ app: XCUIApplication, _ prefix: String) -> XCUIElement {
-        app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", prefix)).firstMatch
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH[c] %@", prefix)).firstMatch
     }
 }

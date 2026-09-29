@@ -209,6 +209,8 @@ struct TaskSnapshot: Codable {
 }
 
 struct OfflineDomain: Codable, Identifiable {
+    struct Illustration: Codable { let svg: String }
+    var illustration: Illustration?
     let id: String
     let name: String
     var description: String?
