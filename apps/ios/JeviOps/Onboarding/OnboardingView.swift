@@ -1,12 +1,11 @@
 import SwiftUI
 import UIKit
 
-/// First-run setup and the "Re-link device" flow from Settings.
-///
-/// Exchanges email+password for a session JWT (held in memory only), then
-/// immediately mints a long-lived revocable `ops_` device token via
-/// POST /api/auth/tokens and stores it in the Keychain. The web view's
-/// cookie session is separate — the user still signs in at /sign-in once.
+/// First-run setup and the "Re-link device" flow from Settings, in the
+/// Almanac's own dress: server address, then email + password exchanged for a
+/// session JWT (memory only) that mints a revocable `ops_` device token into
+/// the Keychain. The web view's cookie session is separate — sign in at
+/// /sign-in once.
 struct OnboardingView: View {
     @EnvironmentObject private var config: AppConfig
     var onComplete: (() -> Void)?
@@ -20,82 +19,69 @@ struct OnboardingView: View {
     @State private var errorMessage: String?
 
     var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    TextField("https://nas.tailnet.ts.net", text: $webURL)
-                        .textContentType(.URL)
-                        .keyboardType(.URL)
-                        .autocapitalization(.none)
-                        .autocorrectionDisabled()
-                        .onChange(of: webURL) { _, newValue in
-                            guard !apiURLEdited else { return }
-                            apiURL = AppConfig.deriveApiURL(fromWebURL: normalized(newValue))
-                        }
-                    // Editing this field by hand stops auto-derivation from
-                    // the web URL; programmatic derivation must not trip it.
-                    TextField("API URL", text: $apiURL, onEditingChanged: { began in
-                        if began { apiURLEdited = true }
-                    })
-                        .textContentType(.URL)
-                        .keyboardType(.URL)
-                        .autocapitalization(.none)
-                        .autocorrectionDisabled()
-                        .foregroundStyle(.secondary)
-                } header: {
-                    Text("Server")
-                } footer: {
-                    Text("Your jevi-ops web address. The API address is derived automatically (port 8443 on the tailnet).")
-                }
-
-                Section {
-                    TextField("Email", text: $email)
-                        .textContentType(.username)
-                        .keyboardType(.emailAddress)
-                        .autocapitalization(.none)
-                        .autocorrectionDisabled()
-                    SecureField("Password", text: $password)
-                        .textContentType(.password)
-                } header: {
-                    Text("Link this device")
-                } footer: {
-                    Text("Creates a device token for the share sheet and quick actions. You can revoke it any time in Settings → API tokens on the web.")
-                }
-
-                if let errorMessage {
-                    Section {
-                        Text(errorMessage)
-                            .foregroundStyle(.red)
-                            .font(.callout)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 12) {
+                    RoundedRectangle(cornerRadius: 12).fill(Theme.accent).frame(width: 44, height: 44)
+                        .overlay(AlmanacMark(size: 30))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Almanac").font(Typeface.serif(24, .medium)).foregroundStyle(Theme.ink)
+                        Eyebrow(text: "A Jevi operation")
                     }
                 }
-
-                Section {
-                    Button(action: { Task { await connect() } }) {
-                        if working {
-                            ProgressView().frame(maxWidth: .infinity)
-                        } else {
-                            Text("Connect & Link Device").frame(maxWidth: .infinity)
-                        }
+                .padding(.horizontal, 20).padding(.top, 28)
+                ScreenHeader(eyebrow: "Set up this phone", title: "Where does your Almanac live?")
+                VStack(alignment: .leading, spacing: 18) {
+                    FieldGroup(label: "Web address") {
+                        TextField("https://nas.tailnet.ts.net", text: $webURL)
+                            .textContentType(.URL).keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
+                            .font(Typeface.sans(15)).bordered()
+                            .onChange(of: webURL) { _, newValue in
+                                guard !apiURLEdited else { return }
+                                apiURL = AppConfig.deriveApiURL(fromWebURL: normalized(newValue))
+                            }
                     }
-                    .disabled(working || webURL.isEmpty || email.isEmpty || password.isEmpty)
-
-                    Button("Skip — just open the app") {
-                        saveURLs()
-                        finish()
+                    FieldGroup(label: "API address") {
+                        TextField("API URL", text: $apiURL, onEditingChanged: { began in if began { apiURLEdited = true } })
+                            .textContentType(.URL).keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
+                            .font(Typeface.sans(15)).foregroundStyle(Theme.ink2).bordered()
+                        Text("Derived from the web address: port 8443 on the tailnet, 3001 for local dev.")
+                            .font(Typeface.sans(12)).foregroundStyle(Theme.ink3)
                     }
-                    .disabled(working || webURL.isEmpty)
-                    .foregroundStyle(.secondary)
+                    Hairline().padding(.vertical, 4)
+                    Eyebrow(text: "Link this device")
+                    FieldGroup(label: "Email") {
+                        TextField("Email", text: $email)
+                            .textContentType(.username).keyboardType(.emailAddress).textInputAutocapitalization(.never).autocorrectionDisabled()
+                            .font(Typeface.sans(15)).bordered()
+                    }
+                    FieldGroup(label: "Password") {
+                        SecureField("Password", text: $password).textContentType(.password).font(Typeface.sans(15)).bordered()
+                        Text("Creates a device token for capture, the share sheet and quick actions. Revoke it any time under Settings → API tokens on the web.")
+                            .font(Typeface.sans(12)).foregroundStyle(Theme.ink3).fixedSize(horizontal: false, vertical: true)
+                    }
+                    if let errorMessage {
+                        Text(errorMessage).font(Typeface.sans(13)).foregroundStyle(Theme.accent).fixedSize(horizontal: false, vertical: true)
+                    }
+                    HStack(spacing: 8) {
+                        ActionButton(label: working ? "Connecting…" : "Connect & link device", variant: .solid) { Task { await connect() } }
+                            .disabled(working || webURL.isEmpty || email.isEmpty || password.isEmpty)
+                            .accessibilityLabel("Connect & Link Device")
+                        ActionButton(label: "Skip — just open the app", variant: .ghost) { saveURLs(); finish() }
+                            .disabled(working || webURL.isEmpty)
+                    }
+                    .padding(.top, 4)
                 }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 40)
             }
-            .navigationTitle("jevi-ops")
         }
+        .background(Theme.bg)
         .interactiveDismissDisabled(working)
         .onAppear {
             webURL = config.webBaseURL
             apiURL = config.apiBaseURL
-            apiURLEdited = !apiURL.isEmpty
-                && apiURL != AppConfig.deriveApiURL(fromWebURL: config.webBaseURL)
+            apiURLEdited = !apiURL.isEmpty && apiURL != AppConfig.deriveApiURL(fromWebURL: config.webBaseURL)
         }
     }
 
@@ -114,13 +100,8 @@ struct OnboardingView: View {
         working = true
         errorMessage = nil
         defer { working = false }
-
         saveURLs()
-        guard let api = config.apiURL else {
-            errorMessage = "That server URL doesn't look valid."
-            return
-        }
-
+        guard let api = config.apiURL else { errorMessage = "That server URL doesn't look valid."; return }
         var client = APIClient(baseURL: api)
         do {
             try await client.checkHealth()
@@ -130,8 +111,6 @@ struct OnboardingView: View {
             let opsToken = try await client.mintDeviceToken(named: "iPhone – \(deviceName)")
             KeychainStore.setDeviceToken(opsToken)
             password = ""
-
-            // Seed the picker cache while we're online.
             await ReferenceCache.refresh()
             finish()
         } catch {

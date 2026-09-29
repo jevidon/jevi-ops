@@ -1,36 +1,47 @@
 # Native offline use
 
-The app starts on a native Capture screen. Captures, Tasks & Lists, Dashboard,
-and Settings are separate tabs. Pairing and the server are unnecessary for
-saving notes or recording on the phone. The web Dashboard still requires a
-connection.
+The app opens on the same chrome as the mobile web app. Agenda renders the
+web app and needs the server; Domains, Capture and Search are native and work
+from what the phone holds. Pairing is unnecessary for saving notes or
+recordings; it is required to sync the workspace and to deliver captures.
 
 ## Available without a connection
 
 - Save text (up to 20,000 UTF-16 units) and phone audio (mono 16 kHz WAV,
-  up to 10 minutes, within the server's 25 MiB media limit).
+  up to 10 minutes, within the server's 25 MiB media limit), from the
+  capture portal or by long-pressing the star.
 - Search and read retained local captures; play and export recordings.
-- Read all tasks downloaded by the last successful sync, grouped by their
-  project/domain list, including notes, due dates and custom status labels.
-- Edit titles, notes, dates, priorities, completion and existing custom
-  statuses. The local view changes immediately and displays pending sync.
-- Close/relaunch the app and retain captures, task snapshots and queued edits.
+- Browse the Domains board exactly as the last sync computed it: domain
+  cards with urgency pills and counts, assets, projects, content; domain and
+  project pages with their stat strips; task pages.
+- Edit titles, notes, due dates, priorities, completion and custom workflow
+  statuses, including the task row checkbox. The local view changes
+  immediately and shows "Pending sync".
+- Search tasks, projects, domains and captures instantly.
+- Close/relaunch the app and retain captures, the snapshot and queued edits.
 
 ## Server and app rollout
 
-Deploy the API changes from this branch before installing the new app. The
+Deploy the API changes from this branch before installing the new app. Note
+for web clients: every task PATCH now stamps `updated_at` itself (strictly
+later than the previous value), which is what the phone's version check
+compares; there was no database trigger doing this before. The
 authenticated `/api/tasks/sync-state` response advertises protocol 1 and the
 installation identity. The phone requires that handshake before downloading
 the task snapshot or sending new captures/edits; an older server cannot silently
 treat an offline edit as an unconditional PATCH. Existing web PATCH clients
 keep their behavior.
 
-Link the device and open Tasks & Lists while connected once to download data.
-Later syncs download every task using opt-in UUID keyset pagination (500 per
-page). The snapshot is replaced only after the full tasks/workflows download
-and local write succeed. It is a last-downloaded view, not a live database
-transaction spanning all pages. New tasks created during a download may appear
-on the next sync. Empty lists without tasks are not represented in this view.
+Link the device and open Domains while connected once to download data. Each
+sync fetches `GET /api/local-workspace`: one repeatable-read database
+transaction returning the installation identity, the app timezone, every
+domain (with its committed engraving or the procedural one the web falls back
+to), every project, the workflow definitions, the computed Domains board
+(`/api/work`), and the tasks the phone can act on — every open and waiting
+task plus tasks completed in the last 30 days (`done_window_days`). Older
+history stays on the server. The snapshot is replaced only after the whole
+response has been persisted; a changed installation identity pauses delivery
+and keeps the old snapshot.
 
 ## Queues and conflict behavior
 
@@ -47,7 +58,12 @@ all content; original text/audio stays local. Whole-file uploads retry from the
 start. There is no automatic local-content eviction.
 
 Task edits retain the cached base version, desired values and an operation ID.
-Edits to the same task coalesce until the first request. Once attempted, the
+A save that changes nothing queues nothing, and reverting an unsent edit to
+its base withdraws it. Edits to the same task coalesce until the first
+request. The request body carries the base field values, so the server merges
+edits to different fields of the same task (a stale notes edit still lands
+when only the title changed elsewhere); status transitions on a stale
+version always conflict because completions have side effects. Once attempted, the
 operation is immutable until confirmed or rejected. The server locks the task,
 checks its version, and commits the update and operation receipt in one
 transaction. Replaying a lost response cannot apply the edit again or repeat a
@@ -68,10 +84,11 @@ or changing servers does not automatically retarget old entries. Unpaired
 captures bind to their first delivery destination; recovery across credential
 changes requires manual follow-up. Keep retained files until reconciliation.
 
-Sync runs serially while the app is active, on foreground/reconnection, and via
-the Sync button. Periodic foreground attempts are spaced one minute apart.
-Network failures, 429s and server failures retain pending work; terminal
-rejections remain visible. iOS background execution and force-quit delivery are
+Sync runs serially while the app is active, on foreground/reconnection, when
+the Domains tab opens, on pull-to-refresh, and via Sync buttons. Periodic
+foreground attempts are spaced one minute apart. Network failures, 401/403,
+429 and server failures retain pending work as retryable; terminal
+rejections remain visible for review. iOS background execution and force-quit delivery are
 not promised. Recording stops and attempts to save on background/interruption.
 
 ## Remaining limitations
@@ -81,8 +98,10 @@ not promised. Recording stops and attempts to save on background/interruption.
 - No offline task creation in the new store, deletion, moves between projects,
   list/workflow-definition editing, recurrence-rule editing, or attachment editing.
 - No cached calendar, journal, documents, maintenance pages or linked media.
-- The legacy New Task shortcut and Share Extension retain their existing task
-  behavior/queue; they have not migrated to this new capture store.
+- The store lives in the App Group container (an older Application Support
+  store is moved across once on launch), but the Share Extension still uses
+  its legacy task queue; it has not migrated to this capture store yet.
+- Agenda and the "More" destinations render the web app and need the server.
 - No resumable chunks, mixed-file imports, background delivery, or storage
   management UI. Storage write errors are surfaced; unsent material is retained.
 - Microphone interruptions, force-quit recording recovery, actual airplane mode,

@@ -70,6 +70,11 @@ targets:
       - JeviOps/Web/WebShellView.swift
       - JeviOps/Offline/OfflineStore.swift
       - JeviOps/Offline/OfflineModel.swift
+      - JeviOps/Offline/WorkModels.swift
+      - JeviOps/Design/Theme.swift
+      - JeviOps/Design/SVG.swift
+      - JeviOps/Design/Icons.swift
+      - JeviOps/Design/Components.swift
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES

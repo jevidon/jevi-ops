@@ -1,19 +1,32 @@
-# jevi-ops iOS companion
+# Almanac for iOS (jevi-ops companion)
 
-WKWebView shell around the web app, plus native share-sheet capture and quick
-actions. Talks to the Fastify API directly with a revocable `ops_` device
-token (minted on first run via `POST /api/auth/tokens`, stored in the
-Keychain, shared with the extension through the App Group).
+A native SwiftUI app that mirrors the mobile web experience of jevi-ops: the
+same five-position chrome (Agenda · Domains · ✦ Capture · Search · More), the
+same Almanac design language (linen and Umber themes, Newsreader / Geist /
+Geist Mono, the Record Rose mark, status pills, the engraved domain art), and
+the same screens — rebuilt natively where the phone gains something from it,
+and rendered by the web app inside an in-app shell where it does not (yet).
 
-The native home now opens without the server. Capture saves text and WAV
-recordings in Application Support before attempting delivery. Captures remain
-searchable and playable after upload. Tasks & Lists downloads a paginated
-snapshot and supports queued edits to titles, notes, due dates, priorities,
-completion and custom workflow statuses. See [offline behavior and validation](offline.md).
+| Tab | What renders it | Works offline |
+| --- | --- | --- |
+| Agenda | The web app, inside a persistent WKWebView (signed-in cookie session) with its own tab bar hidden | No — shows a calm offline card |
+| Domains | Native: the Work board, domain and project pages, task pages and editor, from the last synced snapshot | Yes |
+| ✦ Capture | Native portal: create-anything grid, free text, voice; saved on the phone first, delivered later | Yes |
+| Search | Native over the synced snapshot and saved captures; the server's library search joins when reachable | Yes (local results) |
+| More | The web's route list (Library, Content, People, …) opened inside the shell, plus saved captures and the device link | Web items need the server |
+
+Native code talks to the Fastify API with a revocable `ops_` device token
+(minted on first run via `POST /api/auth/tokens`, stored in the Keychain,
+shared with the extension through the App Group). One request,
+`GET /api/local-workspace`, brings down a consistent snapshot: every domain
+(with its engraving), project, workflow definition, the computed Domains
+board, and the tasks the phone can act on (done tasks bounded to the last 30
+days). Edits queue offline with durable operation ids and replay safely; see
+[offline behaviour and validation](offline.md).
 
 The broader [product scope](../../docs/capture-program/02-offline-phone-capture.md)
 and [implementation plan](../../docs/capture-program/03-native-ios-implementation-plan.md)
-also cover functionality not delivered here: on-device transcription, mixed
+cover functionality not delivered here: on-device transcription, mixed
 attachments, durable capture from the Share Extension, and background uploads.
 
 ## One-time machine setup
@@ -116,10 +129,29 @@ Choose a simulator installed on your Mac if that model/runtime is unavailable.
 ## Layout
 
 - `project.yml` — XcodeGen spec; the `.xcodeproj` is generated, never edited.
-- `JeviOps/` — app target: web shell (`Web/`), onboarding, settings.
+- `JeviOps/Design/` — the design system: `Theme` (colour tokens for linen and
+  Umber, typography, the domain colour hash), `SVG` (a small SVG renderer for
+  the web's inline icons, mark and engravings), `Icons`, `Components`
+  (ScreenHeader, Pill, DetailHeader, StatStrip, buttons, due labels).
+- `JeviOps/Shell/` — `AppShell` (tabs, sheets, routing), `TabBar`, `MoreSheet`.
+- `JeviOps/Agenda/` — the web shell tab and its offline card.
+- `JeviOps/Domains/`, `Tasks/`, `Capture/`, `Search/` — the native screens.
+- `JeviOps/Offline/` — `OfflineStore` (App Group files), `OfflineModel`
+  (sync, queue, recording), `WorkModels`, and the debug-only `Fixture`.
+- `JeviOps/Web/` — the WKWebView shell used by the Agenda tab.
+- `JeviOps/Resources/Fonts/` — Newsreader, Geist and Geist Mono (SIL OFL).
 - `ShareExtension/` — share-sheet target (URL/text → task).
 - `Shared/` — compiled into both targets: config (App Group), Keychain,
   API client, models, reference cache, pending queue, compose UI.
+
+## Design review without a server
+
+`-offline-ui-fixture` launches the app on a bundled sample workspace (three
+domains, projects, an asset, content, tasks in every state) with networking
+off, so every native screen can be inspected or screenshotted in the
+simulator. `-offline-ui-reset` wipes it first. The `OfflineUITests` scheme
+drives this fixture through Domains → task edit → capture → search → relaunch
+and attaches a screenshot of each screen to the result bundle.
 
 ## Auth model
 

@@ -7,10 +7,28 @@ import CryptoKit
 struct OfflineStore {
     let root: URL
 
+    /// The store lives in the App Group container so a later Share Extension
+    /// slice can hand captures to the same files. Earlier builds kept it in
+    /// Application Support; that directory is moved across once, whole, and
+    /// left in place (still readable) if the move fails.
     static func applicationStore() throws -> OfflineStore {
         let support = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask,
                                                   appropriateFor: nil, create: true)
-        return try OfflineStore(root: support.appendingPathComponent("Offline", isDirectory: true))
+        return try applicationStore(legacy: support.appendingPathComponent("Offline", isDirectory: true),
+                                    shared: AppGroup.containerURL.appendingPathComponent("Offline", isDirectory: true))
+    }
+
+    static func applicationStore(legacy: URL, shared: URL) throws -> OfflineStore {
+        let fm = FileManager.default
+        if fm.fileExists(atPath: legacy.path), !fm.fileExists(atPath: shared.path) {
+            do {
+                try fm.createDirectory(at: shared.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try fm.moveItem(at: legacy, to: shared)
+            } catch {
+                return try OfflineStore(root: legacy)
+            }
+        }
+        return try OfflineStore(root: shared)
     }
 
     init(root: URL) throws {
@@ -92,7 +110,8 @@ struct OfflineStore {
 }
 
 enum OfflineError: LocalizedError {
-    case invalidStoredCapture, emptyCapture, tooLong, audioLimit, destinationChanged, invalidReceipt, editInFlight
+    case invalidStoredCapture, emptyCapture, tooLong, audioLimit, destinationChanged, invalidReceipt, editInFlight, editChanged
+    case unsupportedServer, notLinked
 
     var errorDescription: String? {
         switch self {
@@ -103,6 +122,9 @@ enum OfflineError: LocalizedError {
         case .destinationChanged: return "Delivery paused: this capture belongs to a different server or device link. Its local copy is safe."
         case .invalidReceipt: return "The server did not confirm this capture. Its local copy is safe; retry to reconcile delivery."
         case .editInFlight: return "This task has an edit awaiting confirmation. Reconnect and resolve it before making another edit."
+        case .editChanged: return "This task changed while you were editing. Your draft is still here; reopen the task to review the saved version."
+        case .unsupportedServer: return "This server does not support offline sync yet. Deploy the latest API, then sync again. Saved data on this phone is unchanged."
+        case .notLinked: return "Link this phone to your server in Settings, then sync once while connected."
         }
     }
 }
@@ -156,19 +178,42 @@ struct LocalCapture: Codable, Identifiable {
 }
 
 struct OfflineTask: Codable, Identifiable {
-    struct Ref: Codable { let id: String; let name: String }
+    struct Ref: Codable { var id: String; var name: String; var color: String? }
+    struct ContentRef: Codable { var id: String; var title: String; var type: String?; var status: String? }
+    struct ParentRef: Codable { var id: String; var title: String }
     let id: String
     var title: String
     var status: String
     var notes: String?
     var due_date: String?
+    var due_time: String?
     var project_id: String?
     var domain_id: String?
     var workflow_status_id: String?
     var project: Ref?
     var domain: Ref?
+    var parent_task: ParentRef?
+    var parent_task_id: String?
+    var content_item: ContentRef?
+    var waiting_on: String?
+    var waiting_since: String?
+    var recurrence_rule: String?
+    var top3_for_date: String?
+    var completed_at: String?
+    var source: String?
     var updated_at: String = ""
     var priority: Int = 4
+
+    var isDone: Bool { status == "done" }
+    var isWaiting: Bool { status == "waiting" }
+    var isOpen: Bool { status == "open" }
+
+    /// Field-level comparison for the edit queue: nothing to send when every
+    /// editable field matches the base.
+    func editableFieldsEqual(_ other: OfflineTask) -> Bool {
+        title == other.title && notes == other.notes && due_date == other.due_date && priority == other.priority
+            && status == other.status && workflow_status_id == other.workflow_status_id
+    }
     var listID: String { project.map { "project:\($0.id)" } ?? domain.map { "domain:\($0.id)" } ?? "inbox" }
     var listName: String { project?.name ?? domain?.name ?? "Inbox" }
 }
@@ -190,6 +235,17 @@ struct TaskSnapshot: Codable {
     var tasks: [OfflineTask]
     let scopes: [OfflineWorkflow]
     var identity: SyncIdentity?
+    // Optional so snapshots from the previous app version remain readable.
+    var domains: [OfflineDomain]?
+    var projects: [OfflineProject]?
+    /// The computed Domains board and the app timezone, from the same
+    /// consistent server read as the tasks.
+    var work: WorkPayload?
+    var timezone: String?
+    var done_window_days: Int?
+
+    func domain(_ id: String?) -> OfflineDomain? { id.flatMap { id in domains?.first { $0.id == id } } }
+    func project(_ id: String?) -> OfflineProject? { id.flatMap { id in projects?.first { $0.id == id } } }
 
     func workflow(for task: OfflineTask) -> OfflineWorkflow? {
         scopes.first { $0.scope == (task.project_id == nil ? "domain" : "project") && $0.id == (task.project_id ?? task.domain_id) }
@@ -202,6 +258,28 @@ struct TaskSnapshot: Codable {
             ?? definition?.statuses.first { $0.category == task.status }
         return status?.label ?? task.status.capitalized
     }
+}
+
+struct OfflineDomain: Codable, Identifiable {
+    struct Illustration: Codable { let svg: String }
+    var illustration: Illustration?
+    let id: String
+    let name: String
+    var description: String?
+    var doc_md: String?
+    var is_system: Bool?
+    var active: Bool?
+}
+
+struct OfflineProject: Codable, Identifiable {
+    let id: String
+    let name: String
+    var domain_id: String?
+    var description: String?
+    var doc_md: String?
+    var kind: String?
+    var status: String?
+    var color: String?
 }
 
 struct SyncIdentity: Codable, Equatable {
@@ -234,6 +312,14 @@ struct PendingTaskEdit: Codable, Identifiable {
             patch["workflow_status_id"] = status
             patch["workflow_revision"] = snapshot.workflow(for: base)?.revision
         } else if base.status != task.status { patch["status"] = task.status }
+        // Include a base for safe field merging. Existing frozen operations
+        // are never rewritten; older queued bodies retain their old semantics.
+        patch["_offline_base"] = [
+            "title": base.title, "notes": base.notes as Any? ?? NSNull(),
+            "due_date": base.due_date as Any? ?? NSNull(), "priority": base.priority,
+            "status": base.status, "workflow_status_id": base.workflow_status_id as Any? ?? NSNull(),
+            "project_id": base.project_id as Any? ?? NSNull(), "domain_id": base.domain_id as Any? ?? NSNull()
+        ] as [String: Any]
         return try PendingTaskEdit(destination: snapshot.destination, identity: snapshot.identity, base: base, task: task,
                                    body: JSONSerialization.data(withJSONObject: patch, options: .sortedKeys))
     }

@@ -50,3 +50,12 @@ struct ProjectsResponse: Codable { let projects: [Project] }
 struct HealthResponse: Decodable { let status: String }
 struct LoginResponse: Codable { let token: String }
 struct MintTokenResponse: Codable { let token: String }
+
+/// Task compose presets: the Domains screens pre-file a task into the domain
+/// or project the user is looking at. Lives in Shared because the compose
+/// view is compiled into the extension too.
+struct ComposeContext: Identifiable, Equatable {
+    var id = UUID()
+    var domain: Domain?
+    var project: Project?
+}
