@@ -50,6 +50,7 @@ final class AgendaModel: ObservableObject {
             var fresh: AgendaBundle
             do { fresh = try await client.send("GET", "/api/briefing/bundle?skip=\(skip)", timeout: 30) }
             catch APIError.http(404, _) { throw OfflineError.unsupportedServer }
+            catch APIError.webPageResponse { throw OfflineError.unsupportedServer }
             fresh.fetchedAt = Date()
             bundle = fresh
             message = nil

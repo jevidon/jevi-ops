@@ -126,7 +126,7 @@ enum OfflineError: LocalizedError {
         case .invalidReceipt: return "The server did not confirm this capture. Its local copy is safe; retry to reconcile delivery."
         case .editInFlight: return "This task has an edit awaiting confirmation. Reconnect and resolve it before making another edit."
         case .editChanged: return "This task changed while you were editing. Your draft is still here; reopen the task to review the saved version."
-        case .unsupportedServer: return "This server does not support offline sync yet. Deploy the latest API, then sync again. Saved data on this phone is unchanged."
+        case .unsupportedServer: return "The server at your API address is running an older version without the phone endpoints (404). Deploy this branch's API there and restart it, then pull to refresh. Saved data on this phone is unchanged."
         case .notLinked: return "Link this phone to your server in Settings, then sync once while connected."
         }
     }
