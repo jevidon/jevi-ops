@@ -14,8 +14,11 @@ struct OfflineStore {
     static func applicationStore() throws -> OfflineStore {
         let support = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask,
                                                   appropriateFor: nil, create: true)
-        return try applicationStore(legacy: support.appendingPathComponent("Offline", isDirectory: true),
-                                    shared: AppGroup.containerURL.appendingPathComponent("Offline", isDirectory: true))
+        let legacy = support.appendingPathComponent("Offline", isDirectory: true)
+        // No provisioned App Group (a device profile without the capability):
+        // stay in Application Support rather than an evictable directory.
+        guard let shared = AppGroup.sharedContainerURL else { return try OfflineStore(root: legacy) }
+        return try applicationStore(legacy: legacy, shared: shared.appendingPathComponent("Offline", isDirectory: true))
     }
 
     static func applicationStore(legacy: URL, shared: URL) throws -> OfflineStore {

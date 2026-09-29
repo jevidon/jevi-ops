@@ -16,8 +16,14 @@ enum AppGroup {
     /// back to Caches when the container is unavailable (never expected on
     /// device once entitlements are set up).
     static var containerURL: URL {
+        sharedContainerURL ?? FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+    }
+
+    /// Nil when the App Group is not provisioned for this build (a device
+    /// profile without the capability). Durable stores must not fall back
+    /// to Caches, which iOS may evict; they stay in Application Support.
+    static var sharedContainerURL: URL? {
         FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: id)
-            ?? FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
     }
 }
 
