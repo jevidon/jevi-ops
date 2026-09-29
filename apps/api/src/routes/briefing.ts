@@ -1,6 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { and, asc, count, desc, eq, gte, inArray, isNull, lt, lte, or } from 'drizzle-orm';
-import { getAppTz } from '../lib/app-settings.js';
+import { getAppSettings, getAppTz } from '../lib/app-settings.js';
 import { computeDomainCadences, type CadenceRow } from '../lib/cadence.js';
 import { getDb } from '../lib/db.js';
 import { addDays, dayWindowUtc, todayInTz } from '../lib/tz.js';
@@ -113,6 +113,76 @@ function cadenceRowToBriefLine(row: CadenceRow): BriefLine | null {
     routeTo: row.routeTo,
   };
 }
+
+// ─── Agenda bundle helpers ────────────────────────────────────────────────
+// Mirror of the web's panel registry (apps/web/src/app/(authed)/_briefing/
+// registry.tsx): id, column and default, in registry order. KEEP IN SYNC —
+// the phone renders panels from this list in the user's stored order.
+const PANEL_REGISTRY: Array<{ id: string; column: 'main' | 'rail'; defaultEnabled: boolean; moduleFlag?: 'health_module_enabled' | 'routines_module_enabled' }> = [
+  { id: 'frame', column: 'main', defaultEnabled: true },
+  { id: 'weather', column: 'main', defaultEnabled: true },
+  { id: 'domain-pulse', column: 'main', defaultEnabled: true },
+  { id: 'silent-clients', column: 'main', defaultEnabled: true },
+  { id: 'attention', column: 'main', defaultEnabled: true },
+  { id: 'reflection', column: 'main', defaultEnabled: true },
+  { id: 'latest-quote', column: 'main', defaultEnabled: true },
+  { id: 'pinned', column: 'rail', defaultEnabled: true },
+  { id: 'agenda', column: 'rail', defaultEnabled: true },
+  { id: 'doing', column: 'rail', defaultEnabled: true },
+  { id: 'health', column: 'rail', defaultEnabled: true, moduleFlag: 'health_module_enabled' },
+  { id: 'routines', column: 'rail', defaultEnabled: true, moduleFlag: 'routines_module_enabled' },
+];
+
+function mergePanels(
+  stored: Array<{ id: string; enabled: boolean }> | null,
+  flags: { health_module_enabled: boolean; routines_module_enabled: boolean },
+) {
+  const byId = new Map(PANEL_REGISTRY.map((p) => [p.id, p]));
+  const out: Array<{ id: string; column: 'main' | 'rail'; enabled: boolean }> = [];
+  for (const e of stored ?? []) {
+    const def = byId.get(e.id);
+    if (def && !out.some((x) => x.id === def.id)) {
+      out.push({ id: def.id, column: def.column, enabled: e.enabled && (!def.moduleFlag || flags[def.moduleFlag]) });
+    }
+  }
+  for (const p of PANEL_REGISTRY) {
+    if (!out.some((x) => x.id === p.id)) {
+      out.push({ id: p.id, column: p.column, enabled: p.defaultEnabled && (!p.moduleFlag || flags[p.moduleFlag]) });
+    }
+  }
+  return out;
+}
+
+function mastheadDate(tz: string): string {
+  const d = new Date();
+  const isoDate = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+  const w = new Date(isoDate + 'T00:00:00Z');
+  w.setUTCDate(w.getUTCDate() + 4 - (w.getUTCDay() || 7));
+  const yearStart = new Date(Date.UTC(w.getUTCFullYear(), 0, 1));
+  const week = Math.ceil(((w.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
+  return d.toLocaleDateString('en-US', { timeZone: tz, weekday: 'short', month: 'short', day: '2-digit' }).toUpperCase() + ` · WEEK ${week}`;
+}
+
+// The frame's data bundle (weather), fetched server-side with a short cache
+// so a phone refresh never hammers the device.
+const frameCache = new Map<string, { at: number; value: unknown }>();
+async function fetchFrameBundle(url: string): Promise<unknown> {
+  const cached = frameCache.get(url);
+  if (cached && Date.now() - cached.at < 5 * 60_000) return cached.value;
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(4000) });
+    const value = res.ok ? await res.json() : null;
+    frameCache.set(url, { at: Date.now(), value });
+    return value;
+  } catch {
+    return null;
+  }
+}
+
+interface AttentionRow { rule_type: string; urgency: string; [key: string]: unknown }
+interface RoutineRow { active: boolean; archived_at: string | null; stats?: { done_today?: boolean }; [key: string]: unknown }
+interface FocusRow { target_type: string; target_id: string; title: string; note?: string | null }
+interface TaskRow { id: string; status: string; due_date: string | null; top3_for_date: string | null; created_at: string; [key: string]: unknown }
 
 export const briefingRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', app.requireAuth);
@@ -431,6 +501,101 @@ export const briefingRoutes: FastifyPluginAsync = async (app) => {
       all_day: events.filter((e) => e.all_day).map((e) => ({ id: e.id, title: e.title })),
       timeline,
       untimed_tasks: taskRows.filter((r) => r.due_time == null).map(toTask),
+    };
+  });
+  // GET /api/briefing/bundle — everything the Agenda page composes, in one
+  // response, for the phone's native Agenda: settings the page reads, the
+  // masthead, the resolved panel list, and every panel's data. Sub-routes
+  // are invoked in-process with the caller's credentials, so each panel keeps
+  // one implementation; a failing panel degrades to null, as on the web.
+  // Secrets in app settings are deliberately not projected.
+  app.get<{ Querystring: { skip?: string } }>('/api/briefing/bundle', async (req) => {
+    const authorization = req.headers.authorization ?? '';
+    const get = async <T,>(url: string): Promise<T | null> => {
+      try {
+        const res = await app.inject({ method: 'GET', url, headers: { authorization } });
+        return res.statusCode === 200 ? (res.json() as T) : null;
+      } catch {
+        return null;
+      }
+    };
+    const settings = await getAppSettings();
+    const tz = settings.timezone ?? 'America/Denver';
+    const today = todayInTz(tz);
+    const flags = {
+      health_module_enabled: settings.health_module_enabled ?? false,
+      routines_module_enabled: settings.routines_module_enabled ?? true,
+      maintenance_module_enabled: settings.maintenance_module_enabled ?? true,
+    };
+    const skip = (req.query.skip ?? '').trim();
+    const [briefing, domains, agenda, pins, attention, attentionCount, routines, resurfacing, focus, notifications, taskList, health, weather] =
+      await Promise.all([
+        get<BriefingPayload>('/api/briefing/today'),
+        get<{ domains: Array<CadenceRow & { stats: DomainStats }> }>('/api/briefing/domains'),
+        get<Record<string, unknown>>('/api/briefing/agenda'),
+        get<{ pins: unknown[] }>('/api/pins'),
+        get<{ items: AttentionRow[] }>('/api/attention?status=active&limit=50'),
+        get<{ active: number }>('/api/attention/count'),
+        get<{ routines: RoutineRow[] }>('/api/routines'),
+        get<Record<string, unknown>>(`/api/library/resurfacing?skip=${encodeURIComponent(skip)}`),
+        get<{ focus: FocusRow | null }>(`/api/focus?date=${today}`),
+        get<{ unread: number }>('/api/notifications/count'),
+        get<{ tasks: TaskRow[] }>('/api/tasks'),
+        flags.health_module_enabled ? get<Record<string, unknown>>('/api/health/overview') : Promise.resolve(null),
+        settings.agenda_data_url ? fetchFrameBundle(settings.agenda_data_url) : Promise.resolve(null),
+      ]);
+
+    const allTasks = taskList?.tasks ?? [];
+    const openTasks = allTasks.filter((t) => t.status === 'open');
+    const top3 = openTasks.filter((t) => t.top3_for_date === today).sort((a, b) => a.created_at.localeCompare(b.created_at));
+    const top3Ids = new Set(top3.map((t) => t.id));
+    const overdue = openTasks
+      .filter((t) => !top3Ids.has(t.id) && t.due_date && t.due_date < today)
+      .sort((a, b) => (a.due_date ?? '').localeCompare(b.due_date ?? ''));
+    const railAll = [...top3, ...overdue];
+    const RAIL_CAP = 10;
+    const active = attention?.items ?? [];
+    const activeRoutines = (routines?.routines ?? []).filter((r) => r.active && !r.archived_at);
+    const rDone = briefing?.routines_today.done ?? activeRoutines.filter((r) => r.stats?.done_today).length;
+    const rTotal = briefing?.routines_today.total ?? activeRoutines.length;
+    const f = focus?.focus ?? null;
+
+    return {
+      protocol_version: 1,
+      tz,
+      today,
+      masthead: { date_line: mastheadDate(tz), unread: notifications?.unread ?? 0 },
+      settings: {
+        timezone: tz,
+        ...flags,
+        agenda_image_url: settings.agenda_image_url ?? null,
+        agenda_data_url: settings.agenda_data_url ?? null,
+      },
+      panels: mergePanels(settings.briefing_panels ?? null, flags),
+      focus: f ? { href: f.target_type === 'project' ? `/projects/${f.target_id}` : `/content/${f.target_id}`, title: f.title, note: f.note ?? null } : null,
+      counts: {
+        overdue: briefing?.doing_today.overdue_count ?? 0,
+        open: briefing?.doing_today.open_count ?? openTasks.length,
+        waiting: allTasks.filter((t) => t.status === 'waiting').length,
+        routines_done: rDone,
+        routines_total: rTotal,
+      },
+      briefing,
+      briefing_failed: briefing == null,
+      domains: domains?.domains ?? [],
+      agenda,
+      pins: pins?.pins ?? [],
+      attention: {
+        items: active.filter((i) => i.rule_type !== 'company_silent').filter((i) => i.urgency === 'high' || i.urgency === 'normal').slice(0, 5),
+        silent_clients: active.filter((i) => i.rule_type === 'company_silent').slice(0, 6),
+        active_count: attentionCount?.active ?? 0,
+      },
+      routines: activeRoutines,
+      routines_failed: routines == null,
+      resurfacing: resurfacing ?? { item: null, exhausted: false },
+      rail: { tasks: railAll.slice(0, RAIL_CAP), overflow: Math.max(0, railAll.length - RAIL_CAP), top3_count: top3.length },
+      health,
+      weather,
     };
   });
 };
