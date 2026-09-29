@@ -75,6 +75,14 @@ targets:
       - JeviOps/Design/SVG.swift
       - JeviOps/Design/Icons.swift
       - JeviOps/Design/Components.swift
+      - JeviOps/Agenda/AgendaBundle.swift
+      - JeviOps/Agenda/AgendaModel.swift
+      - JeviOps/Agenda/AgendaView.swift
+      - JeviOps/Domains/DomainsView.swift
+      - JeviOps/Domains/DomainDetailView.swift
+      - JeviOps/Tasks/TaskViews.swift
+      - JeviOps/Capture/CaptureViews.swift
+      - JeviOps/Offline/Fixture.swift
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES

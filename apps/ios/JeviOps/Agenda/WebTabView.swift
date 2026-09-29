@@ -1,12 +1,13 @@
 import SwiftUI
 
-/// The Agenda tab and every web destination: the in-app web shell, kept
-/// mounted for the life of the app. The web renders its own masthead and
-/// content; only its mobile tab bar is hidden (native chrome replaces it).
-/// Unreachable server → the calm offline card, styled like the app.
-struct AgendaView: View {
+/// Every web destination (the More routes, "Open on web" links): the in-app
+/// web shell, kept mounted for the life of the app. The web renders the page;
+/// only its mobile tab bar is hidden (native chrome replaces it). Unreachable
+/// server → the calm offline card, styled like the app.
+struct WebTabView: View {
     @ObservedObject var shell: ShellState
     var onSettings: () -> Void
+    var onAgenda: () -> Void
     @EnvironmentObject private var config: AppConfig
 
     var body: some View {
@@ -15,20 +16,18 @@ struct AgendaView: View {
             // but its masthead expects to start below the status bar.
             WebShellView(state: shell, onShake: onSettings)
                 .ignoresSafeArea(edges: .bottom)
-            if !shell.isHome {
-                webCrumb
-            }
+            webCrumb
             if let message = shell.offlineMessage {
                 ShellOfflineCard(message: message, onRetry: { Task { await retry() } }, onSettings: onSettings)
             }
         }
     }
 
-    /// A slim native back affordance while the shell is away from home, so a
-    /// More destination never strands the user without the web's own nav.
+    /// A slim native way back to the native Agenda, so a More destination
+    /// never strands the user without the web's own nav.
     private var webCrumb: some View {
         HStack(spacing: 6) {
-            Button(action: { shell.load(path: "/") }) {
+            Button(action: onAgenda) {
                 HStack(spacing: 6) {
                     Icon(name: .arrow, size: 12, color: Theme.ink3).rotationEffect(.degrees(180))
                     Text("Agenda").font(Typeface.mono(10, .semibold)).tracking(0.8).textCase(.uppercase)
@@ -62,10 +61,10 @@ struct ShellOfflineCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            ScreenHeader(eyebrow: "Agenda", title: "The server is out of reach")
+            ScreenHeader(eyebrow: "Web", title: "The server is out of reach")
             VStack(alignment: .leading, spacing: 14) {
                 Text(message).font(Typeface.sans(14)).foregroundStyle(Theme.ink2).fixedSize(horizontal: false, vertical: true)
-                Text("Domains, Search and Capture keep working from what is saved on this phone. The Agenda needs the server.")
+                Text("Agenda, Domains, Search and Capture keep working from what is saved on this phone. This page needs the server.")
                     .font(Typeface.sans(13)).foregroundStyle(Theme.ink3).fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: 8) {
                     ActionButton(label: "Retry", variant: .solid, action: onRetry)

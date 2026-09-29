@@ -7,7 +7,7 @@ import SwiftUI
 // work without the server. The shell's WKWebView stays mounted across tab
 // switches so it never reloads.
 
-enum ShellTab: Hashable { case agenda, domains, search }
+enum ShellTab: Hashable { case agenda, domains, search, web }
 
 enum ShellSheet: String, Identifiable {
     case capture, more, settings, newTask, captures, onboarding
@@ -18,6 +18,7 @@ struct AppShell: View {
     @EnvironmentObject private var config: AppConfig
     @EnvironmentObject private var router: AppRouter
     @StateObject private var model: OfflineModel
+    @StateObject private var agenda: AgendaModel
     @StateObject private var shell = ShellState()
     @State private var tab: ShellTab = .agenda
     @State private var sheet: ShellSheet?
@@ -31,13 +32,18 @@ struct AppShell: View {
             let fixture = OfflineModel(store: try! OfflineFixture.store(), monitorNetwork: false)
             fixture.useOfflineFixture(client: OfflineFixture.client)
             _model = StateObject(wrappedValue: fixture)
+            _agenda = StateObject(wrappedValue: AgendaModel(offline: fixture, fixture: OfflineFixture.agendaBundle()))
             _tab = State(initialValue: Self.launchTab)
             return
         }
-        _model = StateObject(wrappedValue: OfflineModel())
+        let offline = OfflineModel()
+        _model = StateObject(wrappedValue: offline)
+        _agenda = StateObject(wrappedValue: AgendaModel(offline: offline))
         _tab = State(initialValue: Self.launchTab)
         #else
-        _model = StateObject(wrappedValue: OfflineModel())
+        let offline = OfflineModel()
+        _model = StateObject(wrappedValue: offline)
+        _agenda = StateObject(wrappedValue: AgendaModel(offline: offline))
         #endif
     }
 
@@ -58,22 +64,29 @@ struct AppShell: View {
         #endif
     }
 
-    /// The tab bar's "More" highlights whenever the shell is on a non-home
-    /// path, exactly as the web bar does.
-    private var moreActive: Bool { tab == .agenda && !shell.isHome }
+    /// The tab bar's "More" highlights while a web destination is showing,
+    /// exactly as the web bar does for its non-tab routes.
+    private var moreActive: Bool { tab == .web }
+
+    private var colorScheme: ColorScheme? {
+        switch config.theme { case "light": return .light; case "dark": return .dark; default: return nil }
+    }
 
     var body: some View {
         ZStack(alignment: .bottom) {
             Theme.bg.ignoresSafeArea()
             // The web shell runs full-bleed — the page pads its own bottom for
             // a bar of this height, exactly as it does under the web's bar.
-            AgendaView(shell: shell, onSettings: { sheet = .settings })
-                .opacity(tab == .agenda ? 1 : 0)
-                .allowsHitTesting(tab == .agenda)
-                .accessibilityHidden(tab != .agenda)
+            WebTabView(shell: shell, onSettings: { sheet = .settings }, onAgenda: { select(.agenda) })
+                .opacity(tab == .web ? 1 : 0)
+                .allowsHitTesting(tab == .web)
+                .accessibilityHidden(tab != .web)
             // Native tabs treat the bar as a bottom safe-area inset so their
             // scroll views end at its top edge.
             Group {
+                if tab == .agenda {
+                    AgendaView(model: agenda, offline: model, onWeb: openWeb, onSettings: { sheet = .settings })
+                }
                 if tab == .domains {
                     DomainsView(model: model, onCompose: { composeContext = $0 }, onWeb: openWeb)
                 }
@@ -90,7 +103,7 @@ struct AppShell: View {
             }
             .ignoresSafeArea(.keyboard, edges: .bottom)
         }
-        .preferredColorScheme(nil)
+        .preferredColorScheme(colorScheme)
         .tint(Theme.accent)
         .sheet(item: $sheet, content: sheetContent)
         .sheet(item: $composeContext) { context in
@@ -102,6 +115,7 @@ struct AppShell: View {
         .onChange(of: router.pendingRoute) { _, _ in consumeRoute() }
         .onAppear {
             shell.nativeRoute = { path in
+                if path == "/" || path == "/today" { select(.agenda); return true }
                 if path == "/work" || path.hasPrefix("/work/") { select(.domains); return true }
                 if path == "/search" { select(.search); return true }
                 return false
@@ -117,7 +131,7 @@ struct AppShell: View {
             Task { await model.refresh() }
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { Task { await model.refresh() }; PendingQueue.flushSoon() }
+            if phase == .active { Task { await model.refresh(); await agenda.refresh() }; PendingQueue.flushSoon() }
             if phase == .background { model.stopRecording() }
         }
         .task {
@@ -143,12 +157,16 @@ struct AppShell: View {
                 .presentationDetents([.large])
                 .presentationDragIndicator(.hidden)
         case .more:
-            MoreSheet(currentPath: shell.currentPath, onOpen: { path in self.sheet = nil; openWeb(path) },
+            MoreSheet(currentPath: tab == .web ? shell.currentPath : "/", flags: agenda.bundle?.settings,
+                      badges: (agenda.bundle?.attention.active_count ?? 0, agenda.bundle?.masthead.unread ?? 0),
+                      onOpen: { path in self.sheet = nil; openWeb(path) },
                       onCaptures: { self.sheet = .captures }, onSettings: { self.sheet = .settings })
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.hidden)
         case .settings:
-            SettingsView(onReload: { shell.reloadFromOrigin(); Task { await model.refresh() } })
+            SettingsView(onReload: { shell.reloadFromOrigin(); Task { await model.refresh(); await agenda.refresh(force: true) } },
+                         onTheme: { shell.applyTheme($0) },
+                         onWeb: { path in openWeb(path) })
         case .newTask:
             TaskComposeView(initialTitle: "", sharedURL: nil, preset: ComposeContext()) { _ in self.sheet = nil }
         case .captures:
@@ -159,15 +177,16 @@ struct AppShell: View {
     }
 
     private func select(_ next: ShellTab) {
-        if next == .agenda, tab == .agenda || !shell.isHome { shell.load(path: "/") }
+        if next == .agenda, tab == .agenda { Task { await agenda.refresh() } }
         tab = next
     }
 
     /// Opens a web path inside the shell and shows it (the web's More items,
     /// the capture grid's create routes, "Open on web" links).
     private func openWeb(_ path: String) {
+        if path == "/" || path == "/today" { select(.agenda); return }
         shell.load(path: path)
-        tab = .agenda
+        tab = .web
     }
 
     private func captureTapped() {

@@ -9,6 +9,24 @@ final class OfflineUITests: XCTestCase {
         app.launchArguments = ["-offline-ui-fixture", "-offline-ui-reset"]
         app.launch()
 
+        // The native Agenda: masthead, pills and panels from the bundle.
+        XCTAssertTrue(app.staticTexts["The Almanac"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["DOMAIN PULSE · 2"].exists)
+        attach(app, "Agenda")
+        app.swipeUp(); app.swipeUp()
+        attach(app, "Agenda panels")
+
+        // Settings is the phone's own; Dark applies to the native chrome.
+        app.buttons["More"].tap()
+        XCTAssertTrue(app.buttons["Settings"].waitForExistence(timeout: 5))
+        app.buttons["Settings"].tap()
+        XCTAssertTrue(app.buttons["Dark"].waitForExistence(timeout: 5))
+        app.buttons["Dark"].tap()
+        XCTAssertTrue(app.buttons["Dark"].isSelected)
+        attach(app, "Settings dark")
+        app.buttons["System"].tap()
+        app.buttons["Done"].tap()
+
         // Domains board → expand a card → open the domain page.
         app.buttons["Domains"].tap()
         let card = app.otherElements["domainCard-Home & Property"]

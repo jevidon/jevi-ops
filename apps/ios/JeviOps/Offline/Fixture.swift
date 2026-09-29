@@ -32,6 +32,54 @@ enum OfflineFixture {
         return store
     }
 
+    /// The Agenda bundle for the same sample household, as the server would
+    /// send it: every panel populated once, so each renders in a screenshot.
+    static func agendaBundle() -> AgendaBundle {
+        let today = DueLabel.today(in: "America/Denver")
+        let json = """
+        {"protocol_version":1,"tz":"America/Denver","today":"\(today)",
+         "masthead":{"date_line":"TUE, SEP 29 · WEEK 40","unread":2},
+         "settings":{"timezone":"America/Denver","health_module_enabled":true,"routines_module_enabled":true,"maintenance_module_enabled":true,
+                     "agenda_image_url":null,"agenda_data_url":"http://frame.invalid/api/current_data"},
+         "panels":[{"id":"frame","column":"main","enabled":true},{"id":"weather","column":"main","enabled":true},{"id":"domain-pulse","column":"main","enabled":true},
+                   {"id":"silent-clients","column":"main","enabled":true},{"id":"attention","column":"main","enabled":true},{"id":"reflection","column":"main","enabled":true},
+                   {"id":"latest-quote","column":"main","enabled":true},{"id":"pinned","column":"rail","enabled":true},{"id":"agenda","column":"rail","enabled":true},
+                   {"id":"doing","column":"rail","enabled":true},{"id":"health","column":"rail","enabled":true},{"id":"routines","column":"rail","enabled":true}],
+         "focus":{"href":"/projects/\(roofProject)","title":"Roof repair","note":"Get the second quote signed."},
+         "counts":{"overdue":1,"open":7,"waiting":1,"routines_done":1,"routines_total":3},
+         "briefing":{"inbox_triage_count":2,"doing_today":{"open_count":7,"overdue_count":1,"titles":[]},"routines_today":{"total":3,"done":1},
+                     "latest_quote":{"id":"q2","text":"The best time to plant a tree was twenty years ago. The second best time is now.","source_author":"Proverb","source_reference":null,"source_url":null,"href":"/library/quotes/q2"}},
+         "domains":[{"id":"\(homeDomain)","name":"Home & Property","metric":85,"cadence":7,"status":"slip","unit":"days since a journal entry","last":"Last entry Jul 6","next":"Write a short update","stats":{"projects":2,"open_tasks":5,"overdue":1,"due_soon":2,"next_due":{"date":"\(today)","title":"Water the lemon tree"}}},
+                    {"id":"\(financeDomain)","name":"Finance","metric":null,"cadence":null,"status":"unconfigured","unit":"","last":null,"next":"","stats":{"projects":1,"open_tasks":2,"overdue":0,"due_soon":1,"next_due":null}}],
+         "agenda":{"date":"\(today)","all_day":[{"id":"e0","title":"Recycling day"}],
+                   "timeline":[{"kind":"event","id":"e1","title":"Roofer site visit","time_label":"09:30","end_label":"10:00","location":"Home"},
+                               {"kind":"task","time_label":"14:00","task":{"id":"a1111111-0000-4000-8000-000000000004","title":"Water the lemon tree","status":"open","domain_id":"\(homeDomain)","project_id":null,"workflow_status_id":null,"due_time":"14:00:00","priority":3,"project":null}}],
+                   "untimed_tasks":[]},
+         "pins":[{"id":"p1","target_type":"project","target_id":"\(roofProject)","position":0,"title":"Roof repair","subtitle":"Home & Property","href":"/projects/\(roofProject)","state":null,"project":{"kind":"target","status":"active","color":"#8A4B3C"}},
+                 {"id":"p2","target_type":"task","target_id":"\(torchTask)","position":1,"title":"Pack the torch","subtitle":"Camping kit","href":"/tasks/\(torchTask)","state":"due","task":{"status":"open","due_date":"\(today)","priority":2,"project":{"id":"\(campingProject)","name":"Camping kit"}}}],
+         "attention":{"items":[{"id":"at1","rule_type":"task_waiting","source_type":"task","source_id":"a1111111-0000-4000-8000-000000000001","title":"Waiting on Sam for 9 days","detail":"Book the campsite has been blocked since last week.","suggested_action":"Nudge","urgency":"high","status":"active"}],
+                      "silent_clients":[{"id":"at2","rule_type":"company_silent","source_type":"company","source_id":"c1","title":"Silent client: Ridgeline Roofing","detail":"No conversation in 21 days","suggested_action":null,"urgency":"normal","status":"active"}],
+                      "active_count":4},
+         "routines":[{"id":"r1","name":"Morning pages","time_of_day":"morning","specific_time":"06:30:00","position":0,"last_missed_sent_date":null,"goal_days":null,"stats":{"done_today":true,"current_streak":4}},
+                     {"id":"r2","name":"Walk the dog","time_of_day":"morning","specific_time":null,"position":1,"last_missed_sent_date":"\(today)","goal_days":null,"stats":{"done_today":false,"current_streak":0}},
+                     {"id":"r3","name":"Read 20 pages","time_of_day":"evening","specific_time":null,"position":0,"last_missed_sent_date":null,"goal_days":null,"stats":{"done_today":false,"current_streak":2}}],
+         "resurfacing":{"item":{"kind":"journal","id":"j1","excerpt":"Spent the morning clearing the gutters before the rain came. The lemon tree is finally fruiting.","source":"Journal · Jul 6","href":"/library/journal/j1"},"exhausted":false},
+         "rail":{"tasks":[{"id":"\(torchTask)","title":"Pack the torch","status":"open","due_date":"\(today)","project_id":"\(campingProject)","domain_id":"\(homeDomain)","project":{"id":"\(campingProject)","name":"Camping kit","color":"#3B6A52"},"top3_for_date":"\(today)","updated_at":"2026-09-24T01:02:03.000Z","priority":2},
+                          {"id":"a1111111-0000-4000-8000-000000000002","title":"Get roofer quotes","status":"open","due_date":"2026-09-27","project_id":"\(roofProject)","domain_id":"\(homeDomain)","project":{"id":"\(roofProject)","name":"Roof repair","color":"#8A4B3C"},"updated_at":"2026-09-24T01:02:03.000Z","priority":1}],
+                 "overflow":0,"top3_count":1},
+         "health":{"latest_vitals":[{"id":"v1","metric":"weight","value":82.4,"value_secondary":null,"unit":"kg"},{"id":"v2","metric":"bp","value":121,"value_secondary":79,"unit":null}],
+                   "upcoming_visits":[{"id":"hv1","visit_date":"2026-10-14","provider_name":"Dr Patel","reason":"Annual check"}],
+                   "recent_labs":[],"active_medications":[{"id":"m1","name":"Vitamin D"}]},
+         "weather":{"data":{"title":"Wellington","updated_at_text":"Updated 7:40 am","current_temperature":"14","current_temperature_alt":57,"temperature_unit":"°C","temperature_unit_alt":"°F",
+                            "data_points":[{"label":"Wind","measurement":"18","unit":"km/h","arrow":"↗"},{"label":"Humidity","measurement":"71","unit":"%"},{"label":"Sunset","measurement":"7:12 pm","unit":""}],
+                            "hourly_forecast":[{"time":"8am","temperature":12},{"time":"11am","temperature":14,"precipitation":0.1},{"time":"2pm","temperature":17},{"time":"5pm","temperature":15,"precipitation":0.4},{"time":"8pm","temperature":11},{"time":"11pm","temperature":9}],
+                            "forecast":[{"day":"Tue","date":"2026-09-29","high":17,"low":9,"rain_pct":20},{"day":"Wed","date":"2026-09-30","high":16,"low":8,"rain_pct":60},{"day":"Thu","date":"2026-10-01","high":15,"low":7},{"day":"Fri","date":"2026-10-02","high":18,"low":9},{"day":"Sat","date":"2026-10-03","high":19,"low":10,"rain_pct":10}]}}}
+        """
+        var bundle = try! JSONDecoder().decode(AgendaBundle.self, from: Data(json.utf8))
+        bundle.fetchedAt = Date()
+        return bundle
+    }
+
     static func snapshot(destination: String) -> TaskSnapshot {
         let identity = SyncIdentity(task_edit_protocol: 1, dataSpaceId: "11111111-2222-4333-8444-555555555555", serverEpoch: 1)
         let today = DueLabel.today(in: "America/Denver")

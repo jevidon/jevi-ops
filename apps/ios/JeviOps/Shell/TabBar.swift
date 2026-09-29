@@ -111,7 +111,3 @@ struct ListeningBubble: View {
         }
     }
 }
-
-func formatElapsed(_ seconds: Int) -> String {
-    String(format: "%d:%02d", seconds / 60, seconds % 60)
-}

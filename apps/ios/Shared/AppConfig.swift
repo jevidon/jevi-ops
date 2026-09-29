@@ -41,11 +41,17 @@ final class AppConfig: ObservableObject {
     @Published var onboarded: Bool {
         didSet { defaults.set(onboarded, forKey: "onboarded") }
     }
+    /// Appearance: "light" | "dark" | "system" — the same three states as the
+    /// web's `jops2.theme` cookie, which the shell keeps in step.
+    @Published var theme: String {
+        didSet { defaults.set(theme, forKey: "theme") }
+    }
 
     private init() {
         webBaseURL = defaults.string(forKey: "webBaseURL") ?? ""
         apiBaseURL = defaults.string(forKey: "apiBaseURL") ?? ""
         onboarded = defaults.bool(forKey: "onboarded")
+        theme = defaults.string(forKey: "theme") ?? "system"
     }
 
     /// Production convention: web at https://host, API at https://host:8443

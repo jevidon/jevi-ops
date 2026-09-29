@@ -1,8 +1,12 @@
 # Native offline use
 
-The app opens on the same chrome as the mobile web app. Agenda renders the
-web app and needs the server; Domains, Capture and Search are native and work
-from what the phone holds. Pairing is unnecessary for saving notes or
+The app opens on the same chrome as the mobile web app. Agenda, Domains,
+Capture, Search and Settings are native and work from what the phone holds;
+the More destinations render the web app and need the server. The Agenda
+keeps its last downloaded briefing per server link; its inline actions
+(complete, star, check-in, attention, routines, pins) need the server and
+reload the briefing afterwards, except task completion for a task in the
+synced snapshot, which queues offline like any other edit. Pairing is unnecessary for saving notes or
 recordings; it is required to sync the workspace and to deliver captures.
 
 ## Available without a connection

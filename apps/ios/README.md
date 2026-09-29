@@ -9,11 +9,12 @@ and rendered by the web app inside an in-app shell where it does not (yet).
 
 | Tab | What renders it | Works offline |
 | --- | --- | --- |
-| Agenda | The web app, inside a persistent WKWebView (signed-in cookie session) with its own tab bar hidden | No — shows a calm offline card |
+| Agenda | Native: masthead, focus line and every briefing panel (frame, weather, domain pulse, silent clients, attention, reflection, latest quote, pinned, timeline, doing, health, routines) in the order configured on the web, from one `GET /api/briefing/bundle` | Yes — the last briefing, with inline actions needing the server |
 | Domains | Native: the Work board, domain and project pages, task pages and editor, from the last synced snapshot | Yes |
 | ✦ Capture | Native portal: create-anything grid, free text, voice; saved on the phone first, delivered later | Yes |
 | Search | Native over the synced snapshot and saved captures; the server's library search joins when reachable | Yes (local results) |
-| More | The web's route list (Library, Content, People, …) opened inside the shell, plus saved captures and the device link | Web items need the server |
+| More | The web's route list (Library, Content, People, …) opened inside a persistent WKWebView (signed-in cookie session, its own tab bar hidden), plus native Settings and saved captures | Web items need the server |
+| Settings | Native: appearance (light / system / dark, mirrored into the web's theme cookie), device link, server addresses, share-sheet cache; server-side settings open on the web | Yes |
 
 Native code talks to the Fastify API with a revocable `ops_` device token
 (minted on first run via `POST /api/auth/tokens`, stored in the Keychain,
@@ -134,7 +135,9 @@ Choose a simulator installed on your Mac if that model/runtime is unavailable.
   the web's inline icons, mark and engravings), `Icons`, `Components`
   (ScreenHeader, Pill, DetailHeader, StatStrip, buttons, due labels).
 - `JeviOps/Shell/` — `AppShell` (tabs, sheets, routing), `TabBar`, `MoreSheet`.
-- `JeviOps/Agenda/` — the web shell tab and its offline card.
+- `JeviOps/Agenda/` — the native Agenda (`AgendaView` panels, `AgendaModel`,
+  `AgendaBundle` mirrors of `/api/briefing/bundle`) and `WebTabView`, the
+  in-app web shell for More destinations with its offline card.
 - `JeviOps/Domains/`, `Tasks/`, `Capture/`, `Search/` — the native screens.
 - `JeviOps/Offline/` — `OfflineStore` (App Group files), `OfflineModel`
   (sync, queue, recording), `WorkModels`, and the debug-only `Fixture`.

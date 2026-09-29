@@ -38,6 +38,22 @@ final class ShellState: ObservableObject {
     }
 
     func goBack() { webView?.goBack() }
+
+    /// Mirrors the native appearance choice into the web's `jops2.theme`
+    /// cookie (the root layout stamps <html data-theme> from it), then
+    /// reloads so the page repaints in the same theme as the chrome around it.
+    func applyTheme(_ theme: String, reload: Bool = true) {
+        guard let host = AppConfig.shared.webURL?.host else { return }
+        var properties: [HTTPCookiePropertyKey: Any] = [
+            .name: "jops2.theme", .value: theme, .domain: host, .path: "/",
+            .expires: Date().addingTimeInterval(365 * 86_400),
+        ]
+        if AppConfig.shared.webURL?.scheme == "https" { properties[.secure] = "TRUE" }
+        guard let cookie = HTTPCookie(properties: properties) else { return }
+        WKWebsiteDataStore.default().httpCookieStore.setCookie(cookie) { [weak self] in
+            if reload { DispatchQueue.main.async { self?.webView?.reload() } }
+        }
+    }
 }
 
 /// Injected at document start: the web's own mobile tab bar and its capture
@@ -103,6 +119,7 @@ final class ShellViewController: UIViewController, WKNavigationDelegate, WKUIDel
         view.addSubview(webView)
 
         state.webView = webView
+        state.applyTheme(AppConfig.shared.theme, reload: false)
         loadHome()
     }
 

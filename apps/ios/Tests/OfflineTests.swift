@@ -431,3 +431,17 @@ extension OfflineTests {
         catch OfflineError.unsupportedServer {}
     }
 }
+
+extension OfflineTests {
+    func testAgendaBundleFixtureDecodesEveryPanel() {
+        let bundle = OfflineFixture.agendaBundle()
+        XCTAssertEqual(bundle.panels.filter(\.enabled).count, 12)
+        XCTAssertEqual(bundle.rail.tasks.first?.project?.color, "#3B6A52")
+        XCTAssertEqual(bundle.weather?.data?.current_temperature?.text, "14")
+        XCTAssertEqual(bundle.weather?.data?.current_temperature_alt?.text, "57")
+        XCTAssertEqual(bundle.agenda?.timeline.last?.task?.title, "Water the lemon tree")
+        XCTAssertEqual(bundle.health?.latest_vitals.count, 2)
+        XCTAssertEqual(silenceUrgency(21), .due)
+        XCTAssertEqual(silenceLabel(nil), "No contact")
+    }
+}
