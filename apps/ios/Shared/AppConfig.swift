@@ -16,8 +16,14 @@ enum AppGroup {
     /// back to Caches when the container is unavailable (never expected on
     /// device once entitlements are set up).
     static var containerURL: URL {
+        sharedContainerURL ?? FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+    }
+
+    /// Nil when the App Group is not provisioned for this build (a device
+    /// profile without the capability). Durable stores must not fall back
+    /// to Caches, which iOS may evict; they stay in Application Support.
+    static var sharedContainerURL: URL? {
         FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: id)
-            ?? FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
     }
 }
 
@@ -35,11 +41,17 @@ final class AppConfig: ObservableObject {
     @Published var onboarded: Bool {
         didSet { defaults.set(onboarded, forKey: "onboarded") }
     }
+    /// Appearance: "light" | "dark" | "system" — the same three states as the
+    /// web's `jops2.theme` cookie, which the shell keeps in step.
+    @Published var theme: String {
+        didSet { defaults.set(theme, forKey: "theme") }
+    }
 
     private init() {
         webBaseURL = defaults.string(forKey: "webBaseURL") ?? ""
         apiBaseURL = defaults.string(forKey: "apiBaseURL") ?? ""
         onboarded = defaults.bool(forKey: "onboarded")
+        theme = defaults.string(forKey: "theme") ?? "system"
     }
 
     /// Production convention: web at https://host, API at https://host:8443

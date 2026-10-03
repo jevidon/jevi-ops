@@ -27,11 +27,20 @@ struct TaskComposeView: View {
 
     private var linked: Bool { KeychainStore.deviceToken != nil }
 
-    init(initialTitle: String, initialNotes: String = "", sharedURL: URL?, onFinish: @escaping (_ saved: Bool) -> Void) {
+    init(initialTitle: String, initialNotes: String = "", sharedURL: URL?, preset: ComposeContext? = nil,
+         onFinish: @escaping (_ saved: Bool) -> Void) {
         self.sharedURL = sharedURL
         self.onFinish = onFinish
         _title = State(initialValue: initialTitle)
         _notes = State(initialValue: initialNotes)
+        // A screen that already knows where the task belongs pre-files it.
+        if let project = preset?.project {
+            _kind = State(initialValue: .project)
+            _selectedProject = State(initialValue: project)
+        } else if let domain = preset?.domain {
+            _kind = State(initialValue: .domain)
+            _selectedDomain = State(initialValue: domain)
+        }
     }
 
     var body: some View {
@@ -71,7 +80,7 @@ struct TaskComposeView: View {
                     case .inbox:
                         EmptyView()
                     case .domain:
-                        if let domains = refs?.domains, !domains.isEmpty {
+                        if let domains = pickerDomains, !domains.isEmpty {
                             Picker("Domain", selection: $selectedDomain) {
                                 Text("Choose…").tag(Domain?.none)
                                 ForEach(domains) { Text($0.name).tag(Optional($0)) }
@@ -80,7 +89,7 @@ struct TaskComposeView: View {
                             cacheEmptyHint
                         }
                     case .project:
-                        if let projects = refs?.projects, !projects.isEmpty {
+                        if let projects = pickerProjects, !projects.isEmpty {
                             Picker("Project", selection: $selectedProject) {
                                 Text("Choose…").tag(Project?.none)
                                 ForEach(projects) { Text($0.name).tag(Optional($0)) }
@@ -130,6 +139,18 @@ struct TaskComposeView: View {
         } message: {
             Text("Saved tasks are sent the next time you open Jevi Ops on the tailnet.")
         }
+    }
+
+    private var pickerDomains: [Domain]? {
+        var list = refs?.domains ?? []
+        if let selectedDomain, !list.contains(selectedDomain) { list.insert(selectedDomain, at: 0) }
+        return list.isEmpty ? nil : list
+    }
+
+    private var pickerProjects: [Project]? {
+        var list = refs?.projects ?? []
+        if let selectedProject, !list.contains(selectedProject) { list.insert(selectedProject, at: 0) }
+        return list.isEmpty ? nil : list
     }
 
     private var cacheEmptyHint: some View {

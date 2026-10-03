@@ -14,11 +14,12 @@ struct JeviOpsApp: App {
             ["webBaseURL", "apiBaseURL", "onboarded"].forEach(defaults.removeObject(forKey:))
             KeychainStore.deleteDeviceToken()
         }
+        Typeface.registerBundledFonts()
     }
 
     var body: some Scene {
         WindowGroup {
-            RootView()
+            AppShell()
                 .environmentObject(config)
                 .environmentObject(router)
                 .onOpenURL { url in
