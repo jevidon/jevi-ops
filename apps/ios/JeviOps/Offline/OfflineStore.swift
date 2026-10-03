@@ -206,6 +206,8 @@ struct OfflineTask: Codable, Identifiable {
     var source: String?
     var updated_at: String = ""
     var priority: Int = 4
+    var milestone_id: String?
+    var created_at: String?
 
     var isDone: Bool { status == "done" }
     var isWaiting: Bool { status == "waiting" }
@@ -241,6 +243,7 @@ struct TaskSnapshot: Codable {
     // Optional so snapshots from the previous app version remain readable.
     var domains: [OfflineDomain]?
     var projects: [OfflineProject]?
+    var milestones: [OfflineMilestone]?
     /// The computed Domains board and the app timezone, from the same
     /// consistent server read as the tasks.
     var work: WorkPayload?
@@ -254,12 +257,21 @@ struct TaskSnapshot: Codable {
         scopes.first { $0.scope == (task.project_id == nil ? "domain" : "project") && $0.id == (task.project_id ?? task.domain_id) }
     }
 
+    func milestones(inProject id: String) -> [OfflineMilestone] {
+        (milestones ?? []).filter { $0.project_id == id }
+    }
+
+    /// The scope's custom status for this task (effectiveWorkflowStatus in
+    /// packages/shared): the chosen one while it still matches the task's
+    /// category, else the first status of that category.
+    func workflowStatus(for task: OfflineTask) -> OfflineWorkflow.Definition.Status? {
+        guard let statuses = workflow(for: task)?.definition?.statuses else { return nil }
+        return statuses.first { $0.id == task.workflow_status_id && $0.category == task.status }
+            ?? statuses.first { $0.category == task.status }
+    }
+
     func statusLabel(for task: OfflineTask) -> String {
-        let definition = scopes.first { $0.scope == (task.project_id == nil ? "domain" : "project") &&
-            $0.id == (task.project_id ?? task.domain_id) }?.definition
-        let status = definition?.statuses.first { $0.id == task.workflow_status_id }
-            ?? definition?.statuses.first { $0.category == task.status }
-        return status?.label ?? task.status.capitalized
+        workflowStatus(for: task)?.label ?? task.status.capitalized
     }
 }
 
@@ -283,6 +295,19 @@ struct OfflineProject: Codable, Identifiable {
     var kind: String?
     var status: String?
     var color: String?
+    var engagement_type: String?
+
+    var isArea: Bool { kind == "area" }
+    var isRetainer: Bool { !isArea && engagement_type == "retainer" }
+}
+
+struct OfflineMilestone: Codable, Identifiable {
+    let id: String
+    let project_id: String
+    let title: String
+    var status: String = "open"
+    var weight: Int = 1
+    var position: Int = 0
 }
 
 struct SyncIdentity: Codable, Equatable {

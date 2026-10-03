@@ -2,7 +2,9 @@ import SwiftUI
 
 /// One task row (TaskItem.tsx): the checkbox square (dashed while waiting),
 /// the title, and a meta line — waiting · project with its colour dot · due
-/// label · recurrence. The checkbox queues a status change offline.
+/// label · recurrence. The checkbox queues a status change offline. In a
+/// scope with a custom workflow the checkbox becomes the status menu, as the
+/// web's TaskStatusControl replaces it.
 struct TaskRow: View {
     @ObservedObject var model: OfflineModel
     var task: OfflineTask
@@ -18,20 +20,11 @@ struct TaskRow: View {
         let due = task.due_date.flatMap { DueLabel.format($0, today: today) }
         let pending = model.pendingEdit(for: task)
         HStack(alignment: .top, spacing: 12) {
-            Button(action: toggle) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 0).fill(task.isDone ? Theme.ink2 : .clear)
-                    RoundedRectangle(cornerRadius: 0)
-                        .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: task.isWaiting ? [3, 2] : []))
-                        .foregroundStyle(task.isDone ? Theme.ink2 : task.isWaiting ? (waitStale ? Theme.accent : Theme.ink3) : Theme.lineStrong)
-                    if task.isDone { Icon(name: .check, size: 12, strokeWidth: 2, color: Theme.bg) }
-                }
-                .frame(width: 20, height: 20)
-                .padding(.top, 2)
-                .contentShape(Rectangle())
+            if let statuses = model.snapshot?.workflow(for: task)?.definition?.statuses {
+                RowStatusMenu(model: model, task: task, statuses: statuses, error: $error)
+            } else {
+                checkbox(waitStale: waitStale)
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel(task.isDone ? "Mark task open" : "Mark task done")
             VStack(alignment: .leading, spacing: 3) {
                 Text(task.title)
                     .font(Typeface.sans(14))
@@ -88,9 +81,62 @@ struct TaskRow: View {
         return parts
     }
 
+    private func checkbox(waitStale: Bool) -> some View {
+        Button(action: toggle) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 0).fill(task.isDone ? Theme.ink2 : .clear)
+                RoundedRectangle(cornerRadius: 0)
+                    .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: task.isWaiting ? [3, 2] : []))
+                    .foregroundStyle(task.isDone ? Theme.ink2 : task.isWaiting ? (waitStale ? Theme.accent : Theme.ink3) : Theme.lineStrong)
+                if task.isDone { Icon(name: .check, size: 12, strokeWidth: 2, color: Theme.bg) }
+            }
+            .frame(width: 20, height: 20)
+            .padding(.top, 2)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(task.isDone ? "Mark task open" : "Mark task done")
+    }
+
     private func toggle() {
         do { try model.toggleDone(task); error = nil }
         catch { self.error = error.localizedDescription }
+    }
+}
+
+/// The row-sized status select (TaskStatusControl): the current custom
+/// status, and a menu of the scope's statuses, queued like any offline edit.
+struct RowStatusMenu: View {
+    @ObservedObject var model: OfflineModel
+    var task: OfflineTask
+    var statuses: [OfflineWorkflow.Definition.Status]
+    @Binding var error: String?
+
+    var body: some View {
+        let current = model.snapshot?.workflowStatus(for: task)
+        Menu {
+            ForEach(statuses, id: \.id) { status in
+                Button {
+                    do { try model.setStatus(task, category: status.category, workflowStatusId: status.id); error = nil }
+                    catch { self.error = error.localizedDescription }
+                } label: {
+                    if status.id == current?.id { Label(status.label, systemImage: "checkmark") } else { Text(status.label) }
+                }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Text(current?.label ?? task.status.capitalized)
+                    .font(Typeface.sans(12)).foregroundStyle(Theme.ink).lineLimit(1)
+                Icon(name: .chev, size: 10, color: Theme.ink3).rotationEffect(.degrees(90))
+            }
+            .padding(.horizontal, 8).frame(height: 26)
+            .frame(maxWidth: 132, alignment: .leading)
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 4))
+            .overlay(RoundedRectangle(cornerRadius: 4).stroke(Theme.line, lineWidth: 1))
+            .fixedSize(horizontal: true, vertical: false)
+        }
+        .accessibilityLabel("Task status")
+        .accessibilityValue(current?.label ?? task.status)
     }
 }
 

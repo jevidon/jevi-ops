@@ -10,6 +10,7 @@ extension APIClient {
             let identity: SyncIdentity
             let domains: [OfflineDomain]
             let projects: [OfflineProject]
+            let milestones: [OfflineMilestone]?
             let tasks: [OfflineTask]
             let scopes: [OfflineWorkflow]
             let work: WorkPayload?
@@ -23,7 +24,7 @@ extension APIClient {
         guard response.protocol_version == 1, response.identity.task_edit_protocol == 1 else { throw OfflineError.unsupportedServer }
         var snapshot = TaskSnapshot(destination: OfflineStore.destination(for: self), tasks: response.tasks,
                                     scopes: response.scopes, identity: response.identity,
-                                    domains: response.domains, projects: response.projects)
+                                    domains: response.domains, projects: response.projects, milestones: response.milestones)
         snapshot.work = response.work
         snapshot.timezone = response.timezone
         snapshot.done_window_days = response.done_window_days

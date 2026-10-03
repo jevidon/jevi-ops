@@ -94,6 +94,45 @@ final class OfflineUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["PENDING SYNC"].exists)
     }
 
+    /// A workflow project keeps the web's organisation: milestone groups,
+    /// subtasks folded under their parent with a done / total chip, custom
+    /// statuses in place of checkboxes, and the due-window regrouping.
+    func testProjectTasksKeepStatusesFoldsAndGrouping() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-offline-ui-fixture", "-offline-ui-reset", "-offline-ui-tab", "domains"]
+        app.launch()
+        let card = app.otherElements["domainCard-Home & Property"]
+        XCTAssertTrue(card.waitForExistence(timeout: 10))
+        card.coordinate(withNormalizedOffset: CGVector(dx: 0.12, dy: 0.5)).tap()
+        app.buttons["Open domain: Home & Property"].tap()
+        let project = app.buttons["projectLink-Camping kit"]
+        XCTAssertTrue(project.waitForExistence(timeout: 5))
+        project.tap()
+
+        // Milestone grouping leads: Bookings (position 0) then Gear packed.
+        XCTAssertTrue(app.otherElements["taskGroup-d1111111-0000-4000-8000-000000000001"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Gear packed"].exists)
+        XCTAssertTrue(app.staticTexts["IN PROGRESS · WEIGHT 1"].exists)
+        // Parents fold; their children stay out of the flat list until expanded.
+        let tech = app.buttons["Open task: Packing: Tech, 1 of 2 subtasks done"]
+        XCTAssertTrue(tech.exists)
+        XCTAssertFalse(app.staticTexts["Headlamp"].exists)
+        // Custom statuses replace the checkbox.
+        XCTAssertFalse(app.buttons["Mark task done"].exists)
+        XCTAssertTrue(app.buttons["Task status"].firstMatch.exists)
+        attach(app, "Project grouped by milestone")
+        app.otherElements["parentFold-b2222222-0000-4000-8000-000000000001"].buttons["Expand subtasks"].tap()
+        let fold = app.otherElements["parentFold-b2222222-0000-4000-8000-000000000001"]
+        XCTAssertTrue(fold.staticTexts["Headlamp"].waitForExistence(timeout: 5))
+        XCTAssertFalse(fold.staticTexts["Power bank"].exists, "packed (done) children stay out of the open fold")
+        attach(app, "Parent fold expanded")
+
+        app.buttons["groupBy-due"].tap()
+        XCTAssertTrue(app.otherElements["taskGroup-undated"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.otherElements["taskGroup-waiting"].exists)
+        attach(app, "Project grouped by due window")
+    }
+
     private func attach(_ app: XCUIApplication, _ name: String) {
         let screenshot = XCTAttachment(screenshot: app.screenshot())
         screenshot.name = name
