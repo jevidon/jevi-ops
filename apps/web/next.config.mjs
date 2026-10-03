@@ -7,6 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import { PHASE_DEVELOPMENT_SERVER } from 'next/constants.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -91,4 +92,9 @@ const nextConfig = {
   },
 };
 
-export default nextConfig;
+// A production build must not overwrite the manifests/chunks used by a
+// running dev server: that invalidates the Server Action IDs in open tabs.
+export default (phase) => ({
+  ...nextConfig,
+  distDir: phase === PHASE_DEVELOPMENT_SERVER ? '.next-dev' : '.next',
+});
