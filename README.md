@@ -1,119 +1,58 @@
 # jevi-ops
 
-Self-hosted personal operations dashboard — voice-first capture, six-tab
-PWA, one pane of glass. A sovereign fork of jerad-ops: the whole stack runs
-on your own hardware behind Tailscale, with a personally hosted LLM doing
-the thinking.
+**Your day, in context.**
 
-**The Brain layer of the Sovereign Second Brain**: single source of truth on
-the NAS, frictionless capture from any surface (PWA, watch, widget, agents),
-local AI processing, nothing surrendered to hosted platforms.
+jevi-ops is a self-hosted personal operations system for work, home and the things you want to remember. Its interface, **Almanac**, brings voice and text capture, projects, people, notes and everyday responsibilities into one place—so you can see what needs attention without keeping it all in your head.
 
-## Stack
+A responsive web app and native iOS companion connect to a **Docker-containerized service** on your own hardware. Your server holds the record; you choose the language model, transcription service and integrations around it.
 
-```
-jevi-ops/
-├── apps/
-│   ├── api/              Fastify + TypeScript (tsx runtime) + Drizzle ORM
-│   └── web/              Next.js 15 PWA (App Router, standalone build)
-├── packages/
-│   └── shared/           Zod schemas + TS types shared api ↔ web
-└── infrastructure/
-    ├── schema-selfhost.sql   Portable Postgres DDL (43 tables)
-    ├── seed.sql              Fresh-install seeds
-    ├── DEPENDENCIES.md       External systems setup (Tailscale, LLM, STT, Immich)
-    ├── MIGRATION.md          Supabase → NAS cutover runbook
-    └── docker/               Compose stack + Dockerfiles + deploy README
-```
+## Why jevi-ops
 
-What replaced what, relative to the hosted original:
+- **Capture while it's fresh.** Speak or type a thought, save a note, or create a task from one capture surface. Shortcuts and agents can send captures to the same system.
+- **See the day in context.** An adjustable daily agenda brings together your focus, calendar, tasks, routines and a passage from your library.
+- **Keep responsibilities connected.** Organize projects, content and tasks into domains. Keep people, household assets and maintenance records alongside the work they relate to.
+- **Return to what matters.** Keep journals, notes, books and quotations in a searchable library, with selected entries resurfacing in the daily briefing.
+- **Keep going away from your server.** The iOS companion saves captures on the phone and queues supported task edits for later sync. Its latest synced workspace remains available offline.
+- **Run it on your terms.** Host the application and PostgreSQL database yourself, reach them through Tailscale, and configure your own AI services. Calendar, photo and notification integrations are optional.
 
-| Hosted (jerad-ops) | Self-hosted (jevi-ops) |
-|---|---|
-| Supabase Postgres + PostgREST | Plain Postgres (pgvector image) + Drizzle ORM |
-| Supabase Auth (GoTrue) | Password + self-issued JWT (jose); named `ops_` API tokens for agents/devices |
-| Anthropic API (parser, chat) | Any OpenAI-compatible server (llama.cpp/MLX/Ollama/vLLM) — Anthropic stays as a config-switch fallback |
-| OpenAI Whisper | Any OpenAI-compatible STT server (speaches / whisper.cpp) |
-| Bunny CDN images | Local volume served by the API (`/uploads/*`) |
-| XCloud hosting + HTTP cron | Docker Compose on TrueNAS SCALE + in-process croner scheduler |
-| Public domains | Tailscale-only (`tailscale serve`, ts.net certs) |
+## Screenshots
 
-Pushover (notifications) and Google Calendar sync are unchanged — outbound
-integrations that work fine from a NAS.
+The current web interface in **Almanac's** visual language: linen backgrounds, readable type, quiet status indicators and a central capture control. These screenshots use fictional sample data.
 
-## Quick start (development)
+<!-- Captured 2026-10-24 from the web UI at 3c8a2610 with a local sample-data API; 390 × 844 viewport, 2× scale. -->
+<table>
+  <tr>
+    <td align="center"><img src="docs/screenshots/agenda.png" alt="Almanac agenda with a daily focus, domain activity, journal reflection and today's schedule" width="250"><br><sub>See the day in context</sub></td>
+    <td align="center"><img src="docs/screenshots/domains.png" alt="Domains view organizing Home and Garden, Creative Work, Learning and Personal responsibilities" width="250"><br><sub>Find where things belong</sub></td>
+    <td align="center"><img src="docs/screenshots/capture.png" alt="Capture panel with shortcuts for new records, a text field and voice recording controls" width="250"><br><sub>Capture in the moment</sub></td>
+  </tr>
+</table>
 
-Prereqs: Node ≥ 20.10, pnpm ≥ 9, Docker.
+## The long-term vision
 
-```bash
-pnpm install
-cp .env.example .env                 # fill in AUTH_SECRET at minimum
-ln -sf ../../.env apps/web/.env.local
+**A quieter Life OS.** The goal is a system you can speak freely into: wishes, questions, worries and unfinished thoughts can be worth keeping without becoming obligations. Practical help should arrive when you ask for it or when the context makes it useful.
 
-# Dev database (Postgres 17 + pgvector on :54329)
-docker compose -f infrastructure/docker/compose.dev.yml up -d
-psql postgresql://jevi:jevi@localhost:54329/jeviops -f infrastructure/schema-selfhost.sql
-psql postgresql://jevi:jevi@localhost:54329/jeviops -f infrastructure/seed.sql
+**A lasting record across surfaces.** The server holds the shared memory while phones, browsers, shortcuts and agents provide ways to capture and return to it. Saving a thought, interpreting it and acting on it are distinct steps.
 
-# Your user
-pnpm --filter @jevi-ops/api exec tsx scripts/create-user.ts --email you@example.com
+This proposed direction extends the existing dashboard; the full Life OS experience is still ahead.
 
-# Two terminals
-pnpm dev:api    # :3001
-pnpm dev:web    # :3000
-```
+## Where we're headed
 
-Open <http://localhost:3000> → sign in → `/today`. Point the LLM at your
-server in **Settings → AI** (or via `LLM_BASE_URL`/`LLM_MODEL` in `.env`).
+**Now:** refine the web and native iOS experience, strengthen capture and offline sync, and keep the daily interface useful as the underlying record grows.
 
-The web dev server writes to `apps/web/.next-dev`; production builds and
-`start:web` use `apps/web/.next`. This keeps local builds from overwriting a
-running dev server's Server Action manifests. After a server restart or
-deployment, reload any open tab that reports an outdated action before
-retrying the change.
+**Next:** build toward the Life OS direction—preserving original expression, connecting related thoughts over time and offering small, reviewable next steps when wanted.
 
-## Deploying to the NAS
+## Project status
 
-See [`infrastructure/docker/README.md`](infrastructure/docker/README.md)
-(install via TrueNAS "Custom App → Install via YAML", datasets, first-run) and
-[`infrastructure/DEPENDENCIES.md`](infrastructure/DEPENDENCIES.md) (the
-external systems: Tailscale serve, LLM server, STT server, Immich, Google
-OAuth, Pushover).
+jevi-ops is an actively developed, single-user application with a working web app, API and native iOS companion. Offline support covers specific native workflows; it does not extend to every screen or integration. The [iOS guide](apps/ios/README.md) and [offline behavior notes](apps/ios/offline.md) describe the current boundaries.
 
-Migrating data off a hosted Supabase deployment:
-[`infrastructure/MIGRATION.md`](infrastructure/MIGRATION.md).
+The project began as a self-hosted fork of [jerad-ops](https://github.com/3SecondsAgo/jerad-ops). It uses Next.js and React for the web, SwiftUI for iOS, Fastify for the API, and PostgreSQL with Drizzle for storage.
 
-## Architecture notes
+## Get started
 
-- **Data layer** — Drizzle over postgres.js; `apps/api/src/db/schema.ts` is
-  generated-then-owned (schema changes go into `schema-selfhost.sql` *and*
-  `schema.ts`). Custom driver parsers keep the wire format the web app was
-  built against: numerics as JSON numbers, timestamps as ISO-`T` strings.
-- **Auth** — one `AUTH_SECRET` signs sessions on the API and verifies them
-  in the web middleware (edge-safe jose, no per-request network hop).
-  Agents get their own revocable `ops_` tokens (Settings → API tokens);
-  tokens can't mint tokens.
-- **LLM/STT** — `apps/api/src/lib/llm.ts` + `stt.ts` expose neutral
-  interfaces; config resolves the `app_settings` row (dashboard-editable,
-  applies without restart) → env fallback. `LLM_PROVIDER=anthropic` is a
-  pure config change.
-- **Cron** — `CRON_ENABLED=true` starts the in-process croner scheduler
-  (reminders / calendar-sync / observations / overdue / daily-summary in the
-  app timezone). The `/api/cron/*` endpoints remain for manual triggers.
-- **Capture contract** — `POST /api/ingest` (+ `/api/ingest/capture`) is the
-  stable, secret-gated intake for external surfaces: watch shortcuts, HTTP
-  Shortcuts, future edge-capture hardware, agents. Capture is liberal;
-  display is conservative.
-- **Semantic search readiness** — the Postgres image ships pgvector;
-  embeddings are a `CREATE EXTENSION vector` + a column away, no re-platform.
-
-## Conventions
-
-- **All capture is liberal, all display is conservative** — `/api/ingest`
-  accepts anything; only ~7 things earn home-screen real estate.
-- **Every autonomous action is logged + reversible** — `action_log` +
-  notifications with `undo_payload`.
-- **Stages over completeness** — schema includes tables not yet used; data
-  flows in before the UI exists.
-- **Two config tiers** — secrets/bootstrap in env; integration endpoints
-  (LLM, STT, Immich) in the dashboard with env as fallback.
+- [Local development](docs/development.md) — prerequisites, first-run setup, everyday commands and architecture.
+- [Self-host with Docker](infrastructure/docker/README.md) — deployment on TrueNAS SCALE or another Docker host.
+- [Configure integrations](infrastructure/DEPENDENCIES.md) — Tailscale, AI, transcription, Immich, Calendar and notifications.
+- [Run the iOS companion](apps/ios/README.md) — build, link your server and use the synced workspace.
+- [Capture from Hermes](workers/hermes-capture/README.md) — save text from the desktop agent with a storage receipt.
+- [Migrate from Supabase](infrastructure/MIGRATION.md) — move an existing hosted deployment to your own server.
