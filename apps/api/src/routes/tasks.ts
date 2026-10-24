@@ -108,20 +108,27 @@ export const taskRoutes: FastifyPluginAsync = async (app) => {
 
   // One consistent snapshot for the phone's native Domains, task and search
   // screens: identity, every domain and project (empty containers included),
-  // the workflow definitions, the computed Domains board, and the tasks a
-  // phone can act on. Done tasks are bounded to the last 30 days so the
-  // download stays proportional to live work rather than to history.
+  // the workflow definitions, milestones, the computed Domains board, and the
+  // tasks a phone can act on. Done tasks are bounded to the last 30 days so
+  // the download stays proportional to live work rather than to history —
+  // except subtasks of a live parent, which ride along at any age so the
+  // phone's "done / total" fold chip matches the web's.
   // Replacing a saved snapshot is safe only after this entire response has
   // been persisted.
   app.get('/api/local-workspace', async () => getDb().transaction(async tx => {
     const identity = await installationIdentity(tx);
     const cutoff = new Date(Date.now() - LOCAL_WORKSPACE_DONE_WINDOW_MS).toISOString();
-    const [domains, projectRows, taskRows, work] = await Promise.all([
+    const [domains, projectRows, milestoneRows, taskRows, work] = await Promise.all([
       tx.select().from(stewardship_domains),
       tx.select().from(projects),
+      tx.select().from(milestones),
       tx.query.tasks.findMany({
         with: TASK_EMBEDS,
-        where: or(ne(tasks.status, 'done'), gte(tasks.completed_at, cutoff)),
+        where: or(
+          ne(tasks.status, 'done'),
+          gte(tasks.completed_at, cutoff),
+          sql`${tasks.parent_task_id} in (select live.id from tasks live where live.status <> 'done')`,
+        ),
       }),
       buildWork(tx as unknown as Db),
     ]);
@@ -138,7 +145,7 @@ export const taskRoutes: FastifyPluginAsync = async (app) => {
       done_window_days: LOCAL_WORKSPACE_DONE_WINDOW_MS / 86_400_000,
       // App timezone (a DB setting, not the phone's): every "today" the phone derives must use it.
       timezone: await getAppTz(),
-      domains: withArt, projects: projectRows, tasks: taskRows, work,
+      domains: withArt, projects: projectRows, milestones: milestoneRows, tasks: taskRows, work,
       scopes: [
         ...domains.map(d => ({ id: d.id, scope: 'domain', definition: d.task_workflow, revision: d.workflow_revision })),
         ...projectRows.map(p => ({ id: p.id, scope: 'project', definition: p.task_workflow, revision: p.workflow_revision })),

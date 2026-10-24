@@ -20,10 +20,17 @@ enum OfflineFixture {
     static let roofProject = "55555555-5555-4555-8555-555555555555"
     static let taxProject = "77777777-7777-4777-8777-777777777777"
     static let torchTask = "11111111-2222-4333-8444-555555555555"
+    static let bookingMilestone = "d1111111-0000-4000-8000-000000000001"
+    static let gearMilestone = "d1111111-0000-4000-8000-000000000002"
 
     static func store() throws -> OfflineStore {
         let root = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("OfflineUITest")
-        if ProcessInfo.processInfo.arguments.contains(resetArgument) { try? FileManager.default.removeItem(at: root) }
+        if ProcessInfo.processInfo.arguments.contains(resetArgument) {
+            try? FileManager.default.removeItem(at: root)
+            // Per-project Group-by choices live in defaults, not the store.
+            let defaults = UserDefaults.standard
+            defaults.dictionaryRepresentation().keys.filter { $0.hasPrefix("projectGroupMode.") }.forEach(defaults.removeObject(forKey:))
+        }
         let store = try OfflineStore(root: root)
         let destination = OfflineStore.destination(for: client)
         if (try? store.snapshot(for: destination)) == nil {
@@ -121,6 +128,30 @@ enum OfflineFixture {
                         updated_at: stamp, priority: 3),
         ]
         tasks[0].top3_for_date = today
+        // The packing-list shape: kit statuses, packing parents with
+        // subtasks (one packed), tasks pinned to two milestones.
+        func kit(_ n: Int, _ title: String, parent: String? = nil, status: String = "open", workflow: String? = nil, milestone: String? = nil) -> OfflineTask {
+            var t = OfflineTask(id: String(format: "b2222222-0000-4000-8000-%012d", n), title: title, status: status,
+                                project_id: campingProject, domain_id: homeDomain, workflow_status_id: workflow,
+                                project: camping, domain: home, parent_task_id: parent,
+                                completed_at: status == "done" ? stamp : nil, updated_at: stamp, priority: 3)
+            t.milestone_id = milestone
+            t.created_at = String(format: "2026-09-20T00:00:%02d.000Z", 60 - n)
+            return t
+        }
+        let tech = String(format: "b2222222-0000-4000-8000-%012d", 1)
+        let clothing = String(format: "b2222222-0000-4000-8000-%012d", 2)
+        tasks[0].milestone_id = gearMilestone
+        tasks[1].milestone_id = bookingMilestone
+        tasks += [
+            kit(1, "Packing: Tech", milestone: gearMilestone),
+            kit(2, "Packing: Clothing", milestone: gearMilestone),
+            kit(3, "Headlamp", parent: tech, workflow: "buy"),
+            kit(4, "Power bank", parent: tech, status: "done", workflow: "packed"),
+            kit(5, "Puffy jacket", parent: clothing, workflow: "pack"),
+            kit(6, "Wool socks", parent: clothing, workflow: "pack"),
+            kit(7, "Water filter", workflow: "pack"),
+        ]
         // Engravings as the server sends them: the procedural motif each name
         // seeds (packages/shared/src/illustration.ts), captured verbatim.
         let domains = [
@@ -131,9 +162,10 @@ enum OfflineFixture {
             OfflineDomain(id: emptyDomain, name: "Empty domain"),
         ]
         let projects = [
-            OfflineProject(id: campingProject, name: "Camping kit", domain_id: homeDomain, kind: "target", status: "active", color: "#3B6A52"),
-            OfflineProject(id: roofProject, name: "Roof repair", domain_id: homeDomain, kind: "target", status: "active", color: "#8A4B3C"),
-            OfflineProject(id: taxProject, name: "Tax return", domain_id: financeDomain, kind: "retainer", status: "active", color: "#A8763E"),
+            OfflineProject(id: campingProject, name: "Camping kit", domain_id: homeDomain, kind: "project", status: "active", color: "#3B6A52"),
+            OfflineProject(id: roofProject, name: "Roof repair", domain_id: homeDomain, kind: "project", status: "active", color: "#8A4B3C"),
+            OfflineProject(id: taxProject, name: "Tax return", domain_id: financeDomain, kind: "project", status: "active", color: "#A8763E",
+                           engagement_type: "retainer"),
             OfflineProject(id: "88888888-8888-4888-8888-888888888888", name: "Empty project", domain_id: homeDomain, kind: "area", status: "active"),
         ]
         var work = WorkPayload()
@@ -163,7 +195,17 @@ enum OfflineFixture {
             WorkDomain(id: emptyDomain, name: "Empty domain", urgency: .quiet),
         ]
         work.ideasCount = 3
-        var snapshot = TaskSnapshot(destination: destination, tasks: tasks, scopes: [], identity: identity, domains: domains, projects: projects)
+        let kitStatuses = OfflineWorkflow.Definition(statuses: [
+            .init(id: "buy", label: "Need to buy", category: "open"),
+            .init(id: "pack", label: "Need to pack", category: "open"),
+            .init(id: "packed", label: "Packed", category: "done"),
+        ])
+        let milestones = [
+            OfflineMilestone(id: bookingMilestone, project_id: campingProject, title: "Bookings", status: "open", weight: 1, position: 0),
+            OfflineMilestone(id: gearMilestone, project_id: campingProject, title: "Gear packed", status: "open", weight: 3, position: 1),
+        ]
+        var snapshot = TaskSnapshot(destination: destination, tasks: tasks, scopes: [OfflineWorkflow(id: campingProject, scope: "project", definition: kitStatuses, revision: 1)],
+                                    identity: identity, domains: domains, projects: projects, milestones: milestones)
         snapshot.work = work
         snapshot.timezone = "America/Denver"
         snapshot.done_window_days = 30
