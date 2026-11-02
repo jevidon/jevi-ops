@@ -102,6 +102,7 @@ export default async function ProjectDetailPage({
   const liveIds = new Set([...openTasks, ...waitingTasks].map((t) => t.id));
   const isFoldedChild = (t: Task) => t.parent_task_id != null && liveIds.has(t.parent_task_id);
   const kidsOf = (t: Task) => childrenByParent.get(t.id) ?? [];
+  const parentIdsWithKids = new Set(childrenByParent.keys());
 
   // Drill-in grouping (Addendum 08 §10) — folded children excluded; they
   // render inside their parent's fold instead.
@@ -109,7 +110,7 @@ export default async function ProjectDetailPage({
   const defaultMode: 'milestone' | 'due' = !isRetainer && !isArea && milestones.length > 0 ? 'milestone' : 'due';
   const groupMode: 'milestone' | 'due' =
     groupParam === 'milestone' ? 'milestone' : groupParam === 'due' ? 'due' : defaultMode;
-  const taskGroups = groupMode === 'milestone' ? buildMilestoneGroups(livePool, milestones) : buildDueGroups(livePool, today);
+  const taskGroups = groupMode === 'milestone' ? buildMilestoneGroups(livePool, milestones, parentIdsWithKids) : buildDueGroups(livePool, today, parentIdsWithKids);
 
   const hoursLogged = Number(project.hours_logged ?? 0);
   const quoted = project.quoted_hours != null ? Number(project.quoted_hours) : null;
@@ -475,8 +476,13 @@ function retainerCycle(anchorDay: number, todayYmd: string): { day: number; leng
 
 interface TaskGroup { key: string; title: string; meta: string; tasks: Task[]; muted?: boolean; accent?: boolean; }
 
-function sortPool(list: Task[]): Task[] {
+function sortPool(list: Task[], parentIds: Set<string> = new Set()): Task[] {
   return [...list].sort((a, b) => {
+    // Parents carrying subtasks first: the fold rows read as sections, and
+    // scattered loose items below them are the real to-do surface.
+    const ap = parentIds.has(a.id) ? 0 : 1;
+    const bp = parentIds.has(b.id) ? 0 : 1;
+    if (ap !== bp) return ap - bp;
     const aw = a.status === 'waiting' ? 1 : 0;
     const bw = b.status === 'waiting' ? 1 : 0;
     if (aw !== bw) return aw - bw;
@@ -484,22 +490,22 @@ function sortPool(list: Task[]): Task[] {
   });
 }
 
-function buildMilestoneGroups(pool: Task[], milestones: Milestone[]): TaskGroup[] {
+function buildMilestoneGroups(pool: Task[], milestones: Milestone[], parentIds: Set<string> = new Set()): TaskGroup[] {
   const ordered = [...milestones].sort((a, b) => a.position - b.position);
   const currentId = ordered.find((m) => m.status === 'open')?.id ?? null;
   const groups: TaskGroup[] = [];
   for (const m of ordered) {
-    const t = sortPool(pool.filter((x) => x.milestone_id === m.id));
+    const t = sortPool(pool.filter((x) => x.milestone_id === m.id), parentIds);
     if (t.length === 0) continue;
     const meta = m.status === 'done' ? `done · weight ${m.weight}` : m.id === currentId ? `in progress · weight ${m.weight}` : `weight ${m.weight}`;
     groups.push({ key: m.id, title: m.title, meta, tasks: t, muted: m.status === 'done' });
   }
-  const general = sortPool(pool.filter((t) => !t.milestone_id));
+  const general = sortPool(pool.filter((t) => !t.milestone_id), parentIds);
   if (general.length > 0) groups.push({ key: 'general', title: 'General', meta: 'no milestone', tasks: general });
   return groups;
 }
 
-function buildDueGroups(pool: Task[], today: string): TaskGroup[] {
+function buildDueGroups(pool: Task[], today: string, parentIds: Set<string> = new Set()): TaskGroup[] {
   const plus7 = new Date(new Date(`${today}T00:00:00Z`).getTime() + 7 * 86_400_000).toISOString().slice(0, 10);
   const open = pool.filter((t) => t.status === 'open');
   const waiting = pool.filter((t) => t.status === 'waiting');
@@ -510,7 +516,7 @@ function buildDueGroups(pool: Task[], today: string): TaskGroup[] {
     { key: 'later', title: 'Later', tasks: open.filter((t) => t.due_date && t.due_date > plus7), meta: '' },
     { key: 'undated', title: 'Undated', tasks: open.filter((t) => !t.due_date), meta: '' },
     { key: 'waiting', title: 'Waiting', muted: true, tasks: waiting, meta: '' },
-  ].map((g) => ({ ...g, meta: String(g.tasks.length), tasks: sortPool(g.tasks) }));
+  ].map((g) => ({ ...g, meta: String(g.tasks.length), tasks: sortPool(g.tasks, parentIds) }));
   return buckets.filter((g) => g.tasks.length > 0);
 }
 
