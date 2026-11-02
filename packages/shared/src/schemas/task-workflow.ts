@@ -42,9 +42,4 @@ export const BUILTIN_WORKFLOW_PRESETS: WorkflowPreset[] = [
     { id: 'need', label: 'Need to buy', category: 'open' },
     { id: 'enough', label: 'Have enough', category: 'done' },
   ] } },
-  { id: 'kit', name: 'Kit readiness', definition: { statuses: [
-    { id: 'buy', label: 'Need to buy', category: 'open' },
-    { id: 'pack', label: 'Need to pack', category: 'open' },
-    { id: 'packed', label: 'Packed', category: 'done' },
-  ] } },
 ];

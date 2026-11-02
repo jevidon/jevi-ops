@@ -2,7 +2,7 @@ import { TasksView } from '@/app/(authed)/tasks/tasks-view';
 import type { Task } from '@jevi-ops/shared';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { BUILTIN_WORKFLOW_PRESETS, type WorkflowRegistry } from '@jevi-ops/shared';
+import { BUILTIN_WORKFLOW_PRESETS, type TaskWorkflow, type WorkflowRegistry } from '@jevi-ops/shared';
 import { TaskStatusControl, TaskWorkflowsProvider } from './TaskWorkflows';
 import { WorkflowSettings } from './WorkflowSettings';
 import { changeWorkflowStatus, configureWorkflow } from './actions';
@@ -11,7 +11,11 @@ import { UnrecognizedActionError } from 'next/dist/client/components/unrecognize
 vi.mock('@/app/(authed)/today/actions', () => ({ toggleTaskDoneAction: vi.fn() }));
 vi.mock('./actions', () => ({ changeWorkflowStatus: vi.fn(), configureWorkflow: vi.fn(), saveWorkflowPreset: vi.fn(), deleteWorkflowPreset: vi.fn() }));
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.resetAllMocks(); });
-const kit = BUILTIN_WORKFLOW_PRESETS[1]!.definition;
+const kit: TaskWorkflow = { statuses: [
+  { id: 'buy', label: 'Need to buy', category: 'open' },
+  { id: 'pack', label: 'Need to pack', category: 'open' },
+  { id: 'packed', label: 'Packed', category: 'done' },
+] };
 const registry: WorkflowRegistry = { scopes: [{ id: 'project', scope: 'project', definition: kit, revision: 3 }, { id: 'domain', scope: 'domain', definition: kit, revision: 2 }], presets: BUILTIN_WORKFLOW_PRESETS };
 const task = { id: 'task', status: 'open', project_id: 'project', domain_id: 'domain', workflow_status_id: 'pack' };
 

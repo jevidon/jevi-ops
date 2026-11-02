@@ -3,14 +3,18 @@ import type { FastifyInstance } from 'fastify';
 import { eq } from 'drizzle-orm';
 import { createItem, logsFor } from './helpers.js';
 import { randomUUID } from 'node:crypto';
-import { BUILTIN_WORKFLOW_PRESETS } from '@jevi-ops/shared';
+import type { TaskWorkflow } from '@jevi-ops/shared';
 import { buildServer } from '../src/server.js';
 import { signSession } from '../src/lib/jwt.js';
 import { getDb } from '../src/lib/db.js';
 import { projects, stewardship_domains, tasks } from '../src/db/schema.js';
 
 let app: FastifyInstance, token: string, domainId: string, projectId: string;
-const kit = BUILTIN_WORKFLOW_PRESETS[1]!.definition;
+const kit: TaskWorkflow = { statuses: [
+  { id: 'buy', label: 'Need to buy', category: 'open' },
+  { id: 'pack', label: 'Need to pack', category: 'open' },
+  { id: 'packed', label: 'Packed', category: 'done' },
+] };
 beforeAll(async () => { app = await buildServer(); token = await signSession({ id: randomUUID(), email: 'workflow@test.local' }); });
 afterAll(async () => { await app.close(); });
 beforeEach(async () => {
