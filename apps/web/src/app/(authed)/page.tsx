@@ -24,6 +24,7 @@ import {
   type BriefingContext,
   type PanelDef,
 } from './_briefing/registry';
+import { RecentActivityPanel } from './_briefing/panels/recent-activity';
 
 // The Briefing — editorial home screen (v2 redesign, Jul 2026; panel system
 // Aug 2026). Lead with state, not a checklist.
@@ -183,6 +184,14 @@ export default async function TodayPage() {
     const Panel = def.Panel;
     return <Panel key={def.id} ctx={ctx} />;
   };
+  const railNodes = railPanels.map(renderPanel);
+  if (mainPanels.some((panel) => panel.id === 'recent-activity')) {
+    const anchor = Math.max(
+      railPanels.findIndex((panel) => panel.id === 'pinned'),
+      railPanels.findIndex((panel) => panel.id === 'agenda'),
+    );
+    railNodes.splice(anchor + 1, 0, <RecentActivityPanel key="recent-activity-mobile" ctx={ctx} placement="rail-mobile" />);
+  }
 
   return (
     <div className="pb-32">
@@ -246,7 +255,7 @@ export default async function TodayPage() {
           {mainPanels.map(renderPanel)}
         </div>
         <div className="mt-9 lg:mt-0 lg:sticky lg:top-[76px] [&>section+section]:mt-6">
-          {railPanels.map(renderPanel)}
+          {railNodes}
         </div>
       </div>
 

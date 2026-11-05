@@ -24,16 +24,18 @@ export function PanelFrame({
   eyebrow,
   action,
   headerGap = 'mb-3',
+  className = '',
   children,
 }: {
   eyebrow: React.ReactNode;
   action?: React.ReactNode;
   // Tailwind margin class between header and content (per-panel rhythm).
   headerGap?: string;
+  className?: string;
   children: React.ReactNode;
 }) {
   return (
-    <section className="px-5 lg:px-0">
+    <section className={`px-5 lg:px-0 ${className}`}>
       <div className={`flex items-baseline justify-between ${headerGap}`}>
         <div className="eyebrow">{eyebrow}</div>
         {action}
