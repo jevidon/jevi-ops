@@ -4,7 +4,7 @@ import type { FastifyInstance } from 'fastify';
 import { buildServer } from '../src/server.js';
 import { signSession } from '../src/lib/jwt.js';
 import { getDb } from '../src/lib/db.js';
-import { projects, stewardship_domains, tasks } from '../src/db/schema.js';
+import { milestones, projects, stewardship_domains, tasks } from '../src/db/schema.js';
 import { INBOX_DOMAIN_ID } from '@jevi-ops/shared';
 
 let app: FastifyInstance, token: string;
@@ -22,7 +22,8 @@ async function request(base: Record<string, unknown>, patch: Record<string, unkn
 describe('local workspace', () => {
   it('includes empty domains and projects and all tasks, behind authentication', async () => {
     expect((await app.inject({ method: 'GET', url: '/api/local-workspace' })).statusCode).toBe(401);
-    const [domain] = await getDb().insert(stewardship_domains).values({ name: `Empty ${randomUUID()}` }).returning();
+    // No full UUID in the name: domains outlive this file, and the parser test asserts its context carries none.
+    const [domain] = await getDb().insert(stewardship_domains).values({ name: `Empty ${randomUUID().slice(0, 8)}` }).returning();
     const [project] = await getDb().insert(projects).values({ name: 'Empty project', domain_id: domain!.id }).returning();
     await getDb().insert(tasks).values(Array.from({ length: 503 }, (_, i) => ({ title: `Snapshot ${i}`, domain_id: INBOX_DOMAIN_ID })));
     // Done tasks ride along only inside the recent window; older history stays server-side.
@@ -48,6 +49,26 @@ describe('local workspace', () => {
     // The Domains board rides in the same consistent snapshot.
     expect(Array.isArray(body.work.domains)).toBe(true);
     expect(body.work.domains.some((d: { id: string }) => d.id === domain!.id)).toBe(true);
+  });
+  it('carries milestones and every subtask of a live parent, however old', async () => {
+    const [project] = await getDb().insert(projects).values({ name: `Packing ${randomUUID()}`, domain_id: INBOX_DOMAIN_ID }).returning();
+    const [milestone] = await getDb().insert(milestones).values({ project_id: project!.id, title: 'Gear', weight: 2, position: 1 }).returning();
+    const stale = new Date(Date.now() - 45 * 86_400_000).toISOString();
+    const [liveParent, doneParent] = await getDb().insert(tasks).values([
+      { title: 'Packing: Tech', domain_id: INBOX_DOMAIN_ID, project_id: project!.id, milestone_id: milestone!.id },
+      { title: 'Packing: Old trip', domain_id: INBOX_DOMAIN_ID, project_id: project!.id, status: 'done', completed_at: stale },
+    ]).returning();
+    await getDb().insert(tasks).values([
+      { title: 'Old packed charger', domain_id: INBOX_DOMAIN_ID, project_id: project!.id, parent_task_id: liveParent!.id, status: 'done', completed_at: stale },
+      { title: 'Old packed under done parent', domain_id: INBOX_DOMAIN_ID, project_id: project!.id, parent_task_id: doneParent!.id, status: 'done', completed_at: stale },
+    ]);
+    const body = (await app.inject({ method: 'GET', url: '/api/local-workspace', headers: headers() })).json();
+    expect(body.milestones.find((m: { id: string }) => m.id === milestone!.id)).toMatchObject({ project_id: project!.id, title: 'Gear', weight: 2, position: 1, status: 'open' });
+    const titles = body.tasks.map((t: { title: string }) => t.title);
+    expect(body.tasks.find((t: { id: string }) => t.id === liveParent!.id).milestone_id).toBe(milestone!.id);
+    expect(titles).toContain('Old packed charger');
+    expect(titles).not.toContain('Old packed under done parent');
+    expect(titles).not.toContain('Packing: Old trip');
   });
   it('merges independent fields and safely replays after a lost response', async () => {
     const base = await create();

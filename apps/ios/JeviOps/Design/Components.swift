@@ -392,6 +392,18 @@ enum DueLabel {
         return Calendar(identifier: .gregorian).dateComponents([.day], from: from, to: to).day
     }
 
+    /// A calendar date `days` after `iso`, both YYYY-MM-DD.
+    static func shift(_ iso: String, days: Int) -> String? {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!  // the dates parse at UTC midnight; a DST jump must not shift the day
+        guard let from = day(iso), let to = calendar.date(byAdding: .day, value: days, to: from) else { return nil }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: to)
+    }
+
     private static func day(_ iso: String) -> Date? {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
