@@ -1,8 +1,10 @@
 import type { FastifyPluginAsync } from 'fastify';
+import { mergePanelOrder } from '@jevi-ops/shared';
 import { and, asc, count, desc, eq, gte, inArray, isNull, lt, lte, or } from 'drizzle-orm';
 import { getAppSettings, getAppTz } from '../lib/app-settings.js';
 import { computeDomainCadences, type CadenceRow } from '../lib/cadence.js';
 import { getDb } from '../lib/db.js';
+import { buildRecentActivity } from '../lib/recent-activity.js';
 import { addDays, dayWindowUtc, todayInTz } from '../lib/tz.js';
 import {
   calendar_events,
@@ -69,6 +71,29 @@ interface LatestQuote {
   href: string;
 }
 
+export type RecentActivityKind =
+  | 'task_added' | 'task_captured' | 'task_completed' | 'task_waiting' | 'content_added';
+
+export interface RecentActivityEntry {
+  id: string;
+  kind: RecentActivityKind;
+  label: string;
+  title: string;
+  href: string;
+  location: { label: string; inbox: boolean };
+  detail: string | null;
+  at: string;
+  day: string;
+  day_label: string;
+  time_label: string | null;
+}
+
+export interface RecentActivityPayload {
+  window_days: number;
+  entries: RecentActivityEntry[];
+  truncated: boolean;
+}
+
 interface BriefingPayload {
   inbox_triage_count: number;
   brief_lines: BriefLine[];
@@ -121,6 +146,7 @@ function cadenceRowToBriefLine(row: CadenceRow): BriefLine | null {
 const PANEL_REGISTRY: Array<{ id: string; column: 'main' | 'rail'; defaultEnabled: boolean; moduleFlag?: 'health_module_enabled' | 'routines_module_enabled' }> = [
   { id: 'frame', column: 'main', defaultEnabled: true },
   { id: 'weather', column: 'main', defaultEnabled: true },
+  { id: 'recent-activity', column: 'main', defaultEnabled: true },
   { id: 'domain-pulse', column: 'main', defaultEnabled: true },
   { id: 'silent-clients', column: 'main', defaultEnabled: true },
   { id: 'attention', column: 'main', defaultEnabled: true },
@@ -138,19 +164,10 @@ function mergePanels(
   flags: { health_module_enabled: boolean; routines_module_enabled: boolean },
 ) {
   const byId = new Map(PANEL_REGISTRY.map((p) => [p.id, p]));
-  const out: Array<{ id: string; column: 'main' | 'rail'; enabled: boolean }> = [];
-  for (const e of stored ?? []) {
-    const def = byId.get(e.id);
-    if (def && !out.some((x) => x.id === def.id)) {
-      out.push({ id: def.id, column: def.column, enabled: e.enabled && (!def.moduleFlag || flags[def.moduleFlag]) });
-    }
-  }
-  for (const p of PANEL_REGISTRY) {
-    if (!out.some((x) => x.id === p.id)) {
-      out.push({ id: p.id, column: p.column, enabled: p.defaultEnabled && (!p.moduleFlag || flags[p.moduleFlag]) });
-    }
-  }
-  return out;
+  return mergePanelOrder(stored, PANEL_REGISTRY).map(({ id, enabled }) => {
+    const def = byId.get(id)!;
+    return { id, column: def.column, enabled: enabled && (!def.moduleFlag || flags[def.moduleFlag]) };
+  });
 }
 
 function mastheadDate(tz: string): string {
@@ -186,6 +203,8 @@ interface TaskRow { id: string; status: string; due_date: string | null; top3_fo
 
 export const briefingRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', app.requireAuth);
+
+  app.get('/api/briefing/activity', async () => buildRecentActivity(getDb(), await getAppTz()));
 
   app.get('/api/briefing/today', async () => {
     const db = getDb();

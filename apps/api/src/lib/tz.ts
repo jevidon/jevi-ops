@@ -56,7 +56,17 @@ export function localWallTimeIso(
 
 // The UTC ISO instant of 00:00 local time on the given local date.
 export function startOfLocalDayIso(localDate: string, tz: string): string {
-  return localWallTimeIso(localDate, 0, 0, tz);
+  // The offset at UTC midnight can differ from the offset at local
+  // midnight on a clock-change day. Sample both sides of local midnight,
+  // choosing the earlier occurrence if the clock repeats midnight.
+  const nominal = Date.parse(`${localDate}T00:00:00Z`);
+  const dayMs = 86_400_000;
+  const before = nominal - getTzOffsetMinutes(new Date(nominal - dayMs), tz) * 60_000;
+  const after = nominal - getTzOffsetMinutes(new Date(nominal + dayMs), tz) * 60_000;
+  const earlier = new Date(Math.min(before, after));
+  return formatInTz(earlier, tz) === localDate
+    ? earlier.toISOString()
+    : new Date(Math.max(before, after)).toISOString();
 }
 
 // The UTC instants bounding the app-tz calendar day [start, end): local

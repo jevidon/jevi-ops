@@ -1851,8 +1851,32 @@ export interface AgendaPayload {
   untimed_tasks: AgendaTask[];
 }
 
+export type RecentActivityKind =
+  | 'task_added' | 'task_captured' | 'task_completed' | 'task_waiting' | 'content_added';
+
+export interface RecentActivityEntry {
+  id: string;
+  kind: RecentActivityKind;
+  label: string;
+  title: string;
+  href: string;
+  location: { label: string; inbox: boolean };
+  detail: string | null;
+  at: string;
+  day: string;
+  day_label: string;
+  time_label: string | null;
+}
+
+export interface RecentActivityPayload {
+  window_days: number;
+  entries: RecentActivityEntry[];
+  truncated: boolean;
+}
+
 export const briefingApi = {
   today: () => api.get<BriefingPayload>('/api/briefing/today'),
+  activity: () => api.get<RecentActivityPayload>('/api/briefing/activity'),
   domains: () => api.get<{ domains: CadenceRow[] }>('/api/briefing/domains'),
   agenda: () => api.get<AgendaPayload>('/api/briefing/agenda'),
 };

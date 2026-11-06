@@ -4,11 +4,12 @@ import type {
   ResurfacingItem,
   RoutineListItem,
 } from '@/lib/api';
-import type { Task } from '@jevi-ops/shared';
+import { mergePanelOrder, type Task } from '@jevi-ops/shared';
 import type { FeatureFlag } from '@/lib/app-settings';
 
 import { FramePanel } from './panels/frame';
 import { WeatherPanel } from './panels/weather';
+import { RecentActivityPanel } from './panels/recent-activity';
 import { DomainPulsePanel } from './panels/domain-pulse';
 import { SilentClientsPanel } from './panels/silent-clients';
 import { AttentionPanel } from './panels/attention';
@@ -34,6 +35,7 @@ import { HealthPanel } from './panels/health';
 export type PanelId =
   | 'frame'
   | 'weather'
+  | 'recent-activity'
   | 'domain-pulse'
   | 'pinned'
   | 'silent-clients'
@@ -100,6 +102,14 @@ export const PANEL_REGISTRY: PanelDef[] = [
     column: 'main',
     defaultEnabled: true,
     Panel: WeatherPanel,
+  },
+  {
+    id: 'recent-activity',
+    label: 'Recent activity',
+    description: 'What you added, captured, finished or set waiting in the last week, plus new content, newest first. On a phone it sits after Pinned and Timeline.',
+    column: 'main',
+    defaultEnabled: true,
+    Panel: RecentActivityPanel,
   },
   {
     id: 'domain-pulse',
@@ -200,24 +210,13 @@ export interface PanelConfigEntry {
   enabled: boolean;
 }
 
-// Resolve stored config against the registry: drop retired ids, append any
-// panel the stored list doesn't know (new panels ship enabled-per-default
-// with zero data migration). Null/absent config → pure registry defaults.
+// Resolve stored config against the registry: drop retired ids and insert new
+// panels after their registry predecessor. Null/absent config uses registry defaults.
 // Used by BOTH the page and the Settings form so they can never disagree.
 export function mergePanelConfig(
   stored: Array<{ id: string; enabled: boolean }> | null | undefined,
 ): PanelConfigEntry[] {
-  const out: PanelConfigEntry[] = [];
-  for (const e of stored ?? []) {
-    const def = BY_ID.get(e.id as PanelId);
-    if (def && !out.some((x) => x.id === def.id)) {
-      out.push({ id: def.id, enabled: e.enabled });
-    }
-  }
-  for (const p of PANEL_REGISTRY) {
-    if (!out.some((x) => x.id === p.id)) out.push({ id: p.id, enabled: p.defaultEnabled });
-  }
-  return out;
+  return mergePanelOrder(stored, PANEL_REGISTRY);
 }
 
 // The panels to render for one column, in config order, honoring enabled

@@ -27,7 +27,7 @@ describe('agenda bundle', () => {
     expect(b.today).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     // Panels resolve from the registry in order, module-gated.
     expect(b.panels.map((p: { id: string }) => p.id)).toEqual([
-      'frame', 'weather', 'domain-pulse', 'silent-clients', 'attention', 'reflection', 'latest-quote', 'pinned', 'agenda', 'doing', 'health', 'routines',
+      'frame', 'weather', 'recent-activity', 'domain-pulse', 'silent-clients', 'attention', 'reflection', 'latest-quote', 'pinned', 'agenda', 'doing', 'health', 'routines',
     ]);
     expect(b.panels.find((p: { id: string }) => p.id === 'health').enabled).toBe(false);
     // Rail: Top 3 first, then overdue.
@@ -46,5 +46,28 @@ describe('agenda bundle', () => {
       'agenda_data_url', 'agenda_image_url', 'health_module_enabled', 'maintenance_module_enabled', 'routines_module_enabled', 'timezone',
     ]);
     expect(JSON.stringify(b)).not.toContain('llm_api_key');
+  });
+
+  it('inserts Recent activity immediately after Weather in a saved panel config', async () => {
+    const patch = (briefing_panels: Array<{ id: string; enabled: boolean }> | null) => app.inject({
+      method: 'PATCH', url: '/api/settings/app', headers: headers(), payload: { briefing_panels },
+    });
+    const stored = [
+      { id: 'domain-pulse', enabled: true },
+      { id: 'weather', enabled: false },
+      { id: 'doing', enabled: true },
+    ];
+    try {
+      expect((await patch(stored)).statusCode).toBe(200);
+      const response = await app.inject({ method: 'GET', url: '/api/briefing/bundle', headers: headers() });
+      expect(response.statusCode).toBe(200);
+      const { panels } = response.json<{ panels: Array<{ id: string; column: string; enabled: boolean }> }>();
+      const weather = panels.findIndex((panel) => panel.id === 'weather');
+      expect(panels.findIndex((panel) => panel.id === 'domain-pulse')).toBeLessThan(weather);
+      expect(panels[weather]).toMatchObject({ enabled: false });
+      expect(panels[weather + 1]).toEqual({ id: 'recent-activity', column: 'main', enabled: true });
+    } finally {
+      expect((await patch(null)).statusCode).toBe(200);
+    }
   });
 });

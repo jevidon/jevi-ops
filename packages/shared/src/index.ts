@@ -6,3 +6,4 @@ export * from './maintenance.js';
 export * from './routine-stats.js';
 export * from './illustration.js';
 export * from './urgency.js';
+export * from './panel-order.js';
