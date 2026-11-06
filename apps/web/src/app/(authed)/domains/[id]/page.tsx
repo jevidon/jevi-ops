@@ -17,7 +17,6 @@ import { EditDomainForm } from './edit-domain-form';
 import { CadenceEditor } from './cadence-editor';
 import { MarkShipped } from './mark-shipped';
 import { IllustrationControls } from './illustration-controls';
-import { ProjectQuickCreate } from './quick-create';
 import { AssignAsset } from './assign-asset';
 import { DocPanel } from '@/components/doc/DocPanel';
 import { DomainIllustration } from '../domain-illustration';
@@ -77,10 +76,8 @@ const CADENCE_RULE_SHORT: Record<string, string> = {
 // /domains/[id] — domain detail (Detail Pages v2 adoption, Aug 2026). Same
 // anatomy as the project page: header band (surface bg, actions at right,
 // config behind the Edit drawer) → computed stat strip → two-column read
-// layout. The main column is the Work page's domain-section view — project
-// cards + content rows off the same server-computed /work payload. No raw
-// task list: task-level work is reached through the project cards (or /tasks);
-// only Inbox renders its tasks, because triage IS that page.
+// layout. The main column shows project cards and content from the Work
+// payload, followed by open and waiting tasks assigned directly to the domain.
 //
 // System domains (Inbox) render a streamlined triage-oriented view: no
 // edit drawer (the API rejects identity changes on system domains anyway),
@@ -190,6 +187,8 @@ export default async function DomainDetailPage({
     .sort((a, b) => a.name.localeCompare(b.name));
 
   const isInbox = domain.is_system === true;
+  const domainLevelTasks = [...openTasks, ...waitingTasks].filter((task) => task.project_id == null);
+  const tasksFailed = tasksRes.status === 'rejected' || waitingRes.status === 'rejected';
   const color = domainColor(domain.name);
 
   // Rollup + urgency from the work payload when the domain rides in it;
@@ -243,7 +242,7 @@ export default async function DomainDetailPage({
               {/* Inbox is a system domain — pinning it would be noise. */}
               <PinButton targetType="domain" targetId={domain.id} path={`/domains/${domain.id}`} />
               <ActionButton href={`/maintenance/assets?domain_id=${domain.id}`}>＋ Asset</ActionButton>
-              <ActionButton href={`/projects/new?domain_id=${domain.id}`}>＋ Project</ActionButton>
+              <ActionButton href={`/projects/new?domain_id=${domain.id}`}>＋ Project/Area</ActionButton>
               <ActionButton href={`/tasks/new?domain_id=${domain.id}&from=/domains/${domain.id}`}>＋ Task</ActionButton>
               <EditDrawer title="Edit domain">
                 <DomainDrawerBody domain={domain} cadence={cadence} advanced={advanced} tz={tz} />
@@ -358,35 +357,24 @@ export default async function DomainDetailPage({
                     {work ? 'No projects or content in motion.' : 'Work rollup unavailable.'}
                   </p>
                 )}
-                {/* Quick create — name + kind straight into this domain; the
-                    action redirects to the new project's page. */}
-                <div className="mt-4 pt-3 border-t border-line/40 flex flex-wrap items-center justify-between gap-3">
-                  <div className="flex-1 min-w-[240px]">
-                    <ProjectQuickCreate domainId={domain.id} />
-                  </div>
-                  <Link
-                    href={`/projects/new?domain_id=${domain.id}`}
-                    className="font-mono text-[10px] uppercase tracking-wider text-accent hover:text-ink transition-colors shrink-0"
-                  >
-                    Full editor →
-                  </Link>
-                </div>
+              </DetailSection>
+              <DetailSection label="Direct tasks" count={tasksFailed ? undefined : domainLevelTasks.length}>
+                {tasksFailed && (
+                  <p className="font-sans text-[13px] text-ink-3 italic py-1">Couldn&rsquo;t load all direct tasks.</p>
+                )}
+                {!tasksFailed && domainLevelTasks.length === 0 && (
+                  <p className="font-sans text-[13px] text-ink-3 italic py-1">No open or waiting direct tasks.</p>
+                )}
+                {domainLevelTasks.map((task) => <TaskItem key={task.id} task={task} showStar={false} />)}
               </DetailSection>
               </>
             )}
 
-            {!isInbox && domain.task_workflow && <DetailSection label="Direct tasks">
-              {[...openTasks, ...waitingTasks].filter(t => !t.project_id).map(t => <TaskItem key={t.id} task={t} showStar={false} />)}
-              <Link href={`/tasks/new?domain_id=${domain.id}`} className="text-[12px] underline">Add task</Link>
-            </DetailSection>}
             {domain.task_workflow && satisfiedTasks.length > 0 && <DetailSection label="Satisfied">
               {satisfiedTasks.map(t => <TaskItem key={t.id} task={t} showStar={false} />)}
             </DetailSection>}
 
-            {/* Task lists render only for Inbox — triage IS the page there.
-                Regular domains stopped carrying the raw task list (Aug 2026):
-                project-bound work is reached through the cards above, and the
-                full ledger lives on /tasks. */}
+            {/* Inbox triage shows both direct and project-grouped tasks. */}
             {isInbox && (
             <DetailSection label="Tasks" count={taskCount}>
               {openTasks.length === 0 ? (
