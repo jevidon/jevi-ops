@@ -93,7 +93,9 @@ const viewportBase: Viewport = {
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const pref = await themePref();
   return (
-    <html lang="en" data-theme={pref ?? undefined}>
+    // Chrome iOS injects __gCrRemoteFrameToken on <html> before hydration.
+    // This is shallow: mismatches in the body and its children still report.
+    <html lang="en" data-theme={pref ?? undefined} suppressHydrationWarning>
       <head>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />

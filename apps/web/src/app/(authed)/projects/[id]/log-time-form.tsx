@@ -1,5 +1,6 @@
 'use client';
 
+import { browserAutofillHydrationProps } from '@/lib/browser-autofill-hydration';
 import { useActionState, useEffect, useRef, useState } from 'react';
 import { addActivityAction, type SaveResult } from './activity-actions';
 import { DateTimeInput } from '@/components/DateTimeInput';
@@ -31,7 +32,7 @@ export function LogTimeForm({ projectId }: { projectId: string }) {
   }, [state]);
 
   return (
-    <form action={formAction} className="mb-4">
+    <form {...browserAutofillHydrationProps} action={formAction} className="mb-4">
       <input type="hidden" name="project_id" value={projectId} />
       <input type="hidden" name="kind" value={kind} />
 
@@ -60,6 +61,7 @@ export function LogTimeForm({ projectId }: { projectId: string }) {
 
       <div className="flex flex-wrap gap-2">
         <input
+          {...browserAutofillHydrationProps}
           ref={entryRef}
           type="text"
           name="entry"
@@ -73,6 +75,7 @@ export function LogTimeForm({ projectId }: { projectId: string }) {
             you can't accidentally tie hours to a win/event. */}
         {kind === 'work' && (
           <input
+            {...browserAutofillHydrationProps}
             type="text"
             name="hours"
             // Free-form so the activity-action's parseHours can accept any

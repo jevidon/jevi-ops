@@ -1,5 +1,6 @@
 'use client';
 
+import { browserAutofillHydrationProps } from '@/lib/browser-autofill-hydration';
 import { useActionState, useEffect, useRef, useState } from 'react';
 import { useFormStatus } from 'react-dom';
 import { quickAddTaskAction, type QuickAddResult } from './quick-add-task-action';
@@ -70,7 +71,7 @@ export function QuickAddTask({
   return (
     // basis-full drops the open form onto its own line inside a wrapping
     // footer row on narrow screens; ≥sm it rides inline and takes the slack.
-    <form ref={formRef} action={formAction} className="flex-1 basis-full sm:basis-auto min-w-0">
+    <form {...browserAutofillHydrationProps} ref={formRef} action={formAction} className="flex-1 basis-full sm:basis-auto min-w-0">
       <div className="flex items-center gap-2">
         {/* Fixed targets ride as hidden fields; the Work variant swaps them
             for the select's choice. */}
@@ -86,6 +87,7 @@ export function QuickAddTask({
           </>
         )}
         <input
+          {...browserAutofillHydrationProps}
           ref={inputRef}
           name="title"
           placeholder={placeholder}
@@ -98,6 +100,7 @@ export function QuickAddTask({
         />
         {hasSelect && (
           <select
+            {...browserAutofillHydrationProps}
             value={target}
             onChange={(e) => setTarget(e.target.value)}
             aria-label="Add into"

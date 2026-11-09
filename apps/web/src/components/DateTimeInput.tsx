@@ -1,5 +1,6 @@
 'use client';
 
+import { browserAutofillHydrationProps } from '@/lib/browser-autofill-hydration';
 import { useEffect, useState } from 'react';
 import { parseDate } from './DateInput';
 import { parseTime } from './TimeInput';
@@ -79,6 +80,7 @@ export function DateTimeInput({
           date/time in the field, which reads as a phantom value. Value
           matches the datetime-local format "YYYY-MM-DDTHH:MM". */}
       <input
+        {...browserAutofillHydrationProps}
         type="datetime-local"
         value={normalized}
         onChange={(e) => {
@@ -95,6 +97,7 @@ export function DateTimeInput({
       {/* Text input — the only field on desktop, typing fallback on
           mobile ("5/23/2026 5:30 PM" instead of two spinners). */}
       <input
+        {...browserAutofillHydrationProps}
         type="text"
         value={text}
         onChange={(e) => setText(e.target.value)}
