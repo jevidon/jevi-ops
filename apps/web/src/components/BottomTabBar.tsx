@@ -197,7 +197,8 @@ export function BottomTabBar({
               <span className="font-mono text-[9px] uppercase tracking-[0.08em] text-ink-3 truncate">
                 {email}
               </span>
-              <form action={signOutAction}>
+              {/* Same Chrome iOS autofill allowance as the desktop rail. */}
+              <form action={signOutAction} suppressHydrationWarning>
                 <button
                   type="submit"
                   className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3 hover:text-accent transition-colors shrink-0"

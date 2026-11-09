@@ -240,7 +240,10 @@ export function IconRail({
               <span className="font-mono text-[9px] uppercase tracking-[0.08em] text-ink-3 truncate">
                 {email}
               </span>
-              <form action={signOutAction}>
+              {/* Chrome iOS autofill adds __gcruniqueid before hydration, even
+                  while this rail is hidden on mobile. Tolerate attributes on
+                  this form only; child mismatches must still be reported. */}
+              <form action={signOutAction} suppressHydrationWarning>
                 <button
                   type="submit"
                   className="font-mono text-[9px] uppercase tracking-[0.08em] text-ink-3 hover:text-accent transition-colors shrink-0"
