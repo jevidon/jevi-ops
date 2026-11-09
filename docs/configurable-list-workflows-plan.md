@@ -96,7 +96,7 @@ Ordinary task completion must not fabricate a purchase record. When purchase tra
 - Clear a need without claiming a purchase.
 - Correct/void a mistaken purchase and mark needed when appropriate; do not create a generic compensating-event system.
 
-Reuse the transaction and command-error conventions in `lib/maintenance-tx.ts` and `lib/command-error.ts`. Reuse `operation_receipts` for commands whose retries would otherwise duplicate purchase records. Preserve a stable purchase identity suitable for later finance links; assess reuse of PR #21's `shopping_purchases` before designing a competing identity.
+Reuse the transaction and command-error conventions in `lib/maintenance-tx.ts` and `lib/command-error.ts`. Reuse `operation_receipts` for commands whose retries would otherwise duplicate purchase records. Preserve a stable purchase identity suitable for later finance links. The shopping module's `shopping_purchases` table was dropped in migration 0055 and cannot be reused; design the identity fresh.
 
 Do not enable this capability on maintenance-generated tasks; use an ordinary procurement task or subtask for parts. Initially defer combining purchase requirements with existing task recurrence until visibility and schedule ownership are defined. Reject that combination clearly in both directions.
 
@@ -112,7 +112,7 @@ Groceries represent acquisition needs and availability. Routines represent repea
 
 ## 5. Later work to preserve from the old shopping spec
 
-The existing shopping PR is not fully superseded by custom statuses alone. Preserve or explicitly retire each of these requirements before closing it as replaced:
+The shopping module (PR #21) was closed without merge and its tables removed in migration 0055. Preserve or explicitly retire each of these requirements before declaring them replaced:
 
 - Purchase history and corrections.
 - Recurrence/replenishment, including purchase-relative versus calendar-based intervals.
@@ -136,8 +136,8 @@ Delivery order:
 
 Migration precautions:
 
-- Earlier read-only inspection found zero-row legacy shopping tables and overlapping migration names in the owner's development database. That observation was from the old capture checkout, not proof of the current deployment state.
-- Before deployment, inspect the target migration tracker. Apply the additive workflow migration through the normal migration process. Do not drop shopping tables or rewrite migration history as part of this feature.
+- The legacy shopping tables (`shopping_lists`, `shopping_items`, `shopping_purchases`) were dropped by migration `0055_drop_shopping_module.sql`. They never had a tracked creating migration; do not reintroduce them, and do not rewrite migration history to do so.
+- Before deployment, inspect the target migration tracker. Apply the additive workflow migration through the normal migration process.
 - Test both a fresh bootstrap and the populated 0047-to-current upgrade, including a second application of every migration.
 
 First-delivery acceptance:
