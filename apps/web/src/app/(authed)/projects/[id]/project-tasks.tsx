@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, Fragment, useContext, useState, type ReactNode } from 'react';
+import { createContext, Fragment, useContext, useEffect, useId, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react';
 import Link from 'next/link';
 import { effectiveWorkflowStatus, type Task } from '@jevi-ops/shared';
 import type { Milestone } from '@/lib/api';
@@ -19,7 +19,7 @@ type ProjectTasksProps = {
 };
 type FilterContext = ProjectTasksProps & {
   selected: string[];
-  setSelected: (ids: string[]) => void;
+  setSelected: Dispatch<SetStateAction<string[]>>;
   options: { id: string; label: string }[];
   matches: (task: Task) => boolean;
 };
@@ -57,26 +57,43 @@ function useProjectTasks() {
 
 function StatusFilter() {
   const { selected, setSelected, options, tasks, matches } = useProjectTasks();
+  const [ready, setReady] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const panelId = useId();
+  // Native details/checkboxes respond before hydration. Keep the filter closed
+  // until React can update both the selection and the task list together.
+  useEffect(() => setReady(true), []);
+  const setChecked = (id: string, checked: boolean) => setSelected(previous => {
+    if (previous.includes(id) === checked) return previous;
+    return checked ? [...previous, id] : previous.filter(value => value !== id);
+  });
   return <div className="flex flex-wrap items-center gap-3">
     <span className="eyebrow">Filter by</span>
-    <details className="relative" onKeyDown={event => {
+    <div className="relative" onKeyDown={event => {
       if (event.key === 'Escape') {
-        event.currentTarget.open = false;
-        event.currentTarget.querySelector('summary')?.focus();
+        setExpanded(false);
+        trigger.current?.focus();
       }
     }}>
-      <summary className="cursor-pointer rounded border border-line bg-surface px-2 py-1 font-mono text-[11px] text-ink">
-        Status · {selected.length ? `${selected.length} selected` : 'All'}
-      </summary>
-      <fieldset className="absolute left-0 z-20 mt-1 max-h-72 w-56 overflow-y-auto rounded border border-line bg-surface p-2 shadow-lg">
+      <button ref={trigger} type="button" disabled={!ready} aria-expanded={expanded} aria-controls={panelId}
+        onClick={() => setExpanded(value => !value)}
+        className="min-h-11 cursor-pointer rounded border border-line bg-surface px-2 py-1 font-mono text-[11px] text-ink disabled:cursor-wait disabled:opacity-60">
+        Status · {!ready ? 'Loading…' : selected.length ? `${selected.length} selected` : 'All'}
+        <span aria-hidden className="ml-2">{expanded ? '▾' : '▸'}</span>
+      </button>
+      {expanded && <fieldset id={panelId} className="absolute left-0 z-20 mt-1 max-h-72 w-56 overflow-y-auto rounded border border-line bg-surface p-2 shadow-lg">
         <legend className="sr-only">Filter tasks by status</legend>
-        {options.map(option => <label key={option.id} className="flex cursor-pointer items-center gap-2 rounded px-2 py-2 font-sans text-[13px] text-ink hover:bg-surface-2">
+        {options.map(option => <label key={option.id} className="flex min-h-11 cursor-pointer items-center gap-2 rounded px-2 py-2 font-sans text-[13px] text-ink hover:bg-surface-2">
           <input type="checkbox" checked={selected.includes(option.id)}
-            onChange={event => setSelected(event.target.checked ? [...selected, option.id] : selected.filter(id => id !== option.id))} />
+            // Handle native input as well as React's click-based checkbox
+            // change event. Applying the checked value twice is harmless.
+            onInput={event => setChecked(option.id, event.currentTarget.checked)}
+            onChange={event => setChecked(option.id, event.currentTarget.checked)} />
           {option.label}
         </label>)}
-      </fieldset>
-    </details>
+      </fieldset>}
+    </div>
     {selected.length > 0 && <>
       <button type="button" onClick={() => setSelected([])} className="font-sans text-[12px] text-ink-3 underline hover:text-ink">Clear filter</button>
       <span role="status" className="font-mono text-[10px] text-ink-3">{tasks.filter(matches).length} of {tasks.length} tasks</span>

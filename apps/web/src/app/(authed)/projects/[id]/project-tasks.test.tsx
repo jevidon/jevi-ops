@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { renderToString } from 'react-dom/server';
+import { hydrateRoot } from 'react-dom/client';
 import type { Task, WorkflowRegistry } from '@jevi-ops/shared';
 import { TaskWorkflowsProvider } from '@/components/task-workflows/TaskWorkflows';
 import { ProjectTasksProvider, ProjectTaskList, ProjectCompletedTasks } from './project-tasks';
@@ -38,12 +41,79 @@ function view(items = tasks, groupMode: 'due' | 'milestone' = 'due', workflows =
   </TaskWorkflowsProvider>;
 }
 function select(label: string) {
-  const summary = screen.getByText(/^Status ·/);
-  summary.closest('details')!.open = true;
+  const trigger = screen.getByRole('button', { name: /^Status ·/ });
+  if (trigger.getAttribute('aria-expanded') === 'false') fireEvent.click(trigger);
   fireEvent.click(screen.getByRole('checkbox', { name: label }));
 }
 
 describe('project task status filtering', () => {
+  it('updates immediately from native checkbox input events without a synthetic change event', () => {
+    render(view());
+    fireEvent.click(screen.getByRole('button', { name: /^Status ·/ }));
+    const buy = screen.getByRole('checkbox', { name: 'Buy' }) as HTMLInputElement;
+    const asap = screen.getByRole('checkbox', { name: 'Buy ASAP' }) as HTMLInputElement;
+    fireEvent.input(buy, { target: { checked: true } });
+    expect(screen.getByText('Status · 1 selected')).toBeTruthy();
+    expect(screen.queryByText('Tent')).toBeNull();
+    expect(screen.queryByText('Batteries')).toBeNull();
+    fireEvent.input(asap, { target: { checked: true } });
+    // Some browsers deliver both input and change; the same value is idempotent.
+    fireEvent.input(asap, { target: { checked: true } });
+    fireEvent.change(asap, { target: { checked: true } });
+    expect(screen.getByText('Status · 2 selected')).toBeTruthy();
+    expect(screen.getByText('Milk')).toBeTruthy();
+    expect(screen.getByText('Batteries')).toBeTruthy();
+    expect(screen.getByRole('status').textContent).toBe('2 of 5 tasks');
+    fireEvent.input(buy, { target: { checked: false } });
+    expect(screen.queryByText('Milk')).toBeNull();
+    expect(screen.getByText('Status · 1 selected')).toBeTruthy();
+  });
+
+  it('prevents native-only selections before hydration, then filters on the first tap', async () => {
+    const user = userEvent.setup();
+    const container = document.createElement('div');
+    container.innerHTML = renderToString(view());
+    document.body.append(container);
+    let root: ReturnType<typeof hydrateRoot> | undefined;
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const trigger = within(container).getByRole('button', { name: /^Status ·/ }) as HTMLButtonElement;
+      expect(trigger.disabled).toBe(true);
+      await user.click(trigger);
+      expect(within(container).queryByRole('checkbox', { name: 'Buy' })).toBeNull();
+      await act(async () => { root = hydrateRoot(container, view()); });
+      expect(trigger.disabled).toBe(false);
+      await user.pointer([{ keys: '[TouchA>]', target: trigger }, { keys: '[/TouchA]' }]);
+      const buy = within(container).getByRole('checkbox', { name: 'Buy' }) as HTMLInputElement;
+      await user.pointer([
+        { keys: '[TouchA>]', target: within(container).getByText('Buy', { selector: 'label' }) },
+        { keys: '[/TouchA]' },
+      ]);
+      expect(buy.checked).toBe(true);
+      expect(within(container).getByText('Status · 1 selected')).toBeTruthy();
+      expect(within(container).queryByText('Tent')).toBeNull();
+      expect(within(container).getByText('Milk')).toBeTruthy();
+      await user.pointer([
+        { keys: '[TouchA>]', target: within(container).getByText('Buy ASAP', { selector: 'label' }) },
+        { keys: '[/TouchA]' },
+      ]);
+      expect(within(container).getByText('Status · 2 selected')).toBeTruthy();
+      expect(within(container).getByText('Batteries')).toBeTruthy();
+      expect(within(container).queryByText('Tent')).toBeNull();
+      await user.keyboard('{Escape}');
+      expect(trigger.getAttribute('aria-expanded')).toBe('false');
+      expect(document.activeElement).toBe(trigger);
+      await user.keyboard(' ');
+      expect(trigger.getAttribute('aria-expanded')).toBe('true');
+      expect((within(container).getByRole('checkbox', { name: 'Buy ASAP' }) as HTMLInputElement).checked).toBe(true);
+      expect(error).not.toHaveBeenCalled();
+    } finally {
+      if (root) await act(async () => root!.unmount());
+      container.remove();
+      error.mockRestore();
+    }
+  });
+
   it('combines distinct custom statuses with OR and clears back to all tasks', () => {
     render(view());
     select('Buy');
