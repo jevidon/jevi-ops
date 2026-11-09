@@ -13,8 +13,7 @@ import { PinButton } from '@/components/PinButton';
 import { projectsApi, domainsApi, peopleApi, ApiError, type ProjectDetail } from '@/lib/api';
 import { isToday, todayIsoDate } from '@/lib/today';
 import { getAppTimezone } from '@/lib/app-settings';
-import type { Task } from '@jevi-ops/shared';
-import type { Milestone } from '@/lib/api';
+import { ProjectTasksProvider, ProjectTaskList, ProjectCompletedTasks } from './project-tasks';
 import { ProjectForm } from '../project-form';
 import { MilestonesSection } from './milestones-section';
 import { ChecklistSection } from './checklist-section';
@@ -89,28 +88,9 @@ export default async function ProjectDetailPage({
   const overdueCount = openTasks.filter((t) => t.due_date && t.due_date < today).length;
   const dueTodayCount = openTasks.filter((t) => t.due_date === today).length;
 
-  // Subtasks fold under their parent (fork, one level deep): children whose
-  // parent is renderable in this list never sit flat — the parent row
-  // becomes a details-fold with the kids indented beneath it. Children of a
-  // parent outside this project's live pool (done, or another project) fall
-  // back to the loose list.
-  const childrenByParent = new Map<string, Task[]>();
-  for (const t of tasks) {
-    if (!t.parent_task_id) continue;
-    childrenByParent.set(t.parent_task_id, [...(childrenByParent.get(t.parent_task_id) ?? []), t]);
-  }
-  const liveIds = new Set([...openTasks, ...waitingTasks].map((t) => t.id));
-  const isFoldedChild = (t: Task) => t.parent_task_id != null && liveIds.has(t.parent_task_id);
-  const kidsOf = (t: Task) => childrenByParent.get(t.id) ?? [];
-  const parentIdsWithKids = new Set(childrenByParent.keys());
-
-  // Drill-in grouping (Addendum 08 §10) — folded children excluded; they
-  // render inside their parent's fold instead.
-  const livePool = [...openTasks, ...waitingTasks].filter((t) => !isFoldedChild(t));
   const defaultMode: 'milestone' | 'due' = !isRetainer && !isArea && milestones.length > 0 ? 'milestone' : 'due';
   const groupMode: 'milestone' | 'due' =
     groupParam === 'milestone' ? 'milestone' : groupParam === 'due' ? 'due' : defaultMode;
-  const taskGroups = groupMode === 'milestone' ? buildMilestoneGroups(livePool, milestones, parentIdsWithKids) : buildDueGroups(livePool, today, parentIdsWithKids);
 
   const hoursLogged = Number(project.hours_logged ?? 0);
   const quoted = project.quoted_hours != null ? Number(project.quoted_hours) : null;
@@ -271,6 +251,17 @@ export default async function ProjectDetailPage({
       </StatStrip>
       )}
 
+      <ProjectTasksProvider
+        key={project.id}
+        projectId={project.id}
+        tasks={tasks}
+        rows={Object.fromEntries(tasks.map(task => [task.id, <TaskItem key={task.id} task={task} showStar={false} showProject={false} />]))}
+        milestones={milestones}
+        today={today}
+        doneTodayIds={doneToday.map(task => task.id)}
+        groupMode={groupMode}
+        hasWorkflow={Boolean(project.task_workflow)}
+      >
       <DetailBody
         main={
           <>
@@ -301,32 +292,7 @@ export default async function ProjectDetailPage({
               <div className="mb-4">
                 <QuickAddTask projectId={project.id} placeholder="Quick add a task — just a title…" />
               </div>
-              {livePool.length === 0 ? (
-                <p className="font-sans text-[13px] text-ink-3 italic py-1">No open tasks.</p>
-              ) : (
-                <>
-                  <div className="mb-4 flex items-center gap-4">
-                    <span className="eyebrow">Group by</span>
-                    <GroupByLink projectId={project.id} mode="milestone" active={groupMode === 'milestone'} label="Milestone" />
-                    <GroupByLink projectId={project.id} mode="due" active={groupMode === 'due'} label="Due window" />
-                  </div>
-                  {taskGroups.map((g) => (
-                    <div key={g.key} className="mb-6">
-                      <div className="flex items-baseline gap-3 mb-2">
-                        <span className={`font-sans text-[14px] font-semibold ${g.muted ? 'text-ink-3' : 'text-ink'}`}>{g.title}</span>
-                        <span className={`font-mono text-[10px] uppercase tracking-wider ${g.accent ? 'text-accent' : 'text-ink-3'}`}>{g.meta}</span>
-                      </div>
-                      {g.tasks.map((t) =>
-                        kidsOf(t).length > 0 ? (
-                          <ParentFold key={t.id} parent={t} kids={kidsOf(t)} />
-                        ) : (
-                          <TaskItem key={t.id} task={t} showStar={false} showProject={false} />
-                        ),
-                      )}
-                    </div>
-                  ))}
-                </>
-              )}
+              <ProjectTaskList />
             </DetailSection>
 
             <section id="log-work" className="mt-8">
@@ -350,15 +316,7 @@ export default async function ProjectDetailPage({
               </DetailSection>
             </section>
 
-            {doneTasks.length > 0 && (
-              <details className="mt-8 group" open={Boolean(project.task_workflow)}>
-                <summary className="eyebrow pb-2 border-b border-line cursor-pointer list-none flex items-center justify-between hover:text-ink-2 transition-colors">
-                  <span>✓ {doneTasks.length} {project.task_workflow ? 'satisfied' : 'done'} {doneToday.length > 0 ? `(${doneToday.length} today)` : ''}</span>
-                  <span className="font-mono text-[10px] text-ink-3 transition-transform group-open:rotate-90" aria-hidden>▶</span>
-                </summary>
-                <div className="mt-3">{doneTasks.map((t) => (<TaskItem key={t.id} task={t} showStar={false} showProject={false} />))}</div>
-              </details>
-            )}
+            <ProjectCompletedTasks />
           </>
         }
         rail={
@@ -393,43 +351,8 @@ export default async function ProjectDetailPage({
           </>
         }
       />
+      </ProjectTasksProvider>
     </div>
-  );
-}
-
-// Parent task with live children — a details-fold (fork, one level deep).
-// The chip carries done/total; open kids render with live checkboxes.
-function ParentFold({ parent, kids }: { parent: Task; kids: Task[] }) {
-  const openKids = kids.filter((k) => k.status !== 'done');
-  const doneKidCount = kids.length - openKids.length;
-  return (
-    <details className="group border-b border-line">
-      <summary className="cursor-pointer list-none flex items-start gap-3 py-2">
-        <span
-          className="flex h-5 w-5 shrink-0 items-center justify-center pt-0.5 font-mono text-[10px] text-ink-3 transition-transform group-open:rotate-90"
-          aria-hidden
-        >
-          ▶
-        </span>
-        <Link
-          href={`/tasks/${parent.id}`}
-          className="flex-1 min-w-0 font-sans text-[14px] leading-snug text-ink hover:text-accent transition-colors pt-0.5"
-        >
-          {parent.title}
-        </Link>
-        <span className="shrink-0 mt-0.5 bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] tracking-wider text-ink-2">
-          {doneKidCount} / {kids.length}
-        </span>
-      </summary>
-      <div className="ml-[9px] border-l border-line-strong pl-4 pb-2">
-        {openKids.map((k) => (
-          <TaskItem key={k.id} task={k} showStar={false} showProject={false} />
-        ))}
-        {openKids.length === 0 && (
-          <p className="font-sans text-[13px] text-ink-3 italic py-1">All subtasks done.</p>
-        )}
-      </div>
-    </details>
   );
 }
 
@@ -470,61 +393,4 @@ function retainerCycle(anchorDay: number, todayYmd: string): { day: number; leng
   const next = Date.UTC(ny, nm - 1, nDay);
   const todayUTC = Date.UTC(y!, m! - 1, d!);
   return { day: Math.floor((todayUTC - start) / 86_400_000) + 1, length: Math.round((next - start) / 86_400_000) };
-}
-
-// ─── Drill-in grouping (Addendum 08 §10) ─────────────────────────────────────
-
-interface TaskGroup { key: string; title: string; meta: string; tasks: Task[]; muted?: boolean; accent?: boolean; }
-
-function sortPool(list: Task[], parentIds: Set<string> = new Set()): Task[] {
-  return [...list].sort((a, b) => {
-    // Parents carrying subtasks first: the fold rows read as sections, and
-    // scattered loose items below them are the real to-do surface.
-    const ap = parentIds.has(a.id) ? 0 : 1;
-    const bp = parentIds.has(b.id) ? 0 : 1;
-    if (ap !== bp) return ap - bp;
-    const aw = a.status === 'waiting' ? 1 : 0;
-    const bw = b.status === 'waiting' ? 1 : 0;
-    if (aw !== bw) return aw - bw;
-    return (a.due_date ?? '9999-99-99').localeCompare(b.due_date ?? '9999-99-99');
-  });
-}
-
-function buildMilestoneGroups(pool: Task[], milestones: Milestone[], parentIds: Set<string> = new Set()): TaskGroup[] {
-  const ordered = [...milestones].sort((a, b) => a.position - b.position);
-  const currentId = ordered.find((m) => m.status === 'open')?.id ?? null;
-  const groups: TaskGroup[] = [];
-  for (const m of ordered) {
-    const t = sortPool(pool.filter((x) => x.milestone_id === m.id), parentIds);
-    if (t.length === 0) continue;
-    const meta = m.status === 'done' ? `done · weight ${m.weight}` : m.id === currentId ? `in progress · weight ${m.weight}` : `weight ${m.weight}`;
-    groups.push({ key: m.id, title: m.title, meta, tasks: t, muted: m.status === 'done' });
-  }
-  const general = sortPool(pool.filter((t) => !t.milestone_id), parentIds);
-  if (general.length > 0) groups.push({ key: 'general', title: 'General', meta: 'no milestone', tasks: general });
-  return groups;
-}
-
-function buildDueGroups(pool: Task[], today: string, parentIds: Set<string> = new Set()): TaskGroup[] {
-  const plus7 = new Date(new Date(`${today}T00:00:00Z`).getTime() + 7 * 86_400_000).toISOString().slice(0, 10);
-  const open = pool.filter((t) => t.status === 'open');
-  const waiting = pool.filter((t) => t.status === 'waiting');
-  const buckets: TaskGroup[] = [
-    { key: 'overdue', title: 'Overdue', accent: true, tasks: open.filter((t) => t.due_date && t.due_date < today), meta: '' },
-    { key: 'today', title: 'Today', tasks: open.filter((t) => t.due_date === today), meta: '' },
-    { key: 'week', title: 'This week', tasks: open.filter((t) => t.due_date && t.due_date > today && t.due_date <= plus7), meta: '' },
-    { key: 'later', title: 'Later', tasks: open.filter((t) => t.due_date && t.due_date > plus7), meta: '' },
-    { key: 'undated', title: 'Undated', tasks: open.filter((t) => !t.due_date), meta: '' },
-    { key: 'waiting', title: 'Waiting', muted: true, tasks: waiting, meta: '' },
-  ].map((g) => ({ ...g, meta: String(g.tasks.length), tasks: sortPool(g.tasks, parentIds) }));
-  return buckets.filter((g) => g.tasks.length > 0);
-}
-
-function GroupByLink({ projectId, mode, active, label }: { projectId: string; mode: 'milestone' | 'due'; active: boolean; label: string }) {
-  return (
-    <Link href={`/projects/${projectId}?group=${mode}`} scroll={false}
-      className={`font-mono text-[11px] uppercase tracking-wider pb-0.5 transition-colors ${active ? 'text-ink border-b border-ink' : 'text-ink-3 hover:text-ink-2 border-b border-transparent'}`}>
-      {label}
-    </Link>
-  );
 }
