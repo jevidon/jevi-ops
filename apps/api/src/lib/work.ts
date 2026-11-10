@@ -9,7 +9,7 @@ import {
 import type { Db } from './db.js';
 import {
   activity_log, assets as assetsTable, attention_items, companies as companiesTable, content_items,
-  maintenance_items, people, projects as projectsTable, stewardship_domains, tasks as tasksTable,
+  maintenance_items, people, projects as projectsTable, stewardship_domains, tasks as tasksTable, task_templates,
 } from '../db/schema.js';
 import { getAppSettings } from './app-settings.js';
 import { latestReadingRowByAsset } from './meter-readings.js';
@@ -37,7 +37,7 @@ export async function buildWork(db: Db): Promise<WorkPayload> {
   const tz = settings.timezone;
   const today = todayInTz(tz);
 
-  const [domains, projects, tasks, content, children, attn, activity, ideasRow, assetRows, maintItems] = await Promise.all([
+  const [domains, projects, tasks, content, children, attn, activity, ideasRow, assetRows, maintItems, templatesRow] = await Promise.all([
     db.query.stewardship_domains.findMany({
       columns: { id: true, name: true, parked: true },
       where: and(eq(stewardship_domains.active, true), eq(stewardship_domains.is_system, false)),
@@ -101,6 +101,7 @@ export async function buildWork(db: Db): Promise<WorkPayload> {
       },
       where: and(eq(maintenance_items.active, true), isNotNull(maintenance_items.asset_id)),
     }),
+    db.select({ n: count() }).from(task_templates).then(rows => rows[0]),
   ]);
 
   // Latest (non-voided) reading per assigned asset, one query.
@@ -378,7 +379,7 @@ export async function buildWork(db: Db): Promise<WorkPayload> {
   });
   parked.sort((a, b) => a.name.localeCompare(b.name));
 
-  return { domains: active, parked, ideasCount: ideasRow?.n ?? 0 };
+  return { domains: active, parked, ideasCount: ideasRow?.n ?? 0, templatesCount: templatesRow?.n ?? 0 };
 }
 
 // ─── helpers ─────────────────────────────────────────────────────────────

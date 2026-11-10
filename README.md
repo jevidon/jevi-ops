@@ -11,6 +11,7 @@ A responsive web app and native iOS companion connect to a **Docker-containerize
 - **Capture while it's fresh.** Speak or type a thought, save a note, or create a task from one capture surface. Shortcuts and agents can send captures to the same system.
 - **See the day in context.** An adjustable daily agenda brings together your focus, calendar, tasks, routines and a passage from your library.
 - **Keep responsibilities connected.** Organize projects, content and tasks into domains. Keep people, household assets and maintenance records alongside the work they relate to.
+- **Reuse familiar task lists.** Save packing lists and other repeatable tasks as templates. From **Domains → Task templates**, create a named project with fresh tasks; editing a template only changes future projects. You can also use **Save as task template** on a project to preserve its task notes and subtasks without changing the original.
 - **Return to what matters.** Keep journals, notes, books and quotations in a searchable library, with selected entries resurfacing in the daily briefing.
 - **Keep going away from your server.** The iOS companion saves captures on the phone and queues supported task edits for later sync. Its latest synced workspace remains available offline.
 - **Run it on your terms.** Host the application and PostgreSQL database yourself, reach them through Tailscale, and configure your own AI services. Calendar, photo and notification integrations are optional.

@@ -14,6 +14,7 @@ import { ingestRoutes } from './routes/ingest.js';
 import { taskWorkflowRoutes } from './routes/task-workflows.js';
 import { taskRoutes } from './routes/tasks.js';
 import { projectRoutes } from './routes/projects.js';
+import { taskTemplateRoutes } from './routes/task-templates.js';
 import { domainRoutes } from './routes/domains.js';
 import { captureRoutes } from './routes/capture.js';
 import { captureProgramRoutes } from './routes/captures.js';
@@ -104,6 +105,7 @@ export async function buildServer() {
   await app.register(taskRoutes);
   await app.register(taskWorkflowRoutes);
   await app.register(projectRoutes);
+  await app.register(taskTemplateRoutes);
   await app.register(domainRoutes);
   await app.register(captureRoutes);
   await app.register(captureProgramRoutes);

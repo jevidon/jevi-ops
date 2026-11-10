@@ -22,6 +22,8 @@ const MIGRATIONS = [
   '0052_currency_visit_outcomes.sql',
   '0053_durable_capture.sql',
   '0054_task_workflows.sql',
+  '0055_drop_shopping_module.sql',
+  '0056_task_templates.sql',
 ].map((f) => resolve(ROOT, 'infrastructure/migrations', f));
 
 function upgradeUrl(): string {
@@ -172,7 +174,11 @@ describe('0047 → 0048 → 0049', () => {
     await expect(sql`insert into maintenance_logs (item_id, completed_on, source, event_key) values (${withLog!.id}, '2026-04-01', 'manual', 'a')`).rejects.toThrow();
 
     // ─── Again — every statement is idempotent ───────────────────────
+    // Templates are additive and survive repeated migrations unchanged.
+    const templateEntries = [{ key: 'e212f627-ad07-4e4d-9243-9f20ec11f286', title: 'Passport', notes: 'Check expiry', parent_key: null }];
+    const [template] = await sql`insert into task_templates (name, entries) values ('Packing', ${sql.json(templateEntries)}) returning id`;
     for (const m of MIGRATIONS) await sql.file(m);
+    expect((await sql`select name, entries, revision from task_templates where id = ${template!.id}`)[0]).toMatchObject({ name: 'Packing', entries: templateEntries, revision: 1 });
     expect((await sql`select data_space_id from app_settings where id = true`)[0]?.data_space_id).toBe(dataSpace!.data_space_id);
     expect((await sql`select count(*)::int as n from api_tokens where permission_profile = 'capture_client'`)[0]?.n).toBe(1);
     const [n] = await sql`select count(*)::int as n from maintenance_logs where item_id = ${seedOnly!.id}`;

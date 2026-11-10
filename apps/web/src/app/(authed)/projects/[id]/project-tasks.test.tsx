@@ -47,6 +47,18 @@ function select(label: string) {
 }
 
 describe('project task status filtering', () => {
+  it('currently renders only one subtask level, requiring the template editor depth limit', () => {
+    render(view([
+      task('Root', null),
+      task('Child', null, { parent_task_id: 'Root' }),
+      task('Grandchild', null, { parent_task_id: 'Child' }),
+    ], 'due', { scopes: [], presets: [] }));
+    const fold = screen.getByRole('link', { name: 'Root' }).closest('details')!;
+    fold.open = true;
+    expect(within(fold).getByText('Child')).toBeTruthy();
+    expect(screen.queryByText('Grandchild')).toBeNull();
+  });
+
   it('updates immediately from native checkbox input events without a synthetic change event', () => {
     render(view());
     fireEvent.click(screen.getByRole('button', { name: /^Status ·/ }));

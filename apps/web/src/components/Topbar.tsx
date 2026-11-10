@@ -19,6 +19,7 @@ const CRUMBS: Record<string, { label: string; sub?: string }> = {
   today: { label: 'Agenda' },
   work: { label: 'Domains' },
   tasks: { label: 'Tasks', sub: 'Everything open' },
+  'task-templates': { label: 'Task templates' },
   content: { label: 'Content', sub: 'Pipeline' },
   people: { label: 'People', sub: 'Relationships' },
   companies: { label: 'Companies', sub: 'CRM' },

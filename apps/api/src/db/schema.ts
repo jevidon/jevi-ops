@@ -1,8 +1,21 @@
-import type { TaskWorkflow } from '@jevi-ops/shared';
+import type { TaskWorkflow, TaskTemplateEntry } from '@jevi-ops/shared';
 import { pgTable, index, uniqueIndex, foreignKey, primaryKey, check, uuid, text, numeric, date, timestamp, unique, jsonb, boolean, integer, real, time, smallint, bigint } from "drizzle-orm/pg-core"
 import { sql } from "drizzle-orm"
 
 export * from './capture-schema.js';
+
+export const task_templates = pgTable('task_templates', {
+  id: uuid().defaultRandom().primaryKey().notNull(),
+  name: text().notNull(),
+  entries: jsonb().$type<TaskTemplateEntry[]>().notNull(),
+  revision: integer().default(1).notNull(),
+  created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+  updated_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+  check('task_templates_name_check', sql`length(btrim(${table.name})) between 1 and 200`),
+  check('task_templates_entries_check', sql`jsonb_typeof(${table.entries}) = 'array' and jsonb_array_length(${table.entries}) between 1 and 200`),
+  check('task_templates_revision_check', sql`${table.revision} > 0`),
+]);
 
 // ─── Typed jsonb payload shapes ────────────────────────────────────────────
 // Stored as jsonb in Postgres; the app reads/writes them with these shapes.

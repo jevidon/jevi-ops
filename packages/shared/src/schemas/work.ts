@@ -90,4 +90,5 @@ export interface WorkPayload {
   domains: WorkDomain[];   // active, ordered: flagged first, then open-work volume
   parked: WorkDomain[];    // parked channels, muted at the bottom
   ideasCount: number;      // status='idea', not archived
+  templatesCount?: number;
 }
