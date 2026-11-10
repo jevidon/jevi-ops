@@ -36,6 +36,30 @@ async function projectTasks(id: string) {
 }
 
 describe('reusable task templates', () => {
+  it('keeps ten template entries in project-detail order, including after a notes edit', async () => {
+    const titles = Array.from({ length: 10 }, (_, i) => `Task ${i + 1}`);
+    const response = await req('POST', '/api/task-templates', { name: 'Ordered list', entries: entries(titles) });
+    const project = await use(response.json().id, 'Ordered project');
+    const detail = (await req('GET', `/api/projects/${project.id}`)).json();
+    expect(detail.tasks.map((task: { title: string }) => task.title)).toEqual(titles);
+    await req('PATCH', `/api/tasks/${detail.tasks[0].id}`, { notes: 'Edited without changing the order' });
+    const edited = (await req('GET', `/api/projects/${project.id}`)).json();
+    expect(edited.tasks.map((task: { title: string }) => task.title)).toEqual(titles);
+  });
+
+  it('keeps project-detail order through project to template to project', async () => {
+    const [source] = await getDb().insert(projects).values({ name: 'Ordered source', domain_id: INBOX_DOMAIN_ID }).returning();
+    await getDb().insert(tasks).values(Array.from({ length: 10 }, (_, i) => ({
+      title: `Source task ${i}`, project_id: source!.id, domain_id: INBOX_DOMAIN_ID,
+      created_at: new Date(Date.UTC(2026, 10, 1, 0, 0, i)).toISOString(),
+    })));
+    const titles = (await req('GET', `/api/projects/${source!.id}`)).json().tasks.map((task: { title: string }) => task.title);
+    const template = (await req('POST', `/api/projects/${source!.id}/task-template`, { name: 'Ordered snapshot' })).json();
+    expect(template.entries.map((entry: { title: string }) => entry.title)).toEqual(titles);
+    const copy = await use(template.id, 'Ordered copy');
+    expect((await req('GET', `/api/projects/${copy.id}`)).json().tasks.map((task: { title: string }) => task.title)).toEqual(titles);
+  });
+
   it('saves a project without changing it and copies completed tasks, notes and nested subtasks into fresh projects', async () => {
     const [source] = await getDb().insert(projects).values({ name: 'Finished trip', domain_id: INBOX_DOMAIN_ID, status: 'done' }).returning();
     const [parent] = await getDb().insert(tasks).values({ project_id: source!.id, domain_id: INBOX_DOMAIN_ID, title: 'Documents', notes: '**Check** expiry\nKeep originals', status: 'done', completed_at: '2026-10-01T00:00:00Z', due_date: '2026-10-01', recurrence_rule: 'weekly', reminder_offsets: [1] }).returning();
@@ -116,7 +140,9 @@ describe('reusable task templates', () => {
   it('rejects stale edits, invalid input and missing records without creating projects', async () => {
     const t = await template();
     expect((await req('PUT', `/api/task-templates/${t.id}`, { name: 'New name', entries: entries(['New task']), expected_revision: 1 })).statusCode).toBe(200);
-    expect((await req('PUT', `/api/task-templates/${t.id}`, { name: 'Stale name', entries: entries(['Old task']), expected_revision: 1 })).statusCode).toBe(409);
+    const stale = await req('PUT', `/api/task-templates/${t.id}`, { name: 'Stale name', entries: entries(['Old task']), expected_revision: 1 });
+    expect(stale.statusCode).toBe(409);
+    expect(stale.json()).toEqual({ error: 'template_changed', current_revision: 2 });
     for (const payload of [
       { name: ' ', entries: entries(['One']) }, { name: 'Valid', entries: entries([]) },
       { name: 'Valid', entries: entries([' ']) }, { name: 'Valid', entries: entries(['x'.repeat(501)]) },
@@ -161,9 +187,28 @@ describe('reusable task templates', () => {
     }
   });
 
+  it('deletes only the template and updates the work count, preserving generated projects and progress', async () => {
+    const t = await template();
+    const project = await use(t.id, 'Keep this project');
+    const [task] = await projectTasks(project.id);
+    await req('PATCH', `/api/tasks/${task!.id}`, { status: 'done', notes: 'Keep these notes' });
+    const before = (await req('GET', `/api/projects/${project.id}`)).json();
+    expect((await req('GET', '/api/work')).json().templatesCount).toBe(1);
+    const response = await req('DELETE', `/api/task-templates/${t.id}`);
+    expect(response.statusCode).toBe(204);
+    expect(response.body).toBe('');
+    expect((await req('GET', '/api/task-templates')).json().templates).toEqual([]);
+    expect((await req('GET', '/api/work')).json().templatesCount).toBe(0);
+    expect((await req('GET', `/api/projects/${project.id}`)).json()).toEqual(before);
+    const missing = await req('DELETE', `/api/task-templates/${t.id}`);
+    expect(missing.statusCode).toBe(404);
+    expect(missing.json()).toEqual({ error: 'not_found' });
+  });
+
   it('requires authentication for every template operation', async () => {
     for (const [method, url, payload] of [
       ['GET', '/api/task-templates', undefined],
+      ['DELETE', `/api/task-templates/${randomUUID()}`, undefined],
       ['POST', '/api/task-templates', { name: 'Test', entries: entries(['Task']) }],
       ['PUT', `/api/task-templates/${randomUUID()}`, { name: 'Test', entries: entries(['Task']), expected_revision: 1 }],
       ['POST', `/api/task-templates/${randomUUID()}/projects`, { name: 'Trip' }],

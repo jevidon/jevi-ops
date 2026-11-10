@@ -1,6 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { randomUUID } from 'node:crypto';
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { INBOX_DOMAIN_ID, ProjectFromTemplateSchema, TaskTemplateInputSchema, UpdateTaskTemplateSchema } from '@jevi-ops/shared';
 import { projects, stewardship_domains, task_templates, tasks } from '../db/schema.js';
@@ -19,6 +19,12 @@ export const taskTemplateRoutes: FastifyPluginAsync = async (app) => {
     templates: await getDb().select().from(task_templates).orderBy(asc(task_templates.name), asc(task_templates.id)),
   }));
 
+  app.delete<{ Params: { id: string } }>('/api/task-templates/:id', async (req, reply) => {
+    const [removed] = await getDb().delete(task_templates).where(eq(task_templates.id, req.params.id)).returning({ id: task_templates.id });
+    if (!removed) return reply.code(404).send({ error: 'not_found' });
+    return reply.code(204).send();
+  });
+
   app.post('/api/task-templates', async (req, reply) => {
     const parsed = TaskTemplateInputSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: 'invalid_payload', details: parsed.error.flatten().fieldErrors });
@@ -35,7 +41,7 @@ export const taskTemplateRoutes: FastifyPluginAsync = async (app) => {
       // Read the entire source, including completed tasks, independently of
       // the detail page's filtering and 500-row display limit. Never truncate.
       const source = await tx.select().from(tasks).where(eq(tasks.project_id, project.id))
-        .orderBy(asc(tasks.created_at), asc(tasks.id)).limit(201);
+        .orderBy(desc(tasks.created_at), asc(tasks.id)).limit(201);
       if (!source.length) return { error: 'empty_project' } as const;
       if (source.length > 200) return { error: 'too_many_tasks' } as const;
       const keys = new Map(source.map(task => [task.id, randomUUID()]));
@@ -60,8 +66,10 @@ export const taskTemplateRoutes: FastifyPluginAsync = async (app) => {
       ...values, revision: expected_revision + 1, updated_at: new Date().toISOString(),
     }).where(and(eq(task_templates.id, req.params.id), eq(task_templates.revision, expected_revision))).returning();
     if (!template) {
-      const [current] = await getDb().select({ id: task_templates.id }).from(task_templates).where(eq(task_templates.id, req.params.id));
-      return reply.code(current ? 409 : 404).send({ error: current ? 'template_changed' : 'not_found' });
+      const [current] = await getDb().select({ revision: task_templates.revision }).from(task_templates).where(eq(task_templates.id, req.params.id));
+      return current
+        ? reply.code(409).send({ error: 'template_changed', current_revision: current.revision })
+        : reply.code(404).send({ error: 'not_found' });
     }
     return template;
   });
@@ -82,8 +90,12 @@ export const taskTemplateRoutes: FastifyPluginAsync = async (app) => {
       // New ordinary project => default checkbox workflow; never inherit
       // completion, dates, recurrence, or a domain's direct-task workflow.
       const ids = new Map(template.entries.map(entry => [entry.key, randomUUID()]));
-      await tx.insert(tasks).values(template.entries.map(entry => ({
+      const createdAt = Date.now();
+      await tx.insert(tasks).values(template.entries.map((entry, index) => ({
         id: ids.get(entry.key)!, title: entry.title, notes: entry.notes,
+        // Project detail sorts newest first. Distinct stamps also keep an
+        // unrelated task edit from reshuffling entries with tied timestamps.
+        created_at: new Date(createdAt - index).toISOString(),
         parent_task_id: entry.parent_key ? ids.get(entry.parent_key)! : null,
         project_id: project.id, domain_id: domainId, status: 'open', source: 'manual',
       })));

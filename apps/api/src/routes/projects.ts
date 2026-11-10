@@ -63,7 +63,7 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
       }),
       db.query.tasks.findMany({
         where: eq(tasks.project_id, id),
-        orderBy: desc(tasks.created_at),
+        orderBy: [desc(tasks.created_at), asc(tasks.id)],
         limit: 500,
       }),
       db.query.activity_log.findMany({

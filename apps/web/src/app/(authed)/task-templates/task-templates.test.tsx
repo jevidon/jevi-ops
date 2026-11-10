@@ -1,10 +1,10 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TaskTemplates } from './task-templates';
 
-const { save, create, push, refresh } = vi.hoisted(() => ({ save: vi.fn(), create: vi.fn(), push: vi.fn(), refresh: vi.fn() }));
-vi.mock('./actions', () => ({ saveTaskTemplate: save, createProjectFromTemplate: create }));
+const { save, create, load, remove, push, refresh } = vi.hoisted(() => ({ save: vi.fn(), create: vi.fn(), load: vi.fn(), remove: vi.fn(), push: vi.fn(), refresh: vi.fn() }));
+vi.mock('./actions', () => ({ saveTaskTemplate: save, createProjectFromTemplate: create, loadTaskTemplate: load, deleteTaskTemplate: remove }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push, refresh }) }));
 const template = { id: 'template-1', name: 'Packing', entries: [{ key: 'parent', title: 'Passport', notes: 'Check expiry', parent_key: null }, { key: 'child', title: 'Charger', notes: 'USB-C', parent_key: 'parent' }], revision: 2, created_at: '', updated_at: '' };
 const domains = [{ id: 'domain-1', name: 'Personal' }];
@@ -18,7 +18,7 @@ describe('task templates', () => {
     render(<TaskTemplates initialTemplates={[template]} domains={domains} />);
     await user.click(screen.getByRole('button', { name: 'Edit Packing' }));
     // The parent cannot be made a child of its own descendant.
-    expect((screen.getByLabelText('Parent for task 1') as HTMLSelectElement).options).toHaveLength(1);
+    expect(screen.queryByLabelText('Parent for task 1')).toBeNull();
     await user.click(screen.getByRole('button', { name: 'Remove task 1' }));
     await user.click(screen.getByRole('button', { name: 'Save template' }));
     expect(save).toHaveBeenCalledWith({ id: template.id, revision: 2, name: 'Packing', entries: [{ ...template.entries[1], parent_key: null }] });
@@ -28,6 +28,9 @@ describe('task templates', () => {
     const user = userEvent.setup();
     save.mockResolvedValue({ ok: true, value: template });
     render(<TaskTemplates initialTemplates={[]} domains={domains} />);
+    expect(screen.queryByLabelText('Template name')).toBeNull();
+    expect(screen.getByText('Or open any project and choose Save as template in its Tasks section.')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'New template' }));
     await user.type(screen.getByLabelText('Template name'), 'Packing');
     await user.type(screen.getByLabelText('Task 1', { exact: true }), 'Passport');
     await user.click(screen.getByRole('button', { name: 'Add task' }));
@@ -87,4 +90,109 @@ describe('task templates', () => {
     await user.click(screen.getByRole('button', { name: 'Create project' }));
     await waitFor(() => expect(push).toHaveBeenCalledWith('/projects/retry-project'));
   });
+});
+
+const conflict = { ok: false, error: 'This template was saved in another window after you opened it. Your edits are still here.', currentRevision: 3 };
+
+it('keeps a conflicting draft and explicitly overwrites using the latest revision', async () => {
+  const user = userEvent.setup();
+  save.mockResolvedValueOnce(conflict).mockResolvedValueOnce({ ...conflict, currentRevision: 4 }).mockResolvedValueOnce({ ok: true, value: { ...template, name: 'My version', revision: 5 } });
+  render(<TaskTemplates initialTemplates={[template]} domains={domains} />);
+  await user.click(screen.getByRole('button', { name: 'Edit Packing' }));
+  await user.clear(screen.getByLabelText('Template name'));
+  await user.type(screen.getByLabelText('Template name'), 'My version');
+  await user.click(screen.getByRole('button', { name: 'Save template' }));
+  expect(screen.getByRole('alert').textContent).toBe(conflict.error);
+  expect((screen.getByLabelText('Template name') as HTMLInputElement).value).toBe('My version');
+  await user.click(screen.getByRole('button', { name: 'Save mine over it' }));
+  expect(save.mock.calls[1]![0]).toMatchObject({ revision: 3, name: 'My version', entries: template.entries });
+  await user.click(screen.getByRole('button', { name: 'Save mine over it' }));
+  expect(save.mock.calls[2]![0]).toMatchObject({ revision: 4, name: 'My version' });
+  expect(await screen.findByRole('button', { name: 'Use My version' })).toBeTruthy();
+});
+
+it('discards a conflicting draft only after loading succeeds and uses the loaded revision', async () => {
+  const user = userEvent.setup();
+  save.mockResolvedValueOnce(conflict).mockResolvedValueOnce({ ok: false, error: 'Try again' });
+  load.mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce({ ok: true, value: { ...template, name: 'Saved version', entries: [{ ...template.entries[0], title: 'Saved task' }], revision: 4 } });
+  render(<TaskTemplates initialTemplates={[template]} domains={domains} />);
+  await user.click(screen.getByRole('button', { name: 'Edit Packing' }));
+  await user.type(screen.getByLabelText('Task 1', { exact: true }), ' draft');
+  await user.click(screen.getByRole('button', { name: 'Save template' }));
+  await user.click(screen.getByRole('button', { name: 'Discard mine, load saved version' }));
+  expect((screen.getByLabelText('Task 1', { exact: true }) as HTMLInputElement).value).toBe('Passport draft');
+  await user.click(screen.getByRole('button', { name: 'Discard mine, load saved version' }));
+  expect(load).toHaveBeenCalledWith(template.id);
+  expect((screen.getByLabelText('Task 1', { exact: true }) as HTMLInputElement).value).toBe('Saved task');
+  expect((screen.getByLabelText('Template name') as HTMLInputElement).value).toBe('Saved version');
+  expect(screen.queryByLabelText('Task 2', { exact: true })).toBeNull();
+  await user.click(screen.getByRole('button', { name: 'Save template' }));
+  expect(save.mock.calls[1]![0]).toMatchObject({ revision: 4, name: 'Saved version' });
+});
+
+it('confirms deletion inline, preserves the row on cancel or failure, then removes it on success', async () => {
+  const user = userEvent.setup();
+  remove.mockResolvedValueOnce({ ok: false, error: 'Try again' }).mockResolvedValueOnce({ ok: true, value: null });
+  render(<TaskTemplates initialTemplates={[template]} domains={domains} />);
+  await user.click(screen.getByRole('button', { name: 'Delete Packing' }));
+  expect(remove).not.toHaveBeenCalled();
+  await user.click(screen.getByRole('button', { name: 'Cancel' }));
+  expect(screen.getByRole('button', { name: 'Use Packing' })).toBeTruthy();
+  await user.click(screen.getByRole('button', { name: 'Delete Packing' }));
+  await user.click(screen.getByRole('button', { name: 'Confirm delete' }));
+  expect(screen.getByRole('heading', { name: 'Packing' })).toBeTruthy();
+  expect(screen.getByRole('alert').textContent).toBe('Try again');
+  await user.click(screen.getByRole('button', { name: 'Confirm delete' }));
+  expect(remove).toHaveBeenCalledWith(template.id);
+  expect(screen.queryByRole('heading', { name: 'Packing' })).toBeNull();
+  expect(screen.getByRole('status').textContent).toContain('Deleted');
+});
+
+it('focuses added tasks, labels untitled parents, drops blanks and promotes their children', async () => {
+  const user = userEvent.setup();
+  save.mockResolvedValue({ ok: false, error: 'Try again' });
+  render(<TaskTemplates initialTemplates={[]} domains={domains} />);
+  await user.click(screen.getByRole('button', { name: 'New template' }));
+  await user.type(screen.getByLabelText('Template name'), 'Draft');
+  await user.click(screen.getByRole('button', { name: 'Save template' }));
+  expect(screen.getByRole('alert').textContent).toBe('Add at least one task.');
+  expect(save).not.toHaveBeenCalled();
+  await user.click(screen.getByRole('button', { name: 'Add task' }));
+  expect(document.activeElement).toBe(screen.getByLabelText('Task 2', { exact: true }));
+  await user.type(document.activeElement!, 'Keep me');
+  await user.selectOptions(screen.getByLabelText('Parent for task 2'), screen.getByRole('option', { name: 'Task 1 (untitled)' }));
+  await user.click(screen.getByRole('button', { name: 'Save template' }));
+  expect(save.mock.calls[0]![0].entries).toEqual([{ key: expect.any(String), title: 'Keep me', notes: null, parent_key: null }]);
+});
+
+it('limits new parents to root tasks while preserving existing deeper entries and notes', async () => {
+  const user = userEvent.setup();
+  save.mockResolvedValue({ ok: false, error: 'Try again' });
+  const legacy = { ...template, entries: [...template.entries, { key: 'grandchild', title: 'Cable', notes: null, parent_key: 'child' }, { key: 'other', title: 'Other root', notes: null, parent_key: null }] };
+  render(<TaskTemplates initialTemplates={[legacy]} domains={domains} />);
+  await user.click(screen.getByRole('button', { name: 'Edit Packing' }));
+  expect(screen.queryByLabelText('Parent for task 1')).toBeNull();
+  expect(screen.queryByLabelText('Parent for task 2')).toBeNull();
+  expect(screen.getAllByText('Notes · has a note')).toHaveLength(2);
+  const parent = screen.getByLabelText('Parent for task 3') as HTMLSelectElement;
+  expect(parent.value).toBe('child');
+  expect(within(parent).getByRole('option', { name: 'Charger (existing nested parent)' }).hasAttribute('disabled')).toBe(true);
+  const root = screen.getByLabelText('Parent for task 4');
+  expect(within(root).queryByRole('option', { name: 'Charger' })).toBeNull();
+  expect(within(root).queryByRole('option', { name: 'Cable' })).toBeNull();
+  expect(screen.getByRole('heading', { name: 'Tasks (4)' })).toBeTruthy();
+  await user.click(screen.getByRole('button', { name: 'Save template' }));
+  expect(save.mock.calls[0]![0].entries).toEqual(legacy.entries);
+});
+
+it('shows API field errors beside the fields that failed', async () => {
+  const user = userEvent.setup();
+  create.mockResolvedValue({ ok: false, error: 'Check the highlighted fields.', fieldErrors: { domain_id: 'Choose an available domain.' } });
+  render(<TaskTemplates initialTemplates={[template]} domains={domains} />);
+  await user.click(screen.getByRole('button', { name: 'Use Packing' }));
+  await user.type(screen.getByLabelText('New project name'), 'Trip');
+  await user.click(screen.getByRole('button', { name: 'Create project' }));
+  const domain = screen.getByLabelText('Domain');
+  expect(domain.getAttribute('aria-invalid')).toBe('true');
+  expect(document.getElementById(domain.getAttribute('aria-describedby')!)?.textContent).toBe('Choose an available domain.');
 });

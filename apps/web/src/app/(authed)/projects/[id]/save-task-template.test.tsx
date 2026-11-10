@@ -13,9 +13,11 @@ it('names a project template, submits once, and shows a link without leaving the
   let resolve!: (value: unknown) => void;
   save.mockReturnValue(new Promise(r => { resolve = r; }));
   render(<SaveTaskTemplate projectId="source" projectName="Finished trip" />);
-  await user.click(screen.getByRole('button', { name: 'Save as task template' }));
+  await user.click(screen.getByRole('button', { name: 'Save as template' }));
   const name = screen.getByLabelText('Template name') as HTMLInputElement;
   expect(name.value).toBe('Finished trip');
+  expect(name.selectionStart).toBe(0);
+  expect(name.selectionEnd).toBe(name.value.length);
   await user.clear(name);
   await user.type(name, 'Packing');
   const form = name.closest('form')!;
@@ -32,10 +34,10 @@ it('retains the name on failure and cancel does not save anything', async () => 
   const user = userEvent.setup();
   save.mockResolvedValue({ ok: false, error: 'Add at least one task.' });
   render(<SaveTaskTemplate projectId="source" projectName="Trip" />);
-  await user.click(screen.getByRole('button', { name: 'Save as task template' }));
+  await user.click(screen.getByRole('button', { name: 'Save as template' }));
   await user.click(screen.getByRole('button', { name: 'Cancel' }));
   expect(save).not.toHaveBeenCalled();
-  await user.click(screen.getByRole('button', { name: 'Save as task template' }));
+  await user.click(screen.getByRole('button', { name: 'Save as template' }));
   await user.click(screen.getByRole('button', { name: 'Save template' }));
   expect(await screen.findByRole('alert')).toBeTruthy();
   expect((screen.getByLabelText('Template name') as HTMLInputElement).value).toBe('Trip');

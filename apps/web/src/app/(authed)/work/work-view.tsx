@@ -80,14 +80,17 @@ export function WorkView({
     <div className="min-w-0 px-5 lg:px-0 pt-6 pb-24">
       <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-4 mb-4">
         <h1 className="font-serif text-[40px] font-medium leading-[1.02] tracking-[-0.022em] text-ink">Domains</h1>
-        {/* Masthead actions — the site's list-page button pair (34px, mono
+        {/* Masthead actions — the site's list-page buttons (34px, mono
             uppercase; outline secondary, solid ink primary). */}
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex flex-wrap items-center gap-2">
           <Link
             href="/content?status=idea"
             className="inline-flex items-center h-[34px] px-3 rounded border border-line-strong font-mono text-[10px] uppercase tracking-[0.09em] text-ink-2 hover:border-ink-3 hover:text-ink transition-colors"
           >
             Ideas ({payload.ideasCount})
+          </Link>
+          <Link href="/task-templates" className="inline-flex items-center h-[34px] px-3 rounded border border-line-strong font-mono text-[10px] uppercase tracking-[0.09em] text-ink-2 hover:border-ink-3 hover:text-ink transition-colors">
+            Templates{payload.templatesCount == null ? '' : ` (${payload.templatesCount})`}
           </Link>
           <Link
             href="/domains/new"
@@ -98,7 +101,6 @@ export function WorkView({
         </div>
       </div>
       <div className="mb-4">
-        <Link href="/task-templates" className={actionClass}>Task templates</Link>
         <FilterInput value={q} onChange={setQ} placeholder="Find domains, assets, projects, content…" className="max-w-[420px]" />
       </div>
       <div className="border-y border-line mb-5 pb-3">

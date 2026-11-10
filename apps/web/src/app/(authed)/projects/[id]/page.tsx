@@ -283,19 +283,18 @@ export default async function ProjectDetailPage({
               />
             </DetailSection>
 
-            <DetailSection
-              label="Tasks"
+            <SaveTaskTemplate
+              projectId={project.id} projectName={project.name}
               count={<>{openTasks.length} open{overdueCount > 0 && <span className="text-accent"> · {overdueCount} overdue</span>}{waitingTasks.length > 0 && <span> · {waitingTasks.length} waiting</span>}</>}
             >
               <WorkflowSettings scope="project" id={project.id} />
-              <SaveTaskTemplate projectId={project.id} projectName={project.name} />
               {/* Quick capture (Wave 2 #2) — title-only add into this
                   project; the ＋ buttons above stay the full-editor path. */}
               <div className="mb-4">
                 <QuickAddTask projectId={project.id} placeholder="Quick add a task — just a title…" />
               </div>
               <ProjectTaskList />
-            </DetailSection>
+            </SaveTaskTemplate>
 
             <section id="log-work" className="mt-8">
               <DetailSection label="Activity" count={activity.length} className="mt-0">
