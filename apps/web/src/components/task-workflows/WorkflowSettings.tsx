@@ -1,4 +1,5 @@
 'use client';
+import { browserAutofillHydrationProps } from '@/lib/browser-autofill-hydration';
 import { useEffect, useState, useTransition } from 'react';
 import { BUILTIN_WORKFLOW_PRESETS, TaskWorkflowSchema, type TaskWorkflow, type WorkflowScope, type WorkflowStatus } from '@jevi-ops/shared';
 import { createClientId } from '@/lib/client-id';
@@ -25,15 +26,15 @@ export function WorkflowSettings({ scope, id }: { scope: WorkflowScope; id: stri
       <label className="flex gap-2 text-[13px]"><input type="checkbox" checked={enabled} onChange={e => { setEnabled(e.target.checked); setMessage(''); }} />Use custom statuses</label>
       {enabled ? <>
         <label className="block text-[12px]">Start from a preset
-          <select aria-label="Workflow preset" className={`${inputClass} ml-2`} value={presetId} onChange={e => {
+          <select {...browserAutofillHydrationProps} aria-label="Workflow preset" className={`${inputClass} ml-2`} value={presetId} onChange={e => {
             const preset = registry.presets.find(p => p.id === e.target.value);
             setPresetId(e.target.value); if (preset) { setDraft(structuredClone(preset.definition)); setMessage('Preset copied into this draft. Save to apply it here.'); }
           }}><option value="">Choose…</option>{registry.presets.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
         </label>
         <p className="text-[12px] text-ink-3">Names are yours. Categories keep task views and reminders working. The first status in each category is its default. Satisfied states appear with completed tasks; recurring tasks roll forward when satisfied.</p>
         <div className="space-y-2">{draft.statuses.map((s, i) => <div key={s.id} className="flex flex-wrap gap-2">
-          <input aria-label={`Status ${i + 1} name`} className={`${inputClass} min-w-0 flex-1`} value={s.label} maxLength={60} onChange={e => update(i, { label: e.target.value })} />
-          <select aria-label={`Status ${i + 1} category`} className={inputClass} value={s.category} onChange={e => update(i, { category: e.target.value as WorkflowStatus['category'] })}>
+          <input {...browserAutofillHydrationProps} aria-label={`Status ${i + 1} name`} className={`${inputClass} min-w-0 flex-1`} value={s.label} maxLength={60} onChange={e => update(i, { label: e.target.value })} />
+          <select {...browserAutofillHydrationProps} aria-label={`Status ${i + 1} category`} className={inputClass} value={s.category} onChange={e => update(i, { category: e.target.value as WorkflowStatus['category'] })}>
             <option value="open">Actionable (Open)</option><option value="waiting">Waiting</option><option value="done">Satisfied (Done)</option>
           </select>
           <button type="button" aria-label={`Move ${s.label || 'status'} up`} disabled={i === 0} className="px-2 disabled:opacity-30" onClick={() => { const statuses = [...draft.statuses]; [statuses[i - 1], statuses[i]] = [statuses[i]!, statuses[i - 1]!]; setDraft({ statuses }); }}>↑</button>
@@ -49,7 +50,7 @@ export function WorkflowSettings({ scope, id }: { scope: WorkflowScope; id: stri
       }}>Save settings</button>
       {enabled && <div className="border-t border-line pt-3 space-y-2">
         <p className="text-[12px] text-ink-3">Save this draft as a preset available across the app. Applying a preset copies it; other projects keep their own settings.</p>
-        <input aria-label="Preset name" className={inputClass} placeholder="Preset name" maxLength={80} value={name} onChange={e => setName(e.target.value)} />
+        <input {...browserAutofillHydrationProps} aria-label="Preset name" className={inputClass} placeholder="Preset name" maxLength={80} value={name} onChange={e => setName(e.target.value)} />
         <button type="button" className="ml-2 text-[12px] underline" disabled={!name.trim()} onClick={() => {
           const parsed = TaskWorkflowSchema.safeParse(draft); if (!parsed.success) { setMessage(parsed.error.issues.map(i => i.message).join(' ')); return; }
           startTransition(async () => { const r = await saveWorkflowPreset(name, draft); setMessage(r.error ?? 'Preset saved for use anywhere.'); if (r.ok) setName(''); });

@@ -1,4 +1,5 @@
 'use client';
+import { browserAutofillHydrationProps } from '@/lib/browser-autofill-hydration';
 import { createContext, useContext, useState, useTransition, type ReactNode } from 'react';
 import Link from 'next/link';
 import { unstable_isUnrecognizedActionError } from 'next/navigation';
@@ -19,7 +20,7 @@ export function TaskStatusControl({ task, children }: { task: StatusTask; childr
   if (!config?.definition) return <>{children}</>;
   const selected = effectiveWorkflowStatus(task, config.definition);
   return <div className="shrink-0 max-w-[180px]">
-    <select aria-label="Task status" value={selected?.id ?? ''} disabled={pending || result.reload}
+    <select {...browserAutofillHydrationProps} aria-label="Task status" value={selected?.id ?? ''} disabled={pending || result.reload}
       className="max-w-full rounded border border-line bg-surface px-2 py-1 text-[12px] text-ink disabled:opacity-60"
       onChange={e => {
         const id = e.target.value;

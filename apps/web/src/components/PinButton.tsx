@@ -1,3 +1,4 @@
+import { browserAutofillHydrationProps } from '@/lib/browser-autofill-hydration';
 import { pinsApi, type PinTargetType } from '@/lib/api';
 import { pinAction, unpinAction } from '@/app/(authed)/_briefing/pin-actions';
 import { Icon } from './Icon';
@@ -25,7 +26,7 @@ export async function PinButton({
     /* render as unpinned; pinAction is idempotent either way */
   }
   return (
-    <form action={pinned ? unpinAction : pinAction}>
+    <form {...browserAutofillHydrationProps} action={pinned ? unpinAction : pinAction}>
       <input type="hidden" name="target_type" value={targetType} />
       <input type="hidden" name="target_id" value={targetId} />
       <input type="hidden" name="path" value={path} />

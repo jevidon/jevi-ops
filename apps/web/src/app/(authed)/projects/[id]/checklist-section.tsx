@@ -1,5 +1,6 @@
 'use client';
 
+import { browserAutofillHydrationProps } from '@/lib/browser-autofill-hydration';
 import { useActionState, useEffect, useRef, useState } from 'react';
 import {
   addChecklistItemAction,
@@ -102,7 +103,7 @@ function ChecklistRow({
 
   return (
     <li className="flex items-center gap-3 py-1.5 group">
-      <form action={toggleChecklistItemAction} className="shrink-0">
+      <form {...browserAutofillHydrationProps} action={toggleChecklistItemAction} className="shrink-0">
         <input type="hidden" name="projectId" value={projectId} />
         <input type="hidden" name="itemId" value={item.id} />
         {/* For recurring items the underlying `done` column might be
@@ -138,7 +139,7 @@ function ChecklistRow({
           {RECURRENCE_GLYPH} {RECURRENCE_LABELS[rule]}
         </span>
       )}
-      <form action={deleteChecklistItemAction} className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+      <form {...browserAutofillHydrationProps} action={deleteChecklistItemAction} className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
         <input type="hidden" name="projectId" value={projectId} />
         <input type="hidden" name="itemId" value={item.id} />
         <button
@@ -171,10 +172,11 @@ function AddChecklistItemForm({ projectId }: { projectId: string }) {
   }, [state]);
 
   return (
-    <form action={formAction} className="flex flex-wrap items-center gap-2">
+    <form {...browserAutofillHydrationProps} action={formAction} className="flex flex-wrap items-center gap-2">
       <input type="hidden" name="projectId" value={projectId} />
       <span className="text-ink-3 text-[14px] select-none" aria-hidden>+</span>
       <input
+        {...browserAutofillHydrationProps}
         ref={inputRef}
         type="text"
         name="title"
@@ -185,6 +187,7 @@ function AddChecklistItemForm({ projectId }: { projectId: string }) {
         className="flex-1 min-w-[160px] bg-transparent border-b border-line focus:border-ink-2 focus:outline-none py-1.5 font-sans text-[14px] placeholder:text-ink-3/70 text-ink"
       />
       <select
+        {...browserAutofillHydrationProps}
         name="recurrence_rule"
         value={recurrence}
         onChange={(e) => setRecurrence(e.target.value as '' | RecurrencePattern)}

@@ -1,3 +1,4 @@
+import { browserAutofillHydrationProps } from '@/lib/browser-autofill-hydration';
 import type { Milestone } from '@/lib/api';
 import {
   addMilestoneAction,
@@ -43,9 +44,10 @@ export function MilestonesSection({
           adding more is always one tap away. Weight defaults to 1; the
           input is exposed for the rare case where a milestone is bigger
           than the others (a 3× rough cut, e.g.). */}
-      <form action={addMilestoneAction} className="flex items-center gap-2 mt-2">
+      <form {...browserAutofillHydrationProps} action={addMilestoneAction} className="flex items-center gap-2 mt-2">
         <input type="hidden" name="project_id" value={projectId} />
         <input
+          {...browserAutofillHydrationProps}
           type="text"
           name="title"
           required
@@ -53,6 +55,7 @@ export function MilestonesSection({
           className="flex-1 bg-transparent border-b border-line focus:border-accent focus:outline-none py-1.5 font-sans text-[14px] text-ink placeholder:text-ink-3"
         />
         <input
+          {...browserAutofillHydrationProps}
           type="number"
           name="weight"
           defaultValue={1}
@@ -82,7 +85,7 @@ function MilestoneRow({ projectId, milestone }: { projectId: string; milestone: 
       <div className="flex items-start gap-3 py-2.5">
         {/* Toggle checkbox. Wrapped in its own <form> so clicking flips
             the status server-side without affecting the edit form below. */}
-        <form action={toggleMilestoneAction}>
+        <form {...browserAutofillHydrationProps} action={toggleMilestoneAction}>
           <input type="hidden" name="project_id" value={projectId} />
           <input type="hidden" name="milestone_id" value={milestone.id} />
           <input type="hidden" name="next_status" value={nextStatus} />
@@ -132,12 +135,13 @@ function MilestoneRow({ projectId, milestone }: { projectId: string; milestone: 
             Edit
           </summary>
           <div className="absolute z-10 mt-1 right-5 lg:right-0 bg-bg border border-line shadow-lg p-3 min-w-[260px]">
-            <form action={updateMilestoneAction} className="flex flex-col gap-2">
+            <form {...browserAutofillHydrationProps} action={updateMilestoneAction} className="flex flex-col gap-2">
               <input type="hidden" name="project_id" value={projectId} />
               <input type="hidden" name="milestone_id" value={milestone.id} />
               <label className="flex flex-col gap-1">
                 <span className="eyebrow">Title</span>
                 <input
+                  {...browserAutofillHydrationProps}
                   type="text"
                   name="title"
                   defaultValue={milestone.title}
@@ -147,6 +151,7 @@ function MilestoneRow({ projectId, milestone }: { projectId: string; milestone: 
               <label className="flex flex-col gap-1">
                 <span className="eyebrow">Weight</span>
                 <input
+                  {...browserAutofillHydrationProps}
                   type="number"
                   name="weight"
                   defaultValue={milestone.weight}
@@ -162,7 +167,7 @@ function MilestoneRow({ projectId, milestone }: { projectId: string; milestone: 
                 Save
               </button>
             </form>
-            <form action={deleteMilestoneAction} className="mt-2 pt-2 border-t border-line">
+            <form {...browserAutofillHydrationProps} action={deleteMilestoneAction} className="mt-2 pt-2 border-t border-line">
               <input type="hidden" name="project_id" value={projectId} />
               <input type="hidden" name="milestone_id" value={milestone.id} />
               <button
