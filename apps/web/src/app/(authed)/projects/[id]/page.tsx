@@ -1,4 +1,5 @@
 import { WorkflowSettings } from '@/components/task-workflows/WorkflowSettings';
+import { SaveTaskTemplate } from './save-task-template';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { SetCrumbs } from '@/components/crumbs/crumbs';
@@ -287,6 +288,7 @@ export default async function ProjectDetailPage({
               count={<>{openTasks.length} open{overdueCount > 0 && <span className="text-accent"> · {overdueCount} overdue</span>}{waitingTasks.length > 0 && <span> · {waitingTasks.length} waiting</span>}</>}
             >
               <WorkflowSettings scope="project" id={project.id} />
+              <SaveTaskTemplate projectId={project.id} projectName={project.name} />
               {/* Quick capture (Wave 2 #2) — title-only add into this
                   project; the ＋ buttons above stay the full-editor path. */}
               <div className="mb-4">

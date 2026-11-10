@@ -98,6 +98,7 @@ export function WorkView({
         </div>
       </div>
       <div className="mb-4">
+        <Link href="/task-templates" className={actionClass}>Task templates</Link>
         <FilterInput value={q} onChange={setQ} placeholder="Find domains, assets, projects, content…" className="max-w-[420px]" />
       </div>
       <div className="border-y border-line mb-5 pb-3">

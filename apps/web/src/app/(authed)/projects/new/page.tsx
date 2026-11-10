@@ -1,4 +1,5 @@
 import { ScreenHeader } from '@/components/ScreenHeader';
+import Link from 'next/link';
 import { domainsApi, ApiError } from '@/lib/api';
 import { ProjectForm } from '../project-form';
 
@@ -34,6 +35,7 @@ export default async function NewProjectPage({
       <div className="hairline mb-6" />
 
       <div className="px-5 lg:px-0 max-w-2xl">
+        {initialKind === 'project' && <Link href={`/task-templates${preDomainId ? `?domain_id=${encodeURIComponent(preDomainId)}` : ''}`} className="inline-flex min-h-11 items-center mb-5 text-sm text-accent underline">Start from a task template</Link>}
         <ProjectForm
           domains={domains}
           initial={{
