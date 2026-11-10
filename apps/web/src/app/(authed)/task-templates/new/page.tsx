@@ -31,7 +31,9 @@ export default async function NewTaskTemplatePage({ searchParams }: { searchPara
     <div className="hairline mb-6" />
     <div className="px-5 lg:px-0 pb-24">
       {sourceMissing && <p role="status" className="max-w-2xl mb-6 text-sm text-ink-2">The template to duplicate is no longer available. This starts a new one.</p>}
-      <TemplateEditor key={from ?? 'new'} initial={initial} />
+      {/* The first blank line's key is made here, on the server, so the
+          editor renders the same markup on both sides of hydration. */}
+      <TemplateEditor key={from ?? 'new'} initial={initial ?? { name: '', entries: [{ key: randomUUID(), title: '', notes: null, parent_key: null }] }} />
     </div>
   </div>;
 }
