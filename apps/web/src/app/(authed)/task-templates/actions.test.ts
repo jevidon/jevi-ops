@@ -71,8 +71,10 @@ it('refuses to drop an untitled task that has a note, and names the row', async 
 
 it('loads the current saved version and handles missing templates without inventing a draft', async () => {
   const saved = { ...input, id: 'template', revision: 5 };
-  vi.mocked(api.get).mockResolvedValue({ templates: [saved] });
+  vi.mocked(api.get).mockResolvedValue(saved);
   expect(await loadTaskTemplate('template')).toEqual({ ok: true, value: saved });
+  expect(api.get).toHaveBeenCalledWith('/api/task-templates/template');
+  vi.mocked(api.get).mockRejectedValue(new ApiError(404, { error: 'not_found' }));
   expect(await loadTaskTemplate('missing')).toEqual({ ok: false, error: 'This template is no longer available.' });
   vi.mocked(api.get).mockRejectedValue(new ApiError(500, null));
   expect(await loadTaskTemplate('template')).toEqual({ ok: false, error: 'Could not load the saved version. Your edits are still here.' });

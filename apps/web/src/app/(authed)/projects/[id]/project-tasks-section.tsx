@@ -14,7 +14,7 @@ export function ProjectTasksSection({ projectId, projectName, count, children }:
   const [name, setName] = useState(projectName);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
-  const [saved, setSaved] = useState<string | null>(null);
+  const [saved, setSaved] = useState<{ id: string; name: string } | null>(null);
   const submitting = useRef(false);
   const nameInput = useRef<HTMLInputElement>(null);
   useEffect(() => { if (open) { nameInput.current?.focus(); nameInput.current?.select(); } }, [open]);
@@ -25,7 +25,7 @@ export function ProjectTasksSection({ projectId, projectName, count, children }:
     submitting.current = true; setPending(true); setError('');
     try {
       const result = await saveProjectAsTemplate({ project_id: projectId, name });
-      if (result.ok) { setSaved(result.value.name); setOpen(false); }
+      if (result.ok) { setSaved({ id: result.value.id, name: result.value.name }); setOpen(false); }
       else setError(result.error);
     } catch { setError('Could not save the template. Please try again.'); }
     finally { submitting.current = false; setPending(false); }
@@ -36,7 +36,7 @@ export function ProjectTasksSection({ projectId, projectName, count, children }:
   return <DetailSection label="Tasks" count={count} action={
     <button type="button" disabled={pending || open} className="relative font-mono text-[10px] uppercase tracking-[0.07em] text-ink-3 hover:text-ink transition-colors disabled:opacity-50 after:absolute after:inset-x-[-8px] after:inset-y-[-15px] after:content-['']" onClick={() => { setSaved(null); setError(''); setOpen(true); }}>Save as template</button>
   }>
-    {saved && <p role="status" className="mb-4 text-sm text-ink-2">Saved “{saved}”. Your project is unchanged. <Link className="text-accent underline" href="/task-templates">View task templates</Link></p>}
+    {saved && <p role="status" className="mb-4 text-sm text-ink-2">Saved “{saved.name}”. Your project is unchanged. <Link className="text-accent underline" href={`/task-templates/${saved.id}`}>Open template</Link></p>}
     {open && <form onSubmit={submit} className="mb-4 rounded border border-line p-4">
       <fieldset disabled={pending} className="space-y-3">
         <label className="block text-sm">Template name

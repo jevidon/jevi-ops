@@ -6,12 +6,16 @@ export function ScreenHeader({
   eyebrow,
   title,
   meta,
+  actions,
 }: {
   // ReactNode, not string — fork pages (e.g. the maintenance subview's
   // linked eyebrow) pass JSX here. Do not narrow back to string.
   eyebrow: React.ReactNode;
   title: React.ReactNode;
   meta?: string;
+  // List-page masthead buttons (the 34px mono pair used on Domains). Sits at
+  // the right on desktop and under the title on mobile.
+  actions?: React.ReactNode;
 }) {
   return (
     <header className="px-5 pt-8 pb-5 lg:px-0 lg:pt-10 lg:pb-6">
@@ -22,7 +26,12 @@ export function ScreenHeader({
             {title}
           </h1>
         </div>
-        {meta && (
+        {actions ? (
+          <div className="mt-3 lg:mt-0 flex flex-wrap items-center gap-x-5 gap-y-3 lg:justify-end">
+            {meta && <div className="font-mono text-meta text-ink-3">{meta}</div>}
+            <div className="flex flex-wrap items-center gap-2">{actions}</div>
+          </div>
+        ) : meta && (
           <div className="mt-2 lg:mt-0 font-mono text-meta text-ink-3 lg:pb-1">
             {meta}
           </div>

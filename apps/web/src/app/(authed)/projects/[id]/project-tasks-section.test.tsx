@@ -25,9 +25,9 @@ it('names a project template, submits once, and shows a link without leaving the
   fireEvent.submit(form);
   expect(save).toHaveBeenCalledTimes(1);
   expect(save).toHaveBeenCalledWith({ project_id: 'source', name: 'Packing' });
-  resolve({ ok: true, value: { name: 'Packing' } });
+  resolve({ ok: true, value: { id: 'template-9', name: 'Packing' } });
   await waitFor(() => expect(screen.getByRole('status').textContent).toContain('Your project is unchanged'));
-  expect(screen.getByRole('link', { name: 'View task templates' }).getAttribute('href')).toBe('/task-templates');
+  expect(screen.getByRole('link', { name: 'Open template' }).getAttribute('href')).toBe('/task-templates/template-9');
 });
 
 it('retains the name on failure and cancel does not save anything', async () => {

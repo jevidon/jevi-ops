@@ -76,6 +76,7 @@ export async function saveTaskTemplate(input: { id?: string; revision?: number; 
       ? await api.put<TaskTemplate>(`/api/task-templates/${encodeURIComponent(input.id)}`, { ...parsed.data, expected_revision: input.revision })
       : await api.post<TaskTemplate>('/api/task-templates', parsed.data);
     revalidatePath('/task-templates');
+    revalidatePath(`/task-templates/${template.id}`);
     revalidatePath('/work');
     return { ok: true, value: template };
   } catch (error) { return failure(error, SAVE_FAILED, TEMPLATE_COPY); }
@@ -83,9 +84,7 @@ export async function saveTaskTemplate(input: { id?: string; revision?: number; 
 
 export async function loadTaskTemplate(id: string): Promise<Result<TaskTemplate>> {
   try {
-    const { templates } = await api.get<{ templates: TaskTemplate[] }>('/api/task-templates');
-    const template = templates.find(template => template.id === id);
-    return template ? { ok: true, value: template } : { ok: false, error: 'This template is no longer available.' };
+    return { ok: true, value: await api.get<TaskTemplate>(`/api/task-templates/${encodeURIComponent(id)}`) };
   } catch (error) { return failure(error, LOAD_FAILED); }
 }
 

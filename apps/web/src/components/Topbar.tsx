@@ -52,6 +52,7 @@ const TRAIL_ROUTES = [
   /^\/tasks\/[0-9a-f-]{8,}$/,    // task detail — full ancestor trail
   /^\/projects\/[0-9a-f-]{8,}$/, // project detail — domain (/ asset) trail
   /^\/assets\/[0-9a-f-]{8,}$/,   // asset detail — domain trail (0049)
+  /^\/task-templates\/(new|[0-9a-f-]{8,})$/, // template editor — [Domains, Task templates]
 ];
 
 function dispatchOpenCapture() {
