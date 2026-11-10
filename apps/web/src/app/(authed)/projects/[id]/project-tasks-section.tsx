@@ -5,7 +5,11 @@ import { DetailSection } from '@/components/detail/DetailShell';
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { saveProjectAsTemplate } from '../../task-templates/actions';
 
-export function SaveTaskTemplate({ projectId, projectName, count, children }: { projectId: string; projectName: string; count?: ReactNode; children?: ReactNode }) {
+// The project page's Tasks section. It owns the section header because the
+// header's "Save as template" action and the panel it opens share state; the
+// page passes the section body (status settings, quick add, task list) as
+// children.
+export function ProjectTasksSection({ projectId, projectName, count, children }: { projectId: string; projectName: string; count?: ReactNode; children?: ReactNode }) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState(projectName);
   const [pending, setPending] = useState(false);
@@ -27,8 +31,10 @@ export function SaveTaskTemplate({ projectId, projectName, count, children }: { 
     finally { submitting.current = false; setPending(false); }
   }
 
+  // The trigger keeps the header's quiet 10px mono style; the ::after box
+  // widens its hit area to about 44px without changing the header's layout.
   return <DetailSection label="Tasks" count={count} action={
-    <button type="button" disabled={pending || open} className="font-mono text-[10px] uppercase tracking-[0.07em] text-ink-3 hover:text-ink transition-colors disabled:opacity-50" onClick={() => { setSaved(null); setError(''); setOpen(true); }}>Save as template</button>
+    <button type="button" disabled={pending || open} className="relative font-mono text-[10px] uppercase tracking-[0.07em] text-ink-3 hover:text-ink transition-colors disabled:opacity-50 after:absolute after:inset-x-[-8px] after:inset-y-[-15px] after:content-['']" onClick={() => { setSaved(null); setError(''); setOpen(true); }}>Save as template</button>
   }>
     {saved && <p role="status" className="mb-4 text-sm text-ink-2">Saved “{saved}”. Your project is unchanged. <Link className="text-accent underline" href="/task-templates">View task templates</Link></p>}
     {open && <form onSubmit={submit} className="mb-4 rounded border border-line p-4">

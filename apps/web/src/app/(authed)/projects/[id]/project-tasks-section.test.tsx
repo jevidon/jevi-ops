@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { SaveTaskTemplate } from './save-task-template';
+import { ProjectTasksSection } from './project-tasks-section';
 
 const { save } = vi.hoisted(() => ({ save: vi.fn() }));
 vi.mock('../../task-templates/actions', () => ({ saveProjectAsTemplate: save }));
@@ -12,7 +12,7 @@ it('names a project template, submits once, and shows a link without leaving the
   const user = userEvent.setup();
   let resolve!: (value: unknown) => void;
   save.mockReturnValue(new Promise(r => { resolve = r; }));
-  render(<SaveTaskTemplate projectId="source" projectName="Finished trip" />);
+  render(<ProjectTasksSection projectId="source" projectName="Finished trip" />);
   await user.click(screen.getByRole('button', { name: 'Save as template' }));
   const name = screen.getByLabelText('Template name') as HTMLInputElement;
   expect(name.value).toBe('Finished trip');
@@ -33,7 +33,7 @@ it('names a project template, submits once, and shows a link without leaving the
 it('retains the name on failure and cancel does not save anything', async () => {
   const user = userEvent.setup();
   save.mockResolvedValue({ ok: false, error: 'Add at least one task.' });
-  render(<SaveTaskTemplate projectId="source" projectName="Trip" />);
+  render(<ProjectTasksSection projectId="source" projectName="Trip" />);
   await user.click(screen.getByRole('button', { name: 'Save as template' }));
   await user.click(screen.getByRole('button', { name: 'Cancel' }));
   expect(save).not.toHaveBeenCalled();

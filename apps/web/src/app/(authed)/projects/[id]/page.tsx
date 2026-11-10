@@ -1,5 +1,5 @@
 import { WorkflowSettings } from '@/components/task-workflows/WorkflowSettings';
-import { SaveTaskTemplate } from './save-task-template';
+import { ProjectTasksSection } from './project-tasks-section';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { SetCrumbs } from '@/components/crumbs/crumbs';
@@ -283,7 +283,7 @@ export default async function ProjectDetailPage({
               />
             </DetailSection>
 
-            <SaveTaskTemplate
+            <ProjectTasksSection
               projectId={project.id} projectName={project.name}
               count={<>{openTasks.length} open{overdueCount > 0 && <span className="text-accent"> · {overdueCount} overdue</span>}{waitingTasks.length > 0 && <span> · {waitingTasks.length} waiting</span>}</>}
             >
@@ -294,7 +294,7 @@ export default async function ProjectDetailPage({
                 <QuickAddTask projectId={project.id} placeholder="Quick add a task — just a title…" />
               </div>
               <ProjectTaskList />
-            </SaveTaskTemplate>
+            </ProjectTasksSection>
 
             <section id="log-work" className="mt-8">
               <DetailSection label="Activity" count={activity.length} className="mt-0">

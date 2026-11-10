@@ -134,9 +134,17 @@ it('confirms deletion inline, preserves the row on cancel or failure, then remov
   const user = userEvent.setup();
   remove.mockResolvedValueOnce({ ok: false, error: 'Try again' }).mockResolvedValueOnce({ ok: true, value: null });
   render(<TaskTemplates initialTemplates={[template]} domains={domains} />);
+  // Use leads the row; Delete is last and not styled as an equal-weight button.
+  const row = screen.getByRole('heading', { name: 'Packing' }).closest('li')!;
+  expect(within(row).getAllByRole('button').map(button => button.getAttribute('aria-label'))).toEqual(['Use Packing', 'Edit Packing', 'Delete Packing']);
+  expect(screen.getByRole('button', { name: 'Delete Packing' }).className).not.toContain('border');
   await user.click(screen.getByRole('button', { name: 'Delete Packing' }));
   expect(remove).not.toHaveBeenCalled();
+  // Focus follows the confirmation: to Cancel on open, back to Delete on close.
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Cancel' }));
+  expect(screen.getByRole('group', { name: /Delete “Packing”\?/ })).toBeTruthy();
   await user.click(screen.getByRole('button', { name: 'Cancel' }));
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Delete Packing' }));
   expect(screen.getByRole('button', { name: 'Use Packing' })).toBeTruthy();
   await user.click(screen.getByRole('button', { name: 'Delete Packing' }));
   await user.click(screen.getByRole('button', { name: 'Confirm delete' }));
@@ -173,6 +181,10 @@ it('limits new parents to root tasks while preserving existing deeper entries an
   await user.click(screen.getByRole('button', { name: 'Edit Packing' }));
   expect(screen.queryByLabelText('Parent for task 1')).toBeNull();
   expect(screen.queryByLabelText('Parent for task 2')).toBeNull();
+  // Group headings state what they are; only the legacy nested parent warns.
+  expect(screen.getByText('Main task · 1 subtask')).toBeTruthy();
+  expect(screen.getByText(/Subtask with 1 subtask of its own, which project pages do not show\./)).toBeTruthy();
+  expect(screen.queryByText(/cannot be assigned a new parent/)).toBeNull();
   expect(screen.getAllByText('Notes · has a note')).toHaveLength(2);
   const parent = screen.getByLabelText('Parent for task 3') as HTMLSelectElement;
   expect(parent.value).toBe('child');
@@ -185,9 +197,9 @@ it('limits new parents to root tasks while preserving existing deeper entries an
   expect(save.mock.calls[0]![0].entries).toEqual(legacy.entries);
 });
 
-it('shows API field errors beside the fields that failed', async () => {
+it('shows API field errors beside the fields that failed, visibly marked and focused', async () => {
   const user = userEvent.setup();
-  create.mockResolvedValue({ ok: false, error: 'Check the highlighted fields.', fieldErrors: { domain_id: 'Choose an available domain.' } });
+  create.mockResolvedValue({ ok: false, error: 'Check the marked fields.', fieldErrors: { domain_id: 'Choose an available domain.' } });
   render(<TaskTemplates initialTemplates={[template]} domains={domains} />);
   await user.click(screen.getByRole('button', { name: 'Use Packing' }));
   await user.type(screen.getByLabelText('New project name'), 'Trip');
@@ -195,4 +207,43 @@ it('shows API field errors beside the fields that failed', async () => {
   const domain = screen.getByLabelText('Domain');
   expect(domain.getAttribute('aria-invalid')).toBe('true');
   expect(document.getElementById(domain.getAttribute('aria-describedby')!)?.textContent).toBe('Choose an available domain.');
+  expect(domain.className).toContain('border-accent');
+  expect(domain.className).not.toContain('border-line');
+  expect(screen.getByLabelText('New project name').className).toContain('border-line');
+  expect(document.activeElement).toBe(domain);
+});
+
+it('marks and focuses the task a failed save points at, far from the Save button', async () => {
+  const user = userEvent.setup();
+  save.mockResolvedValue({ ok: false, error: 'Check the marked fields.', fieldErrors: { 'entries.child': 'Enter a title of up to 500 characters.' } });
+  render(<TaskTemplates initialTemplates={[template]} domains={domains} />);
+  await user.click(screen.getByRole('button', { name: 'Edit Packing' }));
+  await user.click(screen.getByRole('button', { name: 'Save template' }));
+  const marked = screen.getByLabelText('Task 2', { exact: true });
+  expect(document.activeElement).toBe(marked);
+  expect(marked.getAttribute('aria-invalid')).toBe('true');
+  expect(marked.className).toContain('border-accent');
+  expect(document.getElementById(marked.getAttribute('aria-describedby')!)?.textContent).toBe('Enter a title of up to 500 characters.');
+  const clean = screen.getByLabelText('Task 1', { exact: true });
+  expect(clean.getAttribute('aria-invalid')).toBe('false');
+  expect(clean.className).not.toContain('border-accent');
+});
+
+it('refuses to drop an untitled task that has a note and points at that row', async () => {
+  const user = userEvent.setup();
+  save.mockResolvedValue({ ok: true, value: template });
+  render(<TaskTemplates initialTemplates={[template]} domains={domains} />);
+  await user.click(screen.getByRole('button', { name: 'Edit Packing' }));
+  const title = screen.getByLabelText('Task 2', { exact: true }) as HTMLInputElement;
+  await user.clear(title);
+  await user.click(screen.getByRole('button', { name: 'Save template' }));
+  expect(save).not.toHaveBeenCalled();
+  expect(screen.getByRole('alert').textContent).toBe('Add a title to each task that has a note, or clear the note.');
+  expect(document.activeElement).toBe(title);
+  expect(document.getElementById(title.getAttribute('aria-describedby')!)?.textContent).toBe('Add a title, or clear this task’s note.');
+  expect((screen.getByLabelText('Notes for task 2') as HTMLTextAreaElement).value).toBe('USB-C');
+  // Either fix works: give it a title, and the note is saved with it.
+  await user.type(title, 'Cable');
+  await user.click(screen.getByRole('button', { name: 'Save template' }));
+  expect(save.mock.calls[0]![0].entries).toEqual([template.entries[0], { ...template.entries[1], title: 'Cable' }]);
 });
