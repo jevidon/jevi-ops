@@ -19,6 +19,12 @@ export const taskTemplateRoutes: FastifyPluginAsync = async (app) => {
     templates: await getDb().select().from(task_templates).orderBy(asc(task_templates.name), asc(task_templates.id)),
   }));
 
+  app.get<{ Params: { id: string } }>('/api/task-templates/:id', async (req, reply) => {
+    const [template] = await getDb().select().from(task_templates).where(eq(task_templates.id, req.params.id));
+    if (!template) return reply.code(404).send({ error: 'not_found' });
+    return template;
+  });
+
   app.delete<{ Params: { id: string } }>('/api/task-templates/:id', async (req, reply) => {
     const [removed] = await getDb().delete(task_templates).where(eq(task_templates.id, req.params.id)).returning({ id: task_templates.id });
     if (!removed) return reply.code(404).send({ error: 'not_found' });

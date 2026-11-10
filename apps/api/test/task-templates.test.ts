@@ -205,9 +205,21 @@ describe('reusable task templates', () => {
     expect(missing.json()).toEqual({ error: 'not_found' });
   });
 
+  it('returns one template by id, and 404 or 400 for a missing or malformed id', async () => {
+    const t = await template();
+    const found = await req('GET', `/api/task-templates/${t.id}`);
+    expect(found.statusCode).toBe(200);
+    expect(found.json()).toEqual((await req('GET', '/api/task-templates')).json().templates[0]);
+    const missing = await req('GET', `/api/task-templates/${randomUUID()}`);
+    expect(missing.statusCode).toBe(404);
+    expect(missing.json()).toEqual({ error: 'not_found' });
+    expect((await req('GET', '/api/task-templates/not-a-uuid')).statusCode).toBe(400);
+  });
+
   it('requires authentication for every template operation', async () => {
     for (const [method, url, payload] of [
       ['GET', '/api/task-templates', undefined],
+      ['GET', `/api/task-templates/${randomUUID()}`, undefined],
       ['DELETE', `/api/task-templates/${randomUUID()}`, undefined],
       ['POST', '/api/task-templates', { name: 'Test', entries: entries(['Task']) }],
       ['PUT', `/api/task-templates/${randomUUID()}`, { name: 'Test', entries: entries(['Task']), expected_revision: 1 }],
