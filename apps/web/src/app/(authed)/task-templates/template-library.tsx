@@ -2,48 +2,42 @@
 
 import Link from 'next/link';
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
-import { useRouter } from 'next/navigation';
 import type { TaskTemplate } from '@jevi-ops/shared';
 import { deleteTaskTemplate } from './actions';
-import { ProjectFromTemplate } from './project-from-template';
 import { templateSummary } from './template-draft';
 import { buttonClass } from './ui';
 
 const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? '' : 's'}`;
 
 // The library list. Each template is a row that can be read without opening
-// it: the name opens the editor, Use starts a project, and the row menu holds
-// the rest. `edited` carries each template's edit date, already formatted in
-// the app timezone by the server page.
-export function TemplateLibrary({ initialTemplates, edited, domains, initialDomainId = '' }: {
+// it: the name opens the editor, Use opens the New project form with this
+// template chosen, and the row menu holds the rest. `edited` carries each
+// template's edit date, already formatted in the app timezone by the server
+// page. `domainId` rides along to the New project form when the library was
+// opened from a domain.
+export function TemplateLibrary({ initialTemplates, edited, domainId = '' }: {
   initialTemplates: TaskTemplate[];
   edited: Record<string, string>;
-  domains: { id: string; name: string }[];
-  initialDomainId?: string;
+  domainId?: string;
 }) {
-  const router = useRouter();
   const [templates, setTemplates] = useState(initialTemplates);
   // The server list is the source of truth after a save or a refresh; local
   // state only runs ahead of it for a delete.
   useEffect(() => setTemplates(initialTemplates), [initialTemplates]);
-  const [using, setUsing] = useState<TaskTemplate | null>(null);
   const [notice, setNotice] = useState('');
-
-  if (using) return <ProjectFromTemplate template={using} domains={domains} initialDomainId={initialDomainId}
-    onCancel={() => setUsing(null)} onCreated={id => { router.push(`/projects/${id}`); router.refresh(); }} />;
 
   return <div className="max-w-3xl">
     {notice && <p role="status" className="mb-4 text-sm text-ink-2">{notice}</p>}
     {!templates.length ? <p className="text-ink-3">No templates yet. Choose + Template to write one, or open any project and choose Save as template in its Tasks section.</p> :
       <ul className="divide-y divide-line border-y border-line">
         {templates.map(template => <TemplateRow key={template.id} template={template} edited={edited[template.id]}
-          onUse={() => { setNotice(''); setUsing(template); }}
+          useHref={`/projects/new?template_id=${template.id}${domainId ? `&domain_id=${encodeURIComponent(domainId)}` : ''}`}
           onDeleted={() => { setTemplates(current => current.filter(t => t.id !== template.id)); setNotice(`Deleted “${template.name}”. Existing projects are unchanged.`); }} />)}
       </ul>}
   </div>;
 }
 
-function TemplateRow({ template, edited, onUse, onDeleted }: { template: TaskTemplate; edited?: string; onUse: () => void; onDeleted: () => void }) {
+function TemplateRow({ template, edited, useHref, onDeleted }: { template: TaskTemplate; edited?: string; useHref: string; onDeleted: () => void }) {
   const [confirming, setConfirming] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
@@ -81,7 +75,7 @@ function TemplateRow({ template, edited, onUse, onDeleted }: { template: TaskTem
         {summary.peek && <p className="mt-1 text-sm text-ink-2 break-words">{summary.peek}</p>}
       </div>
       {!confirming && <div className="flex items-center gap-2">
-        <button type="button" className={buttonClass} aria-label={`Use ${template.name}`} onClick={onUse}>Use</button>
+        <Link href={useHref} className={buttonClass} aria-label={`Use ${template.name}`}>Use</Link>
         <RowMenu name={template.name} button={menuButton} editHref={editHref} duplicateHref={`/task-templates/new?from=${template.id}`} onDelete={() => setConfirming(true)} />
       </div>}
     </div>

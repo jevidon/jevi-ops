@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { api, ApiError } from '@/lib/api';
-import { ProjectFromTemplateSchema, TaskTemplateInputSchema, type TaskTemplate, type TaskTemplateEntry } from '@jevi-ops/shared';
+import { TaskTemplateInputSchema, type TaskTemplate, type TaskTemplateEntry } from '@jevi-ops/shared';
 import { entryField, untitledWithNotes, withoutBlankTasks, UNTITLED_NOTE_ERROR, UNTITLED_NOTE_FIELD_ERROR } from './template-draft';
 
 export type ActionFailure = { ok: false; error: string; fieldErrors?: Record<string, string>; currentRevision?: number };
@@ -16,14 +16,9 @@ const TEMPLATE_COPY: FieldCopy = {
   name: 'Enter a template name of up to 200 characters.',
   entries: 'Check the tasks. Each needs a title of up to 500 characters, and a subtask’s parent must be a task in this template.',
 };
-const PROJECT_COPY: FieldCopy = {
-  name: 'Enter a project name of up to 200 characters.',
-  domain_id: 'Choose an available domain.',
-};
 const SAVE_FAILED = 'Could not save. Your entries are still here; please try again.';
 const LOAD_FAILED = 'Could not load the saved version. Your edits are still here.';
 const DELETE_FAILED = 'Could not delete this template. Please try again.';
-const CREATE_FAILED = 'Could not create the project. Your entries are still here; please try again.';
 
 const marked = (fieldErrors: Record<string, string>): ActionFailure => ({ ok: false, error: 'Check the marked fields.', fieldErrors });
 
@@ -39,7 +34,6 @@ function failure(error: unknown, fallback: string, copy: FieldCopy = {}): Action
       ok: false, error: 'This template was saved in another window after you opened it. Your edits are still here.', currentRevision: body!.current_revision,
     };
     if (error.status === 404) return { ok: false, error: 'This template is no longer available.' };
-    if (error.status === 400 && body?.error === 'domain_not_found') return marked({ domain_id: 'That domain is no longer available. Choose another.' });
     if (error.status === 400 && body?.details) {
       const fields = Object.entries(body.details).filter(([, messages]) => messages?.length).map(([field]) => field);
       const invalid = invalidFields(fields, copy);
@@ -99,21 +93,6 @@ export async function deleteTaskTemplate(id: string): Promise<Result<null>> {
   revalidatePath('/task-templates');
   revalidatePath('/work');
   return { ok: true, value: null };
-}
-
-export async function createProjectFromTemplate(input: { template_id: string; name: string; domain_id: string }): Promise<Result<{ id: string }>> {
-  const parsed = ProjectFromTemplateSchema.safeParse({ name: input.name, domain_id: input.domain_id || null });
-  if (!parsed.success) {
-    return invalidFields(Object.keys(parsed.error.flatten().fieldErrors), PROJECT_COPY) ?? { ok: false, error: CREATE_FAILED };
-  }
-  try {
-    const project = await api.post<{ id: string }>(`/api/task-templates/${encodeURIComponent(input.template_id)}/projects`, parsed.data);
-    revalidatePath('/work');
-    revalidatePath('/tasks');
-    revalidatePath('/');
-    if (input.domain_id) revalidatePath(`/domains/${input.domain_id}`);
-    return { ok: true, value: { id: project.id } };
-  } catch (error) { return failure(error, CREATE_FAILED, PROJECT_COPY); }
 }
 
 export async function saveProjectAsTemplate(input: { project_id: string; name: string }): Promise<Result<TaskTemplate>> {

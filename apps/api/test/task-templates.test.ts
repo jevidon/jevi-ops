@@ -7,6 +7,7 @@ import { buildServer } from '../src/server.js';
 import { signSession } from '../src/lib/jwt.js';
 import { getDb } from '../src/lib/db.js';
 import { projects, task_templates, tasks } from '../src/db/schema.js';
+import { createAsset } from './helpers.js';
 
 let app: FastifyInstance;
 let token: string;
@@ -214,6 +215,85 @@ describe('reusable task templates', () => {
     expect(missing.statusCode).toBe(404);
     expect(missing.json()).toEqual({ error: 'not_found' });
     expect((await req('GET', '/api/task-templates/not-a-uuid')).statusCode).toBe(400);
+  });
+
+  describe('starting a project from a template through project create', () => {
+    const nested = () => {
+      const [documents, passport, keys] = entries(['Documents', 'Passport', 'Keys']);
+      return [documents!, { ...passport!, parent_key: documents!.key, notes: 'Check expiry' }, keys!];
+    };
+    const createTemplate = async () => (await req('POST', '/api/task-templates', { name: 'Flight', entries: nested() })).json();
+
+    it('creates the project with all of its own fields and the copied tasks, in order and reset', async () => {
+      const t = await createTemplate();
+      const response = await req('POST', '/api/projects', { name: 'December trip', description: 'Two weeks away', target_date: '2026-12-20', type: 'internal', template_id: t.id });
+      expect(response.statusCode).toBe(201);
+      const project = response.json();
+      // Fields the old "Use template" form could not set arrive with the tasks.
+      expect(project).toMatchObject({ name: 'December trip', description: 'Two weeks away', target_date: '2026-12-20', type: 'internal', kind: 'project', status: 'active', task_workflow: null });
+      expect(project).not.toHaveProperty('template_id');
+      const detail = (await req('GET', `/api/projects/${project.id}`)).json();
+      expect(detail.tasks.map((task: { title: string }) => task.title)).toEqual(['Documents', 'Passport', 'Keys']);
+      const [documents, passport] = detail.tasks;
+      expect(passport).toMatchObject({ parent_task_id: documents.id, notes: 'Check expiry', status: 'open', due_date: null, completed_at: null, source: 'manual' });
+      // Same copy as the template's own endpoint, which still works.
+      const viaTemplate = await use(t.id, 'Other trip');
+      expect((await req('GET', `/api/projects/${viaTemplate.id}`)).json().tasks.map((task: { title: string }) => task.title)).toEqual(['Documents', 'Passport', 'Keys']);
+    });
+
+    it('puts tasks in the project domain: chosen, inherited from an asset, or Inbox', async () => {
+      const t = await createTemplate();
+      const domain = (await req('POST', '/api/domains', { name: 'Travel' })).json();
+      const chosen = (await req('POST', '/api/projects', { name: 'Chosen', domain_id: domain.id, template_id: t.id })).json();
+      for (const task of await projectTasks(chosen.id)) expect(task.domain_id).toBe(domain.id);
+      const asset = await createAsset({ domain_id: domain.id });
+      const inherited = (await req('POST', '/api/projects', { name: 'Inherited', asset_id: asset.id, template_id: t.id })).json();
+      expect(inherited.domain_id).toBe(domain.id);
+      for (const task of await projectTasks(inherited.id)) expect(task.domain_id).toBe(domain.id);
+      const none = (await req('POST', '/api/projects', { name: 'No domain', template_id: t.id })).json();
+      expect(none.domain_id).toBeNull();
+      const loose = await projectTasks(none.id);
+      expect(loose).toHaveLength(3);
+      for (const task of loose) expect(task.domain_id).toBe(INBOX_DOMAIN_ID);
+    });
+
+    it('rejects an unknown template and a template on an area without creating anything', async () => {
+      const t = await createTemplate();
+      const missing = await req('POST', '/api/projects', { name: 'No such template', template_id: randomUUID() });
+      expect(missing.statusCode).toBe(400);
+      expect(missing.json()).toEqual({ error: 'template_not_found' });
+      const area = await req('POST', '/api/projects', { name: 'An area', kind: 'area', template_id: t.id });
+      expect(area.statusCode).toBe(400);
+      expect(area.json()).toEqual({ error: 'template_requires_project' });
+      expect((await req('POST', '/api/projects', { name: 'Bad id', template_id: 'nope' })).statusCode).toBe(400);
+      const names = (await getDb().select({ name: projects.name }).from(projects)).map(row => row.name);
+      expect(names).not.toEqual(expect.arrayContaining(['No such template', 'An area', 'Bad id']));
+      expect(await getDb().select().from(tasks)).toHaveLength(0);
+    });
+
+    it('rolls back the project if any task insert fails', async () => {
+      const t = await createTemplate();
+      const db = getDb();
+      await db.execute(`create function reject_template_test_task() returns trigger language plpgsql as $$ begin if new.title = 'Keys' then raise exception 'test insert failure'; end if; return new; end $$`);
+      await db.execute(`create trigger reject_template_test_task before insert on tasks for each row execute function reject_template_test_task()`);
+      try {
+        const response = await req('POST', '/api/projects', { name: 'Must roll back too', template_id: t.id });
+        expect(response.statusCode).toBe(500);
+        expect(await db.select().from(projects).where(eq(projects.name, 'Must roll back too'))).toHaveLength(0);
+        expect(await db.select().from(tasks)).toHaveLength(0);
+      } finally {
+        await db.execute('drop trigger reject_template_test_task on tasks');
+        await db.execute('drop function reject_template_test_task()');
+      }
+    });
+
+    it('ignores template_id on update: an existing project never gains template tasks', async () => {
+      const t = await createTemplate();
+      const [existing] = await getDb().insert(projects).values({ name: 'Existing', domain_id: INBOX_DOMAIN_ID }).returning();
+      const response = await req('PATCH', `/api/projects/${existing!.id}`, { name: 'Renamed', template_id: t.id });
+      expect(response.statusCode).toBe(200);
+      expect(await projectTasks(existing!.id)).toHaveLength(0);
+    });
   });
 
   it('requires authentication for every template operation', async () => {

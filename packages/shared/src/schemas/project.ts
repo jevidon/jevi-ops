@@ -86,9 +86,12 @@ export const CreateProjectSchema = z.object({
   // Create as an idea (0050) or, the default, active.
   status: z.enum(['idea', 'active']).optional(),
   doc_md: z.string().max(200_000).nullable().optional(),
+  // Start the project with a copy of this task template's entries (create
+  // only). The copy happens in the same transaction as the project.
+  template_id: z.string().uuid().optional(),
 });
 
-export const UpdateProjectSchema = CreateProjectSchema.partial().extend({
+export const UpdateProjectSchema = CreateProjectSchema.omit({ template_id: true }).partial().extend({
   status: ProjectStatusSchema.optional(),
   hours_logged: z.number().optional(),
   ...docUpdateFields,

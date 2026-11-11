@@ -1,6 +1,6 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 import { api, ApiError } from '@/lib/api';
-import { createProjectFromTemplate, deleteTaskTemplate, loadTaskTemplate, saveProjectAsTemplate, saveTaskTemplate } from './actions';
+import { deleteTaskTemplate, loadTaskTemplate, saveProjectAsTemplate, saveTaskTemplate } from './actions';
 
 vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }));
 vi.mock('@/lib/api', () => ({
@@ -20,16 +20,12 @@ it('maps API validation details to written copy on individual fields, never vali
     entries: 'Check the tasks. Each needs a title of up to 500 characters, and a subtask’s parent must be a task in this template.',
   } });
   expect(JSON.stringify(saved)).not.toMatch(VALIDATOR_TEXT);
-  vi.mocked(api.post).mockRejectedValue(new ApiError(400, { details: { domain_id: ['Invalid uuid'] } }));
-  expect(await createProjectFromTemplate({ template_id: 'template', name: 'Trip', domain_id: '' })).toEqual({ ok: false, error: 'Check the marked fields.', fieldErrors: { domain_id: 'Choose an available domain.' } });
 });
 
-it('rejects whitespace-only names with written copy before calling the API', async () => {
+it('rejects a whitespace-only name with written copy before calling the API', async () => {
   const template = await saveTaskTemplate({ ...input, name: '   ' });
   expect(template).toEqual({ ok: false, error: 'Check the marked fields.', fieldErrors: { name: 'Enter a template name of up to 200 characters.' } });
-  const project = await createProjectFromTemplate({ template_id: 'template', name: '   ', domain_id: '' });
-  expect(project).toEqual({ ok: false, error: 'Check the marked fields.', fieldErrors: { name: 'Enter a project name of up to 200 characters.' } });
-  expect(JSON.stringify([template, project])).not.toMatch(VALIDATOR_TEXT);
+  expect(JSON.stringify(template)).not.toMatch(VALIDATOR_TEXT);
   expect(api.post).not.toHaveBeenCalled();
 });
 
@@ -88,16 +84,6 @@ it('treats an already-deleted template as deleted, and words a failed delete as 
   expect(await deleteTaskTemplate('template')).toEqual({ ok: true, value: null });
   vi.mocked(api.delete).mockRejectedValue(new ApiError(500, null));
   expect(await deleteTaskTemplate('template')).toEqual({ ok: false, error: 'Could not delete this template. Please try again.' });
-});
-
-it('words create-project failures as creation and marks an unavailable domain', async () => {
-  const create = () => createProjectFromTemplate({ template_id: 'template', name: 'Trip', domain_id: '00000000-0000-4000-8000-000000000009' });
-  vi.mocked(api.post).mockRejectedValue(new ApiError(500, null));
-  expect(await create()).toEqual({ ok: false, error: 'Could not create the project. Your entries are still here; please try again.' });
-  vi.mocked(api.post).mockRejectedValue(new ApiError(400, { error: 'domain_not_found' }));
-  expect(await create()).toEqual({ ok: false, error: 'Check the marked fields.', fieldErrors: { domain_id: 'That domain is no longer available. Choose another.' } });
-  vi.mocked(api.post).mockRejectedValue(new ApiError(404, { error: 'not_found' }));
-  expect(await create()).toEqual({ ok: false, error: 'This template is no longer available.' });
 });
 
 it('reports a missing source project as a project, not a template', async () => {
