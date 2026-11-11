@@ -2,8 +2,9 @@
 
 import { revalidatePath } from 'next/cache';
 import { api, ApiError } from '@/lib/api';
+import { getAppTimezone } from '@/lib/app-settings';
 import { TaskTemplateInputSchema, type TaskTemplate, type TaskTemplateEntry } from '@jevi-ops/shared';
-import { entryField, untitledWithNotes, withoutBlankTasks, UNTITLED_NOTE_ERROR, UNTITLED_NOTE_FIELD_ERROR } from './template-draft';
+import { entryField, formatEdited, untitledWithNotes, withoutBlankTasks, UNTITLED_NOTE_ERROR, UNTITLED_NOTE_FIELD_ERROR } from './template-draft';
 
 export type ActionFailure = { ok: false; error: string; fieldErrors?: Record<string, string>; currentRevision?: number };
 type Result<T> = { ok: true; value: T } | ActionFailure;
@@ -82,6 +83,14 @@ export async function loadTaskTemplate(id: string): Promise<Result<TaskTemplate>
   } catch (error) { return failure(error, LOAD_FAILED); }
 }
 
+/** Every template, with each edit date already formatted in the app timezone. */
+export async function listTaskTemplates(): Promise<Result<{ templates: TaskTemplate[]; edited: Record<string, string> }>> {
+  try {
+    const [{ templates }, tz] = await Promise.all([api.get<{ templates: TaskTemplate[] }>('/api/task-templates'), getAppTimezone()]);
+    return { ok: true, value: { templates, edited: Object.fromEntries(templates.map(template => [template.id, formatEdited(template.updated_at, tz)])) } };
+  } catch (error) { return failure(error, 'Could not load your templates. Please try again.'); }
+}
+
 export async function deleteTaskTemplate(id: string): Promise<Result<null>> {
   try {
     await api.delete(`/api/task-templates/${encodeURIComponent(id)}`);
@@ -95,6 +104,21 @@ export async function deleteTaskTemplate(id: string): Promise<Result<null>> {
   return { ok: true, value: null };
 }
 
+// Why a project cannot become template entries. The same refusals apply to
+// saving it as a new template and to reading its snapshot for an update.
+function sourceFailure(error: unknown, outcome: string): ActionFailure | null {
+  if (!(error instanceof ApiError)) return null;
+  if (error.status === 400) {
+    const code = (error.body as { error?: string } | null)?.error;
+    if (code === 'empty_project') return { ok: false, error: 'Add at least one task to this project before saving a template.' };
+    if (code === 'too_many_tasks') return { ok: false, error: `Templates support up to 200 tasks. This project has more than that; ${outcome}.` };
+    if (code === 'invalid_source_tasks') return { ok: false, error: `Check task titles (up to 500 characters), notes (up to 200,000 characters), and parent relationships. ${outcome.charAt(0).toUpperCase()}${outcome.slice(1)}.` };
+  }
+  // Here a 404 means the source project is gone, not a template.
+  if (error.status === 404) return { ok: false, error: 'This project is no longer available.' };
+  return null;
+}
+
 export async function saveProjectAsTemplate(input: { project_id: string; name: string }): Promise<Result<TaskTemplate>> {
   const name = input.name.trim();
   if (!name || name.length > 200) return { ok: false, error: 'Enter a template name of up to 200 characters.' };
@@ -104,14 +128,16 @@ export async function saveProjectAsTemplate(input: { project_id: string; name: s
     revalidatePath('/work');
     return { ok: true, value: template };
   } catch (error) {
-    if (error instanceof ApiError && error.status === 400) {
-      const code = (error.body as { error?: string } | null)?.error;
-      if (code === 'empty_project') return { ok: false, error: 'Add at least one task to this project before saving a template.' };
-      if (code === 'too_many_tasks') return { ok: false, error: 'Templates support up to 200 tasks. This project has more than that; no template was created.' };
-      if (code === 'invalid_source_tasks') return { ok: false, error: 'Check task titles (up to 500 characters), notes (up to 200,000 characters), and parent relationships. No template was created.' };
-    }
-    // Here a 404 means the source project is gone, not a template.
-    if (error instanceof ApiError && error.status === 404) return { ok: false, error: 'This project is no longer available.' };
-    return failure(error, 'Could not save the template. Please try again.', TEMPLATE_COPY);
+    return sourceFailure(error, 'no template was created') ?? failure(error, 'Could not save the template. Please try again.', TEMPLATE_COPY);
+  }
+}
+
+/** The project's tasks as template entries, read without saving anything. */
+export async function loadProjectSnapshot(projectId: string): Promise<Result<TaskTemplateEntry[]>> {
+  try {
+    const { entries } = await api.get<{ entries: TaskTemplateEntry[] }>(`/api/projects/${encodeURIComponent(projectId)}/task-template-snapshot`);
+    return { ok: true, value: entries };
+  } catch (error) {
+    return sourceFailure(error, 'nothing was changed') ?? failure(error, 'Could not read this project’s tasks. Please try again.');
   }
 }
