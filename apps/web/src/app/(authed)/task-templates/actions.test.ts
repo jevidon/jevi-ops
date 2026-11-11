@@ -1,8 +1,10 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 import { api, ApiError } from '@/lib/api';
-import { deleteTaskTemplate, loadTaskTemplate, saveProjectAsTemplate, saveTaskTemplate } from './actions';
+import { getAppTimezone } from '@/lib/app-settings';
+import { deleteTaskTemplate, listTaskTemplates, loadProjectSnapshot, loadTaskTemplate, saveProjectAsTemplate, saveTaskTemplate } from './actions';
 
 vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }));
+vi.mock('@/lib/app-settings', () => ({ getAppTimezone: vi.fn() }));
 vi.mock('@/lib/api', () => ({
   api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() },
   ApiError: class extends Error { constructor(public status: number, public body: unknown) { super(`API ${status}`); } },
@@ -89,4 +91,29 @@ it('treats an already-deleted template as deleted, and words a failed delete as 
 it('reports a missing source project as a project, not a template', async () => {
   vi.mocked(api.post).mockRejectedValue(new ApiError(404, { error: 'not_found' }));
   expect(await saveProjectAsTemplate({ project_id: 'project', name: 'Packing' })).toEqual({ ok: false, error: 'This project is no longer available.' });
+});
+
+it('lists templates with each edit date formatted in the app timezone', async () => {
+  vi.mocked(getAppTimezone).mockResolvedValue('America/Denver');
+  // 03:30 UTC on the 13th is still the 12th in Denver.
+  const templates = [{ ...input, id: 'a', revision: 1, created_at: '', updated_at: `${new Date().getUTCFullYear()}-10-13T03:30:00Z` }];
+  vi.mocked(api.get).mockResolvedValue({ templates });
+  expect(await listTaskTemplates()).toEqual({ ok: true, value: { templates, edited: { a: 'Oct 12' } } });
+  vi.mocked(api.get).mockRejectedValue(new ApiError(500, null));
+  expect(await listTaskTemplates()).toEqual({ ok: false, error: 'Could not load your templates. Please try again.' });
+});
+
+it('reads a project snapshot and explains each reason it cannot', async () => {
+  vi.mocked(api.get).mockResolvedValue({ entries: [root] });
+  expect(await loadProjectSnapshot('project')).toEqual({ ok: true, value: [root] });
+  expect(api.get).toHaveBeenCalledWith('/api/projects/project/task-template-snapshot');
+  const refusal = async (status: number, body: unknown) => { vi.mocked(api.get).mockRejectedValue(new ApiError(status, body)); return (await loadProjectSnapshot('project') as { error: string }).error; };
+  expect(await refusal(400, { error: 'empty_project' })).toBe('Add at least one task to this project before saving a template.');
+  expect(await refusal(400, { error: 'too_many_tasks' })).toBe('Templates support up to 200 tasks. This project has more than that; nothing was changed.');
+  expect(await refusal(400, { error: 'invalid_source_tasks' })).toBe('Check task titles (up to 500 characters), notes (up to 200,000 characters), and parent relationships. Nothing was changed.');
+  expect(await refusal(404, { error: 'not_found' })).toBe('This project is no longer available.');
+  expect(await refusal(500, null)).toBe('Could not read this project’s tasks. Please try again.');
+  // Saving as new keeps its own wording for the same refusals.
+  vi.mocked(api.post).mockRejectedValue(new ApiError(400, { error: 'too_many_tasks' }));
+  expect(await saveProjectAsTemplate({ project_id: 'project', name: 'Packing' })).toEqual({ ok: false, error: 'Templates support up to 200 tasks. This project has more than that; no template was created.' });
 });

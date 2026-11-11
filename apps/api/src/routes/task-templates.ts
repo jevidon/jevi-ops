@@ -1,11 +1,10 @@
 import type { FastifyPluginAsync } from 'fastify';
-import { randomUUID } from 'node:crypto';
-import { and, asc, desc, eq } from 'drizzle-orm';
+import { and, asc, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { INBOX_DOMAIN_ID, ProjectFromTemplateSchema, TaskTemplateInputSchema, UpdateTaskTemplateSchema } from '@jevi-ops/shared';
-import { projects, stewardship_domains, task_templates, tasks } from '../db/schema.js';
+import { projects, stewardship_domains, task_templates } from '../db/schema.js';
 import { getDb } from '../lib/db.js';
-import { copyTemplateTasks } from '../lib/task-template-copy.js';
+import { copyTemplateTasks, snapshotProjectEntries } from '../lib/task-template-copy.js';
 
 export const taskTemplateRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', app.requireAuth);
@@ -39,26 +38,21 @@ export const taskTemplateRoutes: FastifyPluginAsync = async (app) => {
     return reply.code(201).send(template);
   });
 
+  // The project's tasks as template entries, without saving anything. The web
+  // compares this with an existing template to preview an update.
+  app.get<{ Params: { id: string } }>('/api/projects/:id/task-template-snapshot', async (req, reply) => {
+    const result = await getDb().transaction(tx => snapshotProjectEntries(tx, req.params.id), { isolationLevel: 'repeatable read' });
+    if ('error' in result) return reply.code(result.error === 'not_found' ? 404 : 400).send(result);
+    return result;
+  });
+
   app.post<{ Params: { id: string } }>('/api/projects/:id/task-template', async (req, reply) => {
     const parsed = TaskTemplateInputSchema.pick({ name: true }).safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: 'invalid_payload' });
     const result = await getDb().transaction(async tx => {
-      const [project] = await tx.select({ id: projects.id }).from(projects).where(eq(projects.id, req.params.id));
-      if (!project) return { error: 'not_found' } as const;
-      // Read the entire source, including completed tasks, independently of
-      // the detail page's filtering and 500-row display limit. Never truncate.
-      const source = await tx.select().from(tasks).where(eq(tasks.project_id, project.id))
-        .orderBy(desc(tasks.created_at), asc(tasks.id)).limit(201);
-      if (!source.length) return { error: 'empty_project' } as const;
-      if (source.length > 200) return { error: 'too_many_tasks' } as const;
-      const keys = new Map(source.map(task => [task.id, randomUUID()]));
-      const values = TaskTemplateInputSchema.safeParse({ name: parsed.data.name, entries: source.map(task => ({
-        key: keys.get(task.id)!, title: task.title, notes: task.notes,
-        // A parent outside this project is not copied or linked into it.
-        parent_key: task.parent_task_id ? keys.get(task.parent_task_id) ?? null : null,
-      })) });
-      if (!values.success) return { error: 'invalid_source_tasks' } as const;
-      const [template] = await tx.insert(task_templates).values(values.data).returning();
+      const snapshot = await snapshotProjectEntries(tx, req.params.id);
+      if ('error' in snapshot) return snapshot;
+      const [template] = await tx.insert(task_templates).values({ name: parsed.data.name, entries: snapshot.entries }).returning();
       return { template };
     }, { isolationLevel: 'repeatable read' });
     if ('error' in result) return reply.code(result.error === 'not_found' ? 404 : 400).send(result);

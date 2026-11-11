@@ -296,9 +296,55 @@ describe('reusable task templates', () => {
     });
   });
 
+  describe('project snapshot', () => {
+    const shape = (list: { title: string; notes: string | null; parent_key: string | null }[], keyed: { key: string; title: string }[]) =>
+      list.map(e => ({ title: e.title, notes: e.notes, parent: keyed.find(k => k.key === e.parent_key)?.title ?? null }));
+
+    it('returns exactly what saving the project as a template would store, and changes nothing', async () => {
+      const [source] = await getDb().insert(projects).values({ name: 'Snapshot source', domain_id: INBOX_DOMAIN_ID }).returning();
+      const [parent] = await getDb().insert(tasks).values({ project_id: source!.id, domain_id: INBOX_DOMAIN_ID, title: 'Documents', notes: 'Originals', status: 'done', completed_at: '2026-10-01T00:00:00Z', created_at: '2026-11-01T00:00:03Z' }).returning();
+      await getDb().insert(tasks).values([
+        { project_id: source!.id, domain_id: INBOX_DOMAIN_ID, title: 'Passport', notes: 'Check expiry', parent_task_id: parent!.id, due_date: '2026-12-01', created_at: '2026-11-01T00:00:02Z' },
+        { project_id: source!.id, domain_id: INBOX_DOMAIN_ID, title: 'Keys', created_at: '2026-11-01T00:00:01Z' },
+      ]);
+      const before = (await req('GET', `/api/projects/${source!.id}`)).json();
+      const response = await req('GET', `/api/projects/${source!.id}/task-template-snapshot`);
+      expect(response.statusCode).toBe(200);
+      const { entries: snapshot } = response.json();
+      // Completed tasks included, project-page order, subtask linked, nothing but title/notes/parent.
+      expect(shape(snapshot, snapshot)).toEqual([
+        { title: 'Documents', notes: 'Originals', parent: null }, { title: 'Passport', notes: 'Check expiry', parent: 'Documents' }, { title: 'Keys', notes: null, parent: null },
+      ]);
+      expect(Object.keys(snapshot[0]).sort()).toEqual(['key', 'notes', 'parent_key', 'title']);
+      const saved = (await req('POST', `/api/projects/${source!.id}/task-template`, { name: 'Saved from the same project' })).json();
+      expect(shape(saved.entries, saved.entries)).toEqual(shape(snapshot, snapshot));
+      // Read-only: no template was created by the snapshot, and the project is untouched.
+      expect((await req('GET', '/api/task-templates')).json().templates.map((t: { name: string }) => t.name)).toEqual(['Saved from the same project']);
+      expect((await req('GET', `/api/projects/${source!.id}`)).json()).toEqual(before);
+    });
+
+    it('reports the same refusals as saving: missing, empty and oversized projects', async () => {
+      const missing = await req('GET', `/api/projects/${randomUUID()}/task-template-snapshot`);
+      expect([missing.statusCode, missing.json()]).toEqual([404, { error: 'not_found' }]);
+      const [empty] = await getDb().insert(projects).values({ name: 'Empty snapshot', domain_id: INBOX_DOMAIN_ID }).returning();
+      const none = await req('GET', `/api/projects/${empty!.id}/task-template-snapshot`);
+      expect([none.statusCode, none.json()]).toEqual([400, { error: 'empty_project' }]);
+      const [big] = await getDb().insert(projects).values({ name: 'Oversized snapshot', domain_id: INBOX_DOMAIN_ID }).returning();
+      await getDb().insert(tasks).values(Array.from({ length: 201 }, (_, i) => ({ project_id: big!.id, domain_id: INBOX_DOMAIN_ID, title: `Task ${i}` })));
+      const many = await req('GET', `/api/projects/${big!.id}/task-template-snapshot`);
+      expect([many.statusCode, many.json()]).toEqual([400, { error: 'too_many_tasks' }]);
+      const [long] = await getDb().insert(projects).values({ name: 'Unsavable snapshot', domain_id: INBOX_DOMAIN_ID }).returning();
+      await getDb().insert(tasks).values({ project_id: long!.id, domain_id: INBOX_DOMAIN_ID, title: 'x'.repeat(501) });
+      const invalid = await req('GET', `/api/projects/${long!.id}/task-template-snapshot`);
+      expect([invalid.statusCode, invalid.json()]).toEqual([400, { error: 'invalid_source_tasks' }]);
+      expect((await req('GET', '/api/projects/not-a-uuid/task-template-snapshot')).statusCode).toBe(400);
+    });
+  });
+
   it('requires authentication for every template operation', async () => {
     for (const [method, url, payload] of [
       ['GET', '/api/task-templates', undefined],
+      ['GET', `/api/projects/${randomUUID()}/task-template-snapshot`, undefined],
       ['GET', `/api/task-templates/${randomUUID()}`, undefined],
       ['DELETE', `/api/task-templates/${randomUUID()}`, undefined],
       ['POST', '/api/task-templates', { name: 'Test', entries: entries(['Task']) }],
