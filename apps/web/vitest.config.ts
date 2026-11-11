@@ -8,6 +8,7 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     include: ['src/**/*.test.{ts,tsx}'],
+    setupFiles: ['./vitest.setup.ts'],
   },
   esbuild: { jsx: 'automatic' },
   // Mirror tsconfig's `@/*` → `src/*` so components that import server
