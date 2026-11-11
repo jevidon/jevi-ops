@@ -25,6 +25,7 @@ function readFields(formData: FormData): {
   target_date: string | null;
   color: string | null;
   asset_id: string | null;
+  template_id: string | null;
 } {
   const name = String(formData.get('name') ?? '').trim();
   const description = String(formData.get('description') ?? '').trim() || null;
@@ -61,8 +62,12 @@ function readFields(formData: FormData): {
   // The asset this work groups under (0049); the domain page's quick-create
   // and the asset page pass it as a hidden field.
   const asset_id = String(formData.get('asset_id') ?? '').trim() || null;
+  // The task template a new project starts from. Areas have no task list to
+  // start, so the choice only travels with a project.
+  const rawTemplate = String(formData.get('template_id') ?? '').trim();
+  const template_id = kind === 'project' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rawTemplate) ? rawTemplate : null;
 
-  return { name, description, domain_id, type, status, engagement_type, kind, quoted_hours, retainer_anchor_day, start_date, target_date, color, asset_id };
+  return { name, description, domain_id, type, status, engagement_type, kind, quoted_hours, retainer_anchor_day, start_date, target_date, color, asset_id, template_id };
 }
 
 export async function createProjectAction(
@@ -97,6 +102,7 @@ export async function createProjectAction(
     target_date: isArea ? null : fields.target_date,
     color: fields.color,
     asset_id: fields.asset_id,
+    ...(fields.template_id ? { template_id: fields.template_id } : {}),
   };
   let created;
   try {
@@ -104,6 +110,9 @@ export async function createProjectAction(
   } catch (err) {
     if (err instanceof ApiError) {
       const body = err.body as { error?: string; details?: Record<string, string[]> } | null;
+      // Template failures are things the person can act on, so say how.
+      if (body?.error === 'template_not_found') return { ok: false, error: 'That template is no longer available. Choose another, or start with no tasks. Nothing was created.' };
+      if (body?.error === 'template_requires_project') return { ok: false, error: 'A template can start a project, not an area. Nothing was created.' };
       const detail = body?.details
         ? ` — ${Object.entries(body.details).map(([k, v]) => `${k}: ${v.join('|')}`).join('; ')}`
         : '';
@@ -114,6 +123,12 @@ export async function createProjectAction(
   revalidatePath('/projects');
   revalidatePath('/');
   if (fields.asset_id) revalidatePath(`/assets/${fields.asset_id}`);
+  if (fields.template_id) {
+    // Copied tasks show up wherever open tasks are listed.
+    revalidatePath('/work');
+    revalidatePath('/tasks');
+    if (created.domain_id) revalidatePath(`/domains/${created.domain_id}`);
+  }
   if (returnTo) revalidatePath(returnTo.split('?')[0] ?? returnTo);
   redirect(returnTo ?? `/projects/${created.id}`);
 }

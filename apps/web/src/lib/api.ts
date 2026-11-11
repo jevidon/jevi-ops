@@ -219,6 +219,8 @@ export interface ProjectCreate {
   // Create as an idea (0050) — a candidate, off the board until promoted.
   status?: 'idea' | 'active';
   doc_md?: string | null;
+  // Start with a copy of this task template's entries (create only).
+  template_id?: string;
 }
 
 export interface ProjectUpdate extends Partial<Omit<ProjectCreate, 'status'>> {

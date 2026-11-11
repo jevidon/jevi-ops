@@ -132,6 +132,64 @@ describe('maintenance create action (#5)', () => {
   });
 });
 
+describe('project create action with a task template (#121)', () => {
+  const load = () =>
+    loadWebModule('app/(authed)/projects/actions.ts', {
+      ...baseMocks,
+      '@/lib/api': { ApiError, projectsApi: { create: (body: unknown) => call('POST', '/api/projects', body) } },
+    }) as { createProjectAction: (p: null, f: FormData) => Promise<{ ok: boolean; error?: string }> };
+  const form = (fields: Record<string, string>) => {
+    const data = new FormData();
+    for (const [key, value] of Object.entries(fields)) data.set(key, value);
+    return data;
+  };
+  const template = async () => {
+    const documents = crypto.randomUUID();
+    return call<{ id: string }>('POST', '/api/task-templates', { name: `Flight ${crypto.randomUUID()}`, entries: [
+      { key: documents, title: 'Documents', notes: null, parent_key: null },
+      { key: crypto.randomUUID(), title: 'Passport', notes: 'Check expiry', parent_key: documents },
+      { key: crypto.randomUUID(), title: 'Keys', notes: null, parent_key: null },
+    ] });
+  };
+  const projectNamed = async (name: string) =>
+    (await call<{ projects: { id: string; name: string }[] }>('GET', '/api/projects')).projects.find((p) => p.name === name);
+
+  it('creates the project with its own fields and the copied tasks, then redirects', async () => {
+    const { createProjectAction } = load();
+    const t = await template();
+    const name = `December trip ${crypto.randomUUID()}`;
+    await expect(createProjectAction(null, form({ name, kind: 'project', description: 'Two weeks away', target_date: '2026-12-20', template_id: t.id })))
+      .rejects.toThrow(REDIRECT);
+    const created = await projectNamed(name);
+    expect(created).toBeTruthy();
+    const detail = await call<{ project: { description: string; target_date: string }; tasks: { title: string; notes: string | null; status: string }[] }>('GET', `/api/projects/${created!.id}`);
+    expect(detail.project).toMatchObject({ description: 'Two weeks away', target_date: '2026-12-20' });
+    expect(detail.tasks.map((task) => task.title)).toEqual(['Documents', 'Passport', 'Keys']);
+    expect(detail.tasks[1]).toMatchObject({ notes: 'Check expiry', status: 'open' });
+  });
+
+  it('says so in plain words when the template is gone, and creates nothing', async () => {
+    const { createProjectAction } = load();
+    const name = `Orphan ${crypto.randomUUID()}`;
+    const result = await createProjectAction(null, form({ name, kind: 'project', template_id: crypto.randomUUID() }));
+    expect(result).toEqual({ ok: false, error: 'That template is no longer available. Choose another, or start with no tasks. Nothing was created.' });
+    expect(await projectNamed(name)).toBeUndefined();
+  });
+
+  it('never sends a template for an area, or a value that is not an id', async () => {
+    const { createProjectAction } = load();
+    const t = await template();
+    const area = `Garage ${crypto.randomUUID()}`;
+    await expect(createProjectAction(null, form({ name: area, kind: 'area', template_id: t.id }))).rejects.toThrow(REDIRECT);
+    const malformed = `Plain ${crypto.randomUUID()}`;
+    await expect(createProjectAction(null, form({ name: malformed, kind: 'project', template_id: 'not-an-id' }))).rejects.toThrow(REDIRECT);
+    for (const name of [area, malformed]) {
+      const created = await projectNamed(name);
+      expect((await call<{ tasks: unknown[] }>('GET', `/api/projects/${created!.id}`)).tasks).toHaveLength(0);
+    }
+  });
+});
+
 describe('doc save action (0050)', () => {
   const load = () =>
     loadWebModule('components/doc/doc-actions.ts', {

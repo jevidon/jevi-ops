@@ -8,8 +8,10 @@ import {
   CreateProjectChecklistItemSchema,
   UpdateProjectChecklistItemSchema,
 } from '@jevi-ops/shared/schemas';
+import { INBOX_DOMAIN_ID } from '@jevi-ops/shared';
 import { getAppTz } from '../lib/app-settings.js';
 import { getDb } from '../lib/db.js';
+import { copyTemplateTasks } from '../lib/task-template-copy.js';
 import { clearAttentionForSource } from '../lib/attention.js';
 import { DocConflict, DocVersionRequired, deleteDocRevisions, saveDoc } from '../lib/docs.js';
 import {
@@ -20,6 +22,7 @@ import {
   people,
   project_checklist_items,
   project_contacts,
+  task_templates,
   projects,
   tasks,
 } from '../db/schema.js';
@@ -178,7 +181,9 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
         details: parsed.error.flatten().fieldErrors,
       });
     }
-    const values = { ...parsed.data };
+    const { template_id: templateId, ...values } = parsed.data;
+    // A template starts a project's task list; an area has no such list.
+    if (templateId && values.kind === 'area') return reply.code(400).send({ error: 'template_requires_project' });
     // Work grouped under an asset lives in the asset's domain unless told
     // otherwise (maintenance-items precedent) — so a project created from
     // an assigned car's page lands beside the car, not in Inbox.
@@ -188,6 +193,23 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
         where: eq(assets.id, values.asset_id),
       });
       if (asset?.domain_id) values.domain_id = asset.domain_id;
+    }
+    if (templateId) {
+      // Project and copied tasks land together or not at all. Reading the
+      // template inside the transaction means a concurrent template edit can
+      // never mix old and new tasks.
+      const result = await getDb().transaction(async (tx) => {
+        const [template] = await tx.select().from(task_templates).where(eq(task_templates.id, templateId));
+        if (!template) return { error: 'template_not_found' } as const;
+        const [project] = await tx.insert(projects).values(values).returning();
+        if (!project) throw new Error('insert_returned_no_row');
+        // Tasks follow the project's resolved domain; a project without one
+        // keeps its tasks in Inbox, as tasks always have a domain.
+        await copyTemplateTasks(tx, template.entries, { projectId: project.id, domainId: project.domain_id ?? INBOX_DOMAIN_ID });
+        return { project };
+      });
+      if ('error' in result) return reply.code(400).send(result);
+      return reply.code(201).send(result.project);
     }
     const [row] = await getDb().insert(projects).values(values).returning();
     if (!row) throw app.httpErrors.internalServerError('insert_returned_no_row');

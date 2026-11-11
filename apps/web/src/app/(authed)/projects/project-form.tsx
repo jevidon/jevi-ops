@@ -1,15 +1,22 @@
 'use client';
 
-import { useActionState, useState } from 'react';
+import { useActionState, useEffect, useId, useRef, useState, useTransition, type FormEvent } from 'react';
 import { useFormStatus } from 'react-dom';
 import { createProjectAction, updateProjectAction, deleteProjectAction, type SaveResult } from './actions';
-import { PROJECT_COLOR_PALETTE } from '@jevi-ops/shared';
+import { PROJECT_COLOR_PALETTE, type TaskTemplateEntry } from '@jevi-ops/shared';
 import { useTransientSaveResult } from '@/lib/use-transient-save-result';
 import { DateInput } from '@/components/DateInput';
 
 interface DomainOption {
   id: string;
   name: string;
+}
+
+/** A task template a new project can start from. */
+export interface TemplateOption {
+  id: string;
+  name: string;
+  entries: TaskTemplateEntry[];
 }
 
 interface InitialValues {
@@ -46,13 +53,37 @@ const STATUS_OPTIONS: Array<{ value: 'idea' | 'active' | 'paused' | 'done' | 'ar
 export function ProjectForm({
   initial,
   domains,
+  templates = [],
+  initialTemplateId = '',
 }: {
   initial: InitialValues;
   domains: DomainOption[];
+  // Create only: task templates the project can start from, and the one to
+  // preselect (the library's "Use" link). An unknown id starts with no tasks.
+  templates?: TemplateOption[];
+  initialTemplateId?: string;
 }) {
   const isEdit = Boolean(initial.id);
   const action = isEdit ? updateProjectAction : createProjectAction;
-  const [state, formAction] = useActionState<SaveResult | null, FormData>(action, null);
+  const [state, formAction, isPending] = useActionState<SaveResult | null, FormData>(action, null);
+  const [, startTransition] = useTransition();
+  const preselected = templates.some((t) => t.id === initialTemplateId) ? initialTemplateId : '';
+  const [startWith, setStartWith] = useState<'none' | 'template'>(preselected ? 'template' : 'none');
+  const [templateId, setTemplateId] = useState(preselected || templates[0]?.id || '');
+  const submitting = useRef(false);
+  // The action answered (a redirect on success never gets here): accept the
+  // next submit.
+  useEffect(() => { submitting.current = false; }, [state]);
+  // Create submits by hand. Handing the action to <form action> makes React
+  // reset every uncontrolled field once the action returns, so a failed
+  // create (a template deleted meanwhile, an API error) would wipe the draft.
+  function onCreateSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (submitting.current) return;
+    submitting.current = true;
+    const data = new FormData(event.currentTarget);
+    startTransition(() => formAction(data));
+  }
   // Auto-clear success messages so consecutive saves each get fresh feedback.
   const display = useTransientSaveResult(state);
   const [color, setColor] = useState(initial.color);
@@ -66,8 +97,10 @@ export function ProjectForm({
 
   return (
     <>
-      <form action={formAction} className="flex flex-col gap-5">
+      <form action={formAction} onSubmit={isEdit ? undefined : onCreateSubmit} className="flex flex-col gap-5">
         {initial.id && <input type="hidden" name="id" value={initial.id} />}
+        {/* Sent only when a project (not an area) starts from a template. */}
+        {!isEdit && <input type="hidden" name="template_id" value={!isArea && startWith === 'template' ? templateId : ''} />}
         {/* Color is set by the swatch picker below; mirror it into a hidden input. */}
         <input type="hidden" name="color" value={color} />
         {/* Kind toggle hidden field — actual UI lives below. */}
@@ -113,6 +146,10 @@ export function ProjectForm({
             </button>
           </div>
         </Field>
+
+        {!isEdit && !isArea && templates.length > 0 && (
+          <StartWith templates={templates} startWith={startWith} onStartWith={setStartWith} templateId={templateId} onTemplateId={setTemplateId} />
+        )}
 
         <Field label="Name (required)">
           <input
@@ -299,7 +336,7 @@ export function ProjectForm({
         )}
 
         <div className="pt-2">
-          <SaveButton isEdit={isEdit} kind={kind} />
+          <SaveButton isEdit={isEdit} kind={kind} submitting={isPending} />
         </div>
       </form>
 
@@ -307,6 +344,75 @@ export function ProjectForm({
         <DeleteRow projectId={initial.id} name={initial.name} kind={kind} />
       )}
     </>
+  );
+}
+
+const MAX_PREVIEW = 6;
+
+// "Start with": nothing, or a copy of a task template. Shown only when
+// creating a project and at least one template exists. Changing the choice
+// touches no other field, so a half-filled form survives it.
+function StartWith({ templates, startWith, onStartWith, templateId, onTemplateId }: {
+  templates: TemplateOption[];
+  startWith: 'none' | 'template';
+  onStartWith: (value: 'none' | 'template') => void;
+  templateId: string;
+  onTemplateId: (id: string) => void;
+}) {
+  const legendId = useId();
+  const selected = templates.find((t) => t.id === templateId);
+  const keys = new Set(selected?.entries.map((entry) => entry.key));
+  const main = selected?.entries.filter((entry) => entry.parent_key === null || !keys.has(entry.parent_key)) ?? [];
+  const subtasks = (key: string) => selected?.entries.filter((entry) => entry.parent_key === key).length ?? 0;
+  const box = 'w-full px-3 py-2 border border-line peer-checked:border-ink peer-checked:bg-surface-2/50 peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-accent font-sans text-[13px] text-ink cursor-pointer transition-colors';
+  return (
+    <div role="radiogroup" aria-labelledby={legendId}>
+      <span id={legendId} className="eyebrow block mb-1">Start with</span>
+      <div className="flex gap-2">
+        <label className="flex flex-1">
+          <input type="radio" name="start_with" value="none" checked={startWith === 'none'} onChange={() => onStartWith('none')} className="peer sr-only" />
+          <div className={box}>
+            <div className="font-mono text-[10px] uppercase tracking-wider text-ink-3 mb-0.5">No tasks</div>
+            An empty project
+          </div>
+        </label>
+        <label className="flex flex-1">
+          <input type="radio" name="start_with" value="template" checked={startWith === 'template'} onChange={() => onStartWith('template')} className="peer sr-only" />
+          <div className={box}>
+            <div className="font-mono text-[10px] uppercase tracking-wider text-ink-3 mb-0.5">A task template</div>
+            A fresh copy of a saved list
+          </div>
+        </label>
+      </div>
+      {startWith === 'template' && selected && (
+        <div className="mt-3">
+          <label className="block">
+            <span className="eyebrow block mb-1">Template</span>
+            <select
+              value={templateId}
+              onChange={(e) => onTemplateId(e.target.value)}
+              className="w-full bg-transparent border border-line focus:border-ink-2 focus:outline-none p-2 font-sans text-[14px] text-ink"
+            >
+              {templates.map((t) => (
+                <option key={t.id} value={t.id}>{t.name} · {t.entries.length} {t.entries.length === 1 ? 'task' : 'tasks'}</option>
+              ))}
+            </select>
+          </label>
+          <ul aria-label={`Tasks in ${selected.name}`} className="mt-3 border-l border-line-strong pl-3 font-sans text-[13px] text-ink-2">
+            {main.slice(0, MAX_PREVIEW).map((entry) => (
+              <li key={entry.key} className="flex items-baseline gap-2 py-0.5">
+                <span className="min-w-0 break-words text-ink">{entry.title}</span>
+                {subtasks(entry.key) > 0 && (
+                  <span className="shrink-0 font-mono text-[10px] text-ink-3">{subtasks(entry.key)} {subtasks(entry.key) === 1 ? 'subtask' : 'subtasks'}</span>
+                )}
+              </li>
+            ))}
+            {main.length > MAX_PREVIEW && <li className="py-0.5 text-ink-3">+ {main.length - MAX_PREVIEW} more</li>}
+          </ul>
+          <p className="mt-2 font-sans text-[13px] text-ink-3">Every task starts open, without dates or reminders.</p>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -319,8 +425,9 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-function SaveButton({ isEdit, kind }: { isEdit: boolean; kind: 'project' | 'area' }) {
-  const { pending } = useFormStatus();
+function SaveButton({ isEdit, kind, submitting }: { isEdit: boolean; kind: 'project' | 'area'; submitting: boolean }) {
+  // Edit submits through <form action>; create submits by hand (see above).
+  const pending = useFormStatus().pending || submitting;
   return (
     <button
       type="submit"

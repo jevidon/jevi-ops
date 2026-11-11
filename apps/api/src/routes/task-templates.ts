@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { INBOX_DOMAIN_ID, ProjectFromTemplateSchema, TaskTemplateInputSchema, UpdateTaskTemplateSchema } from '@jevi-ops/shared';
 import { projects, stewardship_domains, task_templates, tasks } from '../db/schema.js';
 import { getDb } from '../lib/db.js';
+import { copyTemplateTasks } from '../lib/task-template-copy.js';
 
 export const taskTemplateRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', app.requireAuth);
@@ -95,16 +96,7 @@ export const taskTemplateRoutes: FastifyPluginAsync = async (app) => {
       if (!project) throw new Error('insert_returned_no_row');
       // New ordinary project => default checkbox workflow; never inherit
       // completion, dates, recurrence, or a domain's direct-task workflow.
-      const ids = new Map(template.entries.map(entry => [entry.key, randomUUID()]));
-      const createdAt = Date.now();
-      await tx.insert(tasks).values(template.entries.map((entry, index) => ({
-        id: ids.get(entry.key)!, title: entry.title, notes: entry.notes,
-        // Project detail sorts newest first. Distinct stamps also keep an
-        // unrelated task edit from reshuffling entries with tied timestamps.
-        created_at: new Date(createdAt - index).toISOString(),
-        parent_task_id: entry.parent_key ? ids.get(entry.parent_key)! : null,
-        project_id: project.id, domain_id: domainId, status: 'open', source: 'manual',
-      })));
+      await copyTemplateTasks(tx, template.entries, { projectId: project.id, domainId });
       return { project };
     });
     if ('error' in result) return reply.code(result.error === 'not_found' ? 404 : 400).send(result);
