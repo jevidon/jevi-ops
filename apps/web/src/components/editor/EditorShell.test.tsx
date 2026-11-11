@@ -55,7 +55,9 @@ describe('shared editor lifecycle', () => {
     expect((screen.getByRole('textbox', { name: 'Notes' }) as HTMLTextAreaElement).value).toBe('Keep these notes plus new draft');
     expect(router.replace).not.toHaveBeenCalled();
     expect(screen.getByRole('dialog')).toBeDefined();
-    await user.click(screen.getByRole('button', { name: 'Save' }));
+    // The error is rendered one commit before the header button leaves
+    // "Saving…" (pending reaches the shell through an effect), so wait for it.
+    await user.click(await screen.findByRole('button', { name: 'Save' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(save).toHaveBeenCalledTimes(2);
   });
